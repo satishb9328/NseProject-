@@ -1,0 +1,37 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ---- Virtual Environments ----
+.venv/
+venv/
+env/
+ENV/
+
+# ---- Local Databases & Data Files ----
+*.db
+*.sqlite3
+tbt_data_*.db
+*.csv
+*.parquet
+*.json
+
+# ---- Environment Variables (Keep your API keys secret) ----
+.env
+upstox_credentials.json
+
+# ---- PyCharm / IntelliJ IDE Files ----
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# ---- VS Code ----
+.vscode/
+
+# ---- OS Generated Files ----
+.DS_Store
+Thumbs.db
+desktop.ini
