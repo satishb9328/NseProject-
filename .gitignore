@@ -1,5 +1,40 @@
 .venv/
-.venv
+venv/
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+*.pyd
+
 .env
+.env.*
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+.idea/
+
+db.sqlite3
+*.sqlite3
+tbt_local_test.db
+Nse Project/tbt_local_test.db
+
+*.log
+
+build/
+dist/
+*.egg-info/
+
+# Project-generated market cache/output files
+nifty_yf_cache.json
+nifty200_advanced_strategy_screen.csv
+Nse Project/Swing_stocks/nifty_yf_cache.json
+Nse Project/Swing_stocks/nifty200_advanced_strategy_screen.csv
+Nse Project/Swing_stocks/nifty200_smc_precision_screen.csv
+
+# Local auth/token artifacts
+Nse Project/AUTHEN_TOKEN/AccessToken/
+Nse Project/AUTHEN_TOKEN/config/fyers_config.json
+
+# Ignore all CSV files anywhere in the project
+*.csv

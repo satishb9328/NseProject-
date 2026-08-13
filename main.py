@@ -21,20 +21,25 @@ import time
 import logging
 import argparse
 import threading
-from datetime import datetime
+import importlib.util
+from pathlib import Path
 
 # ── Import the Fyers WebSocket manager ───────────────────────────────────────────
 # main.py is at:  MyProject2/main.py
-# Brokers/ is at: MyProject2/MyProject2/Brokers/
-# We use a direct import via the MyProject2 package so PyCharm can resolve it.
-from MyProject2.Brokers.fyers_socket import (
-    FyersSocketManager,
-    Tick,
-    Candle,
-    nifty_50_eq_symbols,
-    nifty_bank_eq_symbols,
-)
+# Load the broker module directly because the legacy folder name contains a space.
+FYERS_SOCKET_PATH = Path(__file__).resolve().parent / "Nse Project" / "Brokers" / "fyers_socket.py"
+fyers_socket_spec = importlib.util.spec_from_file_location("fyers_socket", FYERS_SOCKET_PATH)
+if fyers_socket_spec is None or fyers_socket_spec.loader is None:
+    raise ImportError(f"Unable to load Fyers socket module from {FYERS_SOCKET_PATH}")
 
+fyers_socket_module = importlib.util.module_from_spec(fyers_socket_spec)
+fyers_socket_spec.loader.exec_module(fyers_socket_module)
+
+FyersSocketManager = fyers_socket_module.FyersSocketManager
+Tick = fyers_socket_module.Tick
+Candle = fyers_socket_module.Candle
+nifty_50_eq_symbols = fyers_socket_module.nifty_50_eq_symbols
+nifty_bank_eq_symbols = fyers_socket_module.nifty_bank_eq_symbols
 # ── Logging setup ────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
