@@ -93,30 +93,28 @@ def save_token(token_data):
             print(f"\n❌ Failed to save token using centralized manager")
             return False
     except ImportError:
-        # Fallback: manual writes if token manager not available
-        print("⚠️  Could not import upstox_token_manager, using fallback save...")
-        current_time = int(time.time())
-        token_info = {
-            "api_key": API_KEY,
-            "api_secret": API_SECRET,
-            "access_token": access_token,
-            "fetched_at": current_time,
-            "expires_in": expires_in,
-            "expires_at": datetime.fromtimestamp(current_time + expires_in).isoformat(),
-            "saved_at": datetime.now().isoformat()
-        }
-        saved = []
-        for path in ['upstox_v3_token.json', 'upstox_login_details.json', 'upstox/upstox_token.json']:
+            # Fallback: manual write to the exact absolute path expected by the live feed
+            print("⚠️  Could not import upstox_token_manager, using fallback save...")
+            current_time = int(time.time())
+            token_info = {
+                "api_key": API_KEY,
+                "api_secret": API_SECRET,
+                "access_token": access_token,
+                "fetched_at": current_time,
+                "expires_in": expires_in,
+                "expires_at": datetime.fromtimestamp(current_time + expires_in).isoformat(),
+                "saved_at": datetime.now().isoformat()
+            }
+            target_path = r"C:\Program Files\MyProject2\Nse_Project\Brokers\upstox\upstox_v3_token.json"
             try:
-                os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-                with open(path, 'w') as f:
+                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                with open(target_path, 'w', encoding='utf-8') as f:
                     json.dump(token_info, f, indent=2)
-                print(f"✓ Saved to: {path}")
-                saved.append(path)
+                print(f"✓ Saved to: {target_path}")
+                return True
             except Exception as e:
-                print(f"❌ Failed to save to {path}: {e}")
-        return len(saved) > 0
-
+                print(f"❌ Failed to save to {target_path}: {e}")
+                return False
 def main():
     print("="*80)
     print("UPSTOX TOKEN GENERATOR - MANUAL METHOD")

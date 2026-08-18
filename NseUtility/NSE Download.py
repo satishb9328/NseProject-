@@ -159,7 +159,7 @@ pre_market_list = ['NIFTY 50', 'Nifty Bank', 'Emerge', 'Securities in F&O', 'Oth
 # print(nse.most_active_equity_stocks_by_value())
 
 #-----------------------    MOST ACTIVE DERIVATIVES    -------------------#
-# print(nse.most_active_index_calls())
+print(nse.most_active_index_calls())
 # print(nse.most_active_index_puts())
 # print(nse.most_active_stock_calls())
 # print(nse.most_active_stock_puts())

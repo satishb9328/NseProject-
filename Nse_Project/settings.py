@@ -16,6 +16,7 @@ DEBUG = True
 ALLOWED_HOSTS = []
 
 # Application definition
+# Application definition
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -24,7 +25,16 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'Nse_Project.Preopen',
+    'Nse_Project.Swing_ML.apps.SwingMlConfig',
+    'Nse_Project.Live_dashboard',
 ]
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'swing_ml_cache',
+    }
+}
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -43,7 +53,7 @@ ROOT_URLCONF = 'Nse_Project.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'Nse_Project' / 'Master_Temp'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -55,7 +65,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'MyProject2.wsgi.application'
+WSGI_APPLICATION = 'Nse_Project.wsgi.application'
 
 # Database
 DATABASES = {

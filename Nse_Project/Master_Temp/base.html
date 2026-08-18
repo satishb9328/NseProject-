@@ -1,0 +1,297 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="NSE Live Signal Dashboard — real-time intraday analytics, NSE_FO queue tick monitoring and order flow signal performance.">
+  <title>{% block title %}NSE Live Signal Dashboard{% endblock %}</title>
+
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📈</text></svg>">
+
+  <!-- Tailwind CSS (Play CDN — swap for a compiled stylesheet in production) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            display: ['"Space Grotesk"', 'Inter', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+          },
+          colors: {
+            ink: {
+              950: '#04060c',
+              900: '#070b14',
+              850: '#0a0f1a',
+              800: '#0d1424',
+              700: '#141d33',
+              600: '#1c2740',
+              500: '#26314f',
+            },
+            neon: {
+              green: '#22ff88',
+              mint: '#34d399',
+              red: '#ff3b5c',
+              rose: '#fb7185',
+              amber: '#ffb020',
+              blue: '#38bdf8',
+              violet: '#a78bfa',
+            },
+          },
+          boxShadow: {
+            'glow-green': '0 0 24px -6px rgba(34, 255, 136, 0.55)',
+            'glow-red': '0 0 24px -6px rgba(255, 59, 92, 0.55)',
+            'glow-blue': '0 0 24px -6px rgba(56, 189, 248, 0.45)',
+            card: '0 14px 40px -18px rgba(0, 0, 0, 0.7)',
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- Google Fonts: Inter (body) + Space Grotesk (display) + JetBrains Mono (data) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --neon-green: #22ff88;
+      --neon-red: #ff3b5c;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    /* ---- custom scrollbar ---- */
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: #070b14; }
+    ::-webkit-scrollbar-thumb { background: #1c2740; border-radius: 8px; border: 2px solid #070b14; }
+    ::-webkit-scrollbar-thumb:hover { background: #26314f; }
+
+    ::selection { background: rgba(34, 255, 136, .18); color: #22ff88; }
+
+    /* ---- collapsible sidebar layout ---- */
+    #sidebar { width: 18rem; transition: width .3s ease, transform .3s ease; }
+    #sidebar.sidebar-collapsed { width: 5.25rem; }
+    #sidebar.sidebar-collapsed .nav-label,
+    #sidebar.sidebar-collapsed .brand-text,
+    #sidebar.sidebar-collapsed .side-footer,
+    #sidebar.sidebar-collapsed .nav-badge { display: none; }
+    #sidebar.sidebar-collapsed .nav-item { justify-content: center; }
+    #main-col { margin-left: 18rem; transition: margin-left .3s ease; }
+    #main-col.col-expanded { margin-left: 5.25rem; }
+
+    @media (max-width: 1023px) {
+      #sidebar { transform: translateX(-100%); }
+      #sidebar.sidebar-open { transform: translateX(0); }
+      #main-col { margin-left: 0; }
+    }
+
+    /* ---- keyframes & animation helpers ---- */
+    @keyframes pulseDot { 0%,100% { opacity:1; transform:scale(1);} 50% { opacity:.35; transform:scale(.75);} }
+    @keyframes floatY { 0%,100% { transform:translateY(0);} 50% { transform:translateY(-12px);} }
+    @keyframes marquee { from { transform:translateX(0);} to { transform:translateX(-50%);} }
+    @keyframes rowFlash { 0% { background-color:rgba(34,255,136,.14);} 100% { background-color:transparent;} }
+
+    .animate-pulse-dot { animation: pulseDot 1.6s ease-in-out infinite; }
+    .animate-float { animation: floatY 7s ease-in-out infinite; }
+    .animate-marquee { animation: marquee 28s linear infinite; }
+
+    /* ---- surfaces ---- */
+    .glass { background: linear-gradient(180deg, rgba(20,29,51,.5), rgba(10,15,26,.78)); backdrop-filter: blur(14px); border: 1px solid rgba(38,49,79,.55); }
+    .bg-grid { background-image: linear-gradient(rgba(56,189,248,.06) 1px, transparent 1px), linear-gradient(90deg, rgba(56,189,248,.06) 1px, transparent 1px); background-size: 44px 44px; }
+
+    /* ---- gradient text ---- */
+    .text-gradient { background: linear-gradient(115deg, #22ff88 0%, #38bdf8 55%, #a78bfa 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .text-gradient-danger { background: linear-gradient(115deg, #ff3b5c, #ffb020); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+    /* ---- buttons ---- */
+    .btn-primary { background: linear-gradient(120deg, #16a34a, #22ff88); color: #04060c; box-shadow: 0 0 26px -8px rgba(34,255,136,.7); }
+    .btn-primary:hover { filter: brightness(1.08); box-shadow: 0 0 34px -6px rgba(34,255,136,.85); }
+    .btn-ghost { border: 1px solid rgba(38,49,79,.8); color: #cbd5e1; }
+    .btn-ghost:hover { border-color: rgba(34,255,136,.5); color: #22ff88; background: rgba(34,255,136,.06); }
+  </style>
+
+  {% block extra_head %}{% endblock %}
+</head>
+<body class="bg-ink-950 text-slate-300 font-sans antialiased selection:bg-neon-green/20 selection:text-neon-green">
+  <div class="min-h-screen flex">
+    <!-- Sidebar -->
+    <aside id="sidebar" class="fixed inset-y-0 left-0 z-40 flex flex-col bg-ink-900/95 border-r border-ink-700/70 backdrop-blur-xl overflow-y-auto">
+      <!-- Brand -->
+      <div class="flex items-center gap-3 h-16 px-5 border-b border-ink-700/60 shrink-0">
+        <div class="h-9 w-9 shrink-0 rounded-lg bg-gradient-to-br from-neon-green to-neon-blue flex items-center justify-center shadow-glow-green">
+          <svg class="h-5 w-5 text-ink-950" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>
+        </div>
+        <div class="brand-text leading-tight">
+          <p class="font-display font-bold text-slate-100 text-sm">NSE Live Signal</p>
+          <p class="text-[10px] uppercase tracking-[0.2em] text-neon-green">Dashboard</p>
+        </div>
+      </div>
+
+      <!-- Nav -->
+      <nav class="flex-1 px-3 py-5 space-y-1">
+        <p class="nav-label px-3 pb-2 text-[10px] uppercase tracking-[0.2em] text-slate-600">Terminal</p>
+
+        <a href="{% url 'live_dashboard:dashboard' %}" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium {% if request.resolver_match.url_name == 'dashboard' %}bg-ink-800 text-neon-green border-l-2 border-l-neon-green{% else %}text-slate-400 hover:text-slate-100 hover:bg-ink-800/70{% endif %} transition-all duration-200">
+          <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"/></svg>
+          <span class="nav-label">Dashboard</span>
+          <span class="nav-badge ml-auto text-[10px] font-semibold bg-neon-green/10 text-neon-green border border-neon-green/30 rounded-full px-1.5 py-0.5">9</span>
+        </a>
+
+        <!-- Swing ML Predictions Link Added -->
+        <a href="{% url 'live_dashboard:swing_ml_dashboard' %}" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium {% if request.resolver_match.url_name == 'swing_ml_dashboard' %}bg-ink-800 text-neon-green border-l-2 border-l-neon-green{% else %}text-slate-400 hover:text-slate-100 hover:bg-ink-800/70{% endif %} transition-all duration-200">
+          <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941"/></svg>
+          <span class="nav-label">Swing ML Predictions</span>
+          <span class="nav-badge ml-auto text-[10px] font-semibold bg-neon-violet/10 text-neon-violet border border-neon-violet/30 rounded-full px-1.5 py-0.5">AI</span>
+        </a>
+
+        <a href="#live" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-slate-100 hover:bg-ink-800/70 transition-all duration-200">
+          <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
+          <span class="nav-label">Live Signals</span>
+        </a>
+
+        <a href="#live" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-slate-100 hover:bg-ink-800/70 transition-all duration-200">
+          <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 6.75h12M8.25 12h12M8.25 17.25h12M3.75 6.75h.008v.008H3.75V6.75zm0 5.25h.008v.008H3.75V12zm0 5.25h.008v.008H3.75v-.008z"/></svg>
+          <span class="nav-label">Queue Ticks</span>
+        </a>
+
+        <a href="#performance" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-slate-100 hover:bg-ink-800/70 transition-all duration-200">
+          <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/></svg>
+          <span class="nav-label">Order Flow</span>
+        </a>
+
+        <a href="#performance" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-slate-100 hover:bg-ink-800/70 transition-all duration-200">
+          <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>
+          <span class="nav-label">Performance</span>
+        </a>
+
+        <a href="#" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-slate-100 hover:bg-ink-800/70 transition-all duration-200">
+          <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          <span class="nav-label">Watchlist</span>
+        </a>
+
+        <a href="#" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-slate-100 hover:bg-ink-800/70 transition-all duration-200">
+          <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 011.45.12l.773.774c.39.389.44 1.002.12 1.45l-.527.737c-.25.35-.272.806-.107 1.204.165.397.505.71.93.78l.893.15c.543.09.94.56.94 1.109v1.094c0 .55-.397 1.02-.94 1.11l-.893.149c-.425.07-.765.383-.93.78-.165.398-.143.854.107 1.204l.527.738c.32.447.269 1.06-.12 1.45l-.774.773a1.125 1.125 0 01-1.449.12l-.738-.527c-.35-.25-.806-.272-1.203-.107-.397.165-.71.505-.781.929l-.149.894c-.09.542-.56.94-1.11.94h-1.094c-.55 0-1.019-.398-1.11-.94l-.148-.894c-.071-.424-.384-.764-.781-.93-.398-.164-.854-.142-1.204.108l-.738.527c-.447.32-1.06.269-1.45-.12l-.773-.774a1.125 1.125 0 01-.12-1.45l.527-.737c.25-.35.273-.806.108-1.204-.165-.397-.506-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0 .55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.108-1.204l-.526-.738a1.125 1.125 0 01.12-1.45l.773-.773a1.125 1.125 0 011.45-.12l.737.527c.35.25.807.272 1.204.107.397-.165.71-.505.78-.929l.15-.894z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          <span class="nav-label">Settings</span>
+        </a>
+      </nav>
+
+      <!-- Market snapshot -->
+      <div class="side-footer p-4 border-t border-ink-700/60 space-y-2">
+        <p class="text-[10px] uppercase tracking-[0.2em] text-slate-600">Market Snapshot</p>
+        <div class="flex items-center justify-between text-xs font-mono">
+          <span class="text-slate-500">NIFTY</span><span class="text-neon-green">24,512 ▲</span>
+        </div>
+        <div class="flex items-center justify-between text-xs font-mono">
+          <span class="text-slate-500">BANKNIFTY</span><span class="text-neon-red">52,340 ▼</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Mobile overlay -->
+    <div id="sidebar-overlay" class="fixed inset-0 z-30 bg-black/70 backdrop-blur-sm hidden lg:hidden"></div>
+
+    <!-- Main column -->
+    <div id="main-col" class="flex-1 flex flex-col min-w-0">
+      <!-- Navbar -->
+      <header class="sticky top-0 z-20 h-16 flex items-center gap-3 px-4 sm:px-6 border-b border-ink-700/60 bg-ink-950/80 backdrop-blur-xl">
+        <button id="menu-btn" type="button" class="lg:hidden p-2 rounded-lg text-slate-400 hover:text-white hover:bg-ink-800 transition" aria-label="Open menu">
+          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg>
+        </button>
+        <button id="collapse-btn" type="button" class="hidden lg:flex p-2 rounded-lg text-slate-400 hover:text-white hover:bg-ink-800 transition" aria-label="Collapse sidebar">
+          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg>
+        </button>
+
+        <div class="hidden md:flex items-center gap-2 px-3 py-2 rounded-xl bg-ink-800/60 border border-ink-700/60 w-72">
+          <svg class="h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+          <input type="text" placeholder="Search symbol, signal, ticker…" class="bg-transparent outline-none text-sm placeholder-slate-500 w-full">
+          <kbd class="text-[10px] text-slate-500 border border-ink-600 rounded px-1.5 py-0.5">/</kbd>
+        </div>
+
+        <div class="ml-auto flex items-center gap-2 sm:gap-3">
+          <div class="hidden sm:flex flex-col items-end mr-1">
+            <span id="live-clock" class="font-mono text-xs text-slate-300">--:--:--</span>
+            <span class="text-[10px] text-slate-500">IST · Asia/Kolkata</span>
+          </div>
+          <span class="hidden sm:inline-flex items-center gap-1.5 text-xs font-semibold text-neon-green bg-neon-green/10 border border-neon-green/30 rounded-full px-3 py-1.5">
+            <span class="h-2 w-2 rounded-full bg-neon-green animate-pulse-dot shadow-glow-green"></span>
+            LIVE
+          </span>
+          <button type="button" class="relative p-2 rounded-lg text-slate-400 hover:text-white hover:bg-ink-800 transition" aria-label="Notifications">
+            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
+            <span class="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-neon-red shadow-glow-red"></span>
+          </button>
+          <button type="button" class="h-9 w-9 rounded-full bg-gradient-to-br from-neon-blue to-neon-violet flex items-center justify-center text-xs font-bold text-ink-950">NS</button>
+        </div>
+      </header>
+
+      <main id="content" class="flex-1 px-4 sm:px-6 lg:px-10 py-6 lg:py-8">
+        {% block content %}{% endblock %}
+      </main>
+
+      <!-- Footer -->
+      <footer class="border-t border-ink-700/60 bg-ink-900/60">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-8">
+          <div class="flex flex-col md:flex-row gap-6 md:items-center md:justify-between">
+            <div class="space-y-1">
+              <p class="font-display font-semibold text-slate-100">NSE Live Signal Dashboard</p>
+              <p class="text-xs text-slate-500">Real-Time Intraday Analytics &amp; Queue Tick Monitoring</p>
+            </div>
+            <nav class="flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-400">
+              <a href="#stats" class="hover:text-neon-green transition">Analytics</a>
+              <a href="#live" class="hover:text-neon-green transition">Live Data</a>
+              <a href="#performance" class="hover:text-neon-green transition">Performance</a>
+              <a href="#" class="hover:text-neon-green transition">API Docs</a>
+              <a href="#" class="hover:text-neon-green transition">Contact</a>
+            </nav>
+            <p class="text-xs text-slate-600">© {% now "Y" %} NSE Live Signal. All rights reserved.</p>
+          </div>
+          <p class="mt-6 text-[11px] leading-relaxed text-slate-600 border-t border-ink-800 pt-4">
+            <span class="text-neon-red font-semibold">Disclaimer:</span> Trading in securities and derivatives involves substantial risk of loss. This dashboard is for educational and informational purposes only and does not constitute investment advice. Data shown may be delayed, simulated, or subject to exchange disclaimers.
+          </p>
+        </div>
+      </footer>
+
+      <script>
+        (function () {
+          var sidebar = document.getElementById('sidebar');
+          var overlay = document.getElementById('sidebar-overlay');
+          var menuBtn = document.getElementById('menu-btn');
+          var collapseBtn = document.getElementById('collapse-btn');
+          var mainCol = document.getElementById('main-col');
+
+          function openSidebar() { sidebar.classList.add('sidebar-open'); overlay.classList.remove('hidden'); }
+          function closeSidebar() { sidebar.classList.remove('sidebar-open'); overlay.classList.add('hidden'); }
+
+          if (menuBtn) menuBtn.addEventListener('click', openSidebar);
+          if (overlay) overlay.addEventListener('click', closeSidebar);
+
+          if (collapseBtn) {
+            collapseBtn.addEventListener('click', function () {
+              sidebar.classList.toggle('sidebar-collapsed');
+              mainCol.classList.toggle('col-expanded');
+            });
+          }
+
+          sidebar.querySelectorAll('a').forEach(function (a) {
+            a.addEventListener('click', closeSidebar);
+          });
+
+          function tick() {
+            var el = document.getElementById('live-clock');
+            if (!el) return;
+            el.textContent = new Date().toLocaleTimeString('en-IN', { hour12: false, timeZone: 'Asia/Kolkata' });
+          }
+          tick();
+          setInterval(tick, 1000);
+        })();
+      </script>
+      {% block extra_js %}{% endblock %}
+    </div>
+  </div>
+</body>
+</html>

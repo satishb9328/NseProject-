@@ -15,8 +15,15 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path
+from django.urls import path, include
+from django.views.generic import RedirectView  # 🔴 ఇది కొత్తగా ఇంపోర్ట్ చేయండి
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    
+    # 🔴 హోమ్ పేజీ (Root URL) ఓపెన్ చేయగానే ఆటోమేటిక్ గా live-dashboard/ కి వెళ్తుంది
+    path('', RedirectView.as_view(url='/live-dashboard/', permanent=False)),
+    
+    path('swing-ml/', include('Nse_Project.Swing_ML.urls')),
+    path('live-dashboard/', include('Nse_Project.Live_dashboard.urls')),
 ]

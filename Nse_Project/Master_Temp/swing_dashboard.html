@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block title %}AI Swing Signals & SMC Setups · Swing ML Dashboard{% endblock %}
+
+{% block content %}
+<section class="relative overflow-hidden rounded-3xl glass px-6 sm:px-10 py-14 lg:py-20 scroll-mt-24">
+  <div class="pointer-events-none absolute inset-0 bg-grid opacity-60"></div>
+  <div class="relative max-w-6xl mx-auto">
+    <div class="mb-8 flex flex-col gap-3">
+      <p class="text-xs uppercase tracking-[0.3em] text-slate-500">Swing ML Dashboard</p>
+      <h1 class="text-3xl sm:text-4xl font-display font-bold text-slate-50">AI Swing Signals & SMC Setups</h1>
+      <p class="max-w-3xl text-slate-400">Live precision entry reporting and top composite-score setups from the Nifty Swing ML screen.</p>
+    </div>
+
+    <div class="grid gap-8">
+      <div class="glass rounded-3xl border border-ink-700/80 p-6">
+        <div class="mb-4 flex items-center justify-between gap-4">
+          <div>
+            <p class="text-xs uppercase tracking-[0.25em] text-slate-500">SMC Precision Entry Report</p>
+            <h2 class="text-xl font-semibold text-slate-100">SMC Setups</h2>
+          </div>
+          <span class="inline-flex items-center rounded-full bg-slate-800/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-slate-400">{{ smc_setups|length }} setups</span>
+        </div>
+
+        <div class="overflow-x-auto rounded-3xl border border-ink-700/70 bg-ink-900/70">
+          <table class="min-w-full text-left table-auto text-sm table table-dark">
+            <thead class="bg-slate-900/80 text-slate-300">
+              <tr>
+                <th class="px-4 py-3 text-slate-300">Symbol</th>
+                <th class="px-4 py-3 text-slate-300">Signal</th>
+                <th class="px-4 py-3 text-slate-300">Direction</th>
+                <th class="px-4 py-3 text-slate-300">Entry</th>
+                <th class="px-4 py-3 text-slate-300">SL</th>
+                <th class="px-4 py-3 text-slate-300">TP</th>
+                <th class="px-4 py-3 text-slate-300">R:R</th>
+                <th class="px-4 py-3 text-slate-300">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if smc_setups %}
+                {% for row in smc_setups %}
+                  <tr class="border-t border-ink-700/60 text-slate-300 hover:bg-slate-800/70">
+                    <td class="px-4 py-3 font-semibold text-slate-100">{{ row.symbol|default:'-' }}</td>
+                    <td class="px-4 py-3">{{ row.smc_signal|default:'-' }}</td>
+                    <td class="px-4 py-3">
+                      <span class="inline-flex rounded-full px-2 py-1 text-[11px] font-semibold uppercase {% if row.smc_direction == 'bullish' %}text-neon-green bg-neon-green/10{% else %}text-neon-red bg-neon-red/10{% endif %}">
+                        {{ row.smc_direction|default:'-' }}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3">{{ row.entry_price|default:'-' }}</td>
+                    <td class="px-4 py-3">{{ row.stop_loss|default:'-' }}</td>
+                    <td class="px-4 py-3">{{ row.take_profit|default:'-' }}</td>
+                    <td class="px-4 py-3">{{ row.rr_ratio|default:'-' }}</td>
+                    <td class="px-4 py-3 text-slate-400">{{ row.reasons|default:'-' }}</td>
+                  </tr>
+                {% endfor %}
+              {% else %}
+                <tr>
+                  <td class="px-4 py-6 text-center text-slate-500" colspan="8">No SMC setups available yet.</td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="glass rounded-3xl border border-ink-700/80 p-6">
+        <div class="mb-4 flex items-center justify-between gap-4">
+          <div>
+            <p class="text-xs uppercase tracking-[0.25em] text-slate-500">Top 20 Composite Score</p>
+            <h2 class="text-xl font-semibold text-slate-100">Highest-Ranked Signals</h2>
+          </div>
+          <span class="inline-flex items-center rounded-full bg-slate-800/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-slate-400">{{ top_20|length }} rows</span>
+        </div>
+
+        <div class="overflow-x-auto rounded-3xl border border-ink-700/70 bg-ink-900/70">
+          <table class="min-w-full text-left table-auto text-sm table table-dark">
+            <thead class="bg-slate-900/80 text-slate-300">
+              <tr>
+                <th class="px-4 py-3 text-slate-300">Rank</th>
+                <th class="px-4 py-3 text-slate-300">Symbol</th>
+                <th class="px-4 py-3 text-slate-300">Price</th>
+                <th class="px-4 py-3 text-slate-300">Score</th>
+                <th class="px-4 py-3 text-slate-300">Notes / Combo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if top_20 %}
+                {% for row in top_20 %}
+                  <tr class="border-t border-ink-700/60 text-slate-300 hover:bg-slate-800/70">
+                    <td class="px-4 py-3 text-slate-400">{{ forloop.counter }}</td>
+                    <td class="px-4 py-3 font-semibold text-slate-100">{{ row.symbol|default:'-' }}</td>
+                    <td class="px-4 py-3">{{ row.lastPrice|default:'-' }}</td>
+                    <td class="px-4 py-3 text-neon-green">{{ row.score|default:'-' }}</td>
+                    <td class="px-4 py-3 text-slate-400">{{ row.reasons|default:'-' }}</td>
+                  </tr>
+                {% endfor %}
+              {% else %}
+                <tr>
+                  <td class="px-4 py-6 text-center text-slate-500" colspan="5">No top score data available yet.</td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -16,7 +16,18 @@ from .models import SwingSignal
 
 # 1. డాష్‌బోర్డ్ పేజీని చూపించే ఫంక్షన్
 def swing_dashboard_view(request):
-    return render(request, 'swing_dashboard.html')
+    # Latest 50 signals (newest first) for the live table
+    signals = SwingSignal.objects.all().order_by('-timestamp')[:50]
+    data = []
+    for s in signals:
+        data.append({
+            'symbol': s.symbol,
+            'signal_type': s.signal_type,
+            'change_pct': round(s.change_pct, 2),
+            'volume': s.volume,
+            'time': s.timestamp.strftime("%H:%M:%S"),
+        })
+    return render(request, 'dashboard.html', {'signals': data})
 
 # 2. బ్యాక్‌గ్రౌండ్ లో సిగ్నల్స్ తెచ్చే API ఫంక్షన్
 def get_live_signals(request):

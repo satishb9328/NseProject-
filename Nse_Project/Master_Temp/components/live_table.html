@@ -1,0 +1,116 @@
+{% load static %}
+{# components/live_table.html — modular Live Signal table with a neon Action column #}
+
+<div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+  <div>
+    <p class="text-xs uppercase tracking-[0.22em] text-neon-green">Live Data</p>
+    <h2 class="mt-1 font-display text-2xl sm:text-3xl font-bold text-slate-50">AI Signal Queue</h2>
+    <p class="mt-1 text-sm text-slate-500">Auto-refreshing ML predictions &amp; SMC Order Block signals</p>
+  </div>
+  <div class="flex items-center gap-2">
+    <span class="inline-flex items-center gap-1.5 rounded-full border border-neon-green/30 bg-neon-green/10 px-3 py-1.5 text-xs font-semibold text-neon-green">
+      <span class="h-2 w-2 rounded-full bg-neon-green animate-pulse-dot shadow-glow-green"></span>
+      LIVE
+    </span>
+    <span id="live-synced" class="text-xs text-slate-500">Synced just now</span>
+  </div>
+</div>
+
+<div class="mt-5 overflow-hidden rounded-2xl glass border border-ink-700/50">
+  <div class="overflow-x-auto">
+    <table id="live-table" class="w-full text-sm min-w-[760px]">
+      
+      <!-- 🔴 మార్చిన హెడ్డింగ్స్ (మన పైథాన్ డేటాకి తగ్గట్టుగా) -->
+      <thead>
+        <tr class="text-left text-[11px] uppercase tracking-wider text-slate-500 border-b border-ink-700/60 bg-ink-900/60">
+          <th class="px-5 py-3.5 font-semibold">Symbol</th>
+          <th class="px-5 py-3.5 font-semibold">LTP (₹)</th>
+          <th class="px-5 py-3.5 font-semibold">AI Win %</th>
+          <th class="px-5 py-3.5 font-semibold">SMC Signal</th>
+          <th class="px-5 py-3.5 text-right font-semibold">Action</th>
+        </tr>
+      </thead>
+      
+      <!-- 🔴 అసలైన డైనమిక్ డేటా ఇక్కడ లోడ్ అవుతుంది -->
+      <tbody>
+        
+        <!-- ================= TIER 1 TRADES (Elite Setups) ================= -->
+        {% for trade in tier_1_trades %}
+        <tr class="border-t border-ink-800/50 hover:bg-ink-800/40 transition-colors">
+          <td class="px-5 py-3.5">
+            <div class="flex items-center gap-3">
+              <!-- స్టాక్ పేరులోని మొదటి 2 అక్షరాలు లోగో లాగా వస్తాయి -->
+              <span class="h-8 w-8 shrink-0 rounded-lg bg-ink-700 flex items-center justify-center font-mono text-[11px] font-semibold text-slate-200">{{ trade.Symbol|slice:":2" }}</span>
+              <span class="font-semibold text-slate-100">{{ trade.Symbol }}</span>
+            </div>
+          </td>
+          <td class="px-5 py-3.5 font-mono text-slate-300">₹{{ trade.LTP }}</td>
+          <td class="px-5 py-3.5 font-mono font-medium text-neon-green">{{ trade.Win_Prob }}%</td>
+          <td class="px-5 py-3.5 text-slate-400 text-xs">{{ trade.SMC }}</td>
+          <td class="px-5 py-3.5 text-right">
+            {% if 'BUY' in trade.Action %}
+              <span class="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1 text-[11px] font-bold uppercase tracking-wider text-ink-950 bg-neon-green shadow-glow-green">▲ {{ trade.Action }}</span>
+            {% else %}
+              <span class="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1 text-[11px] font-bold uppercase tracking-wider text-white bg-neon-red shadow-glow-red">▼ {{ trade.Action }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <!-- ఏమీ లేకపోతే ఈ మెసేజ్ వస్తుంది -->
+        <tr class="border-t border-ink-800/50">
+          <td colspan="5" class="px-5 py-8 text-center text-slate-500 font-medium">⏳ Waiting for Tier-1 High Confluence Setups...</td>
+        </tr>
+        {% endfor %}
+
+        <!-- ================= TIER 2 TRADES (Good Setups) ================= -->
+        {% for trade in tier_2_trades %}
+        <tr class="border-t border-ink-800/50 hover:bg-ink-800/40 transition-colors opacity-85">
+          <td class="px-5 py-3.5">
+            <div class="flex items-center gap-3">
+              <span class="h-8 w-8 shrink-0 rounded-lg bg-ink-800 flex items-center justify-center font-mono text-[11px] font-semibold text-slate-400">{{ trade.Symbol|slice:":2" }}</span>
+              <span class="font-semibold text-slate-300">{{ trade.Symbol }}</span>
+            </div>
+          </td>
+          <td class="px-5 py-3.5 font-mono text-slate-400">₹{{ trade.LTP }}</td>
+          <td class="px-5 py-3.5 font-mono font-medium text-indigo-400">{{ trade.Win_Prob }}%</td>
+          <td class="px-5 py-3.5 text-slate-500 text-xs">{{ trade.SMC }}</td>
+          <td class="px-5 py-3.5 text-right">
+            <span class="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1 text-[11px] font-bold uppercase tracking-wider text-indigo-300 bg-indigo-900/40 border border-indigo-500/30">
+              {{ trade.Action }}
+            </span>
+          </td>
+        </tr>
+        {% endfor %}
+
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Footer Information -->
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-5 py-3 border-t border-ink-700/60 text-xs text-slate-500">
+    <span>Showing ML predictions · refreshed automatically</span>
+    <span class="inline-flex items-center gap-1.5"><span class="h-2 w-2 rounded-full bg-neon-green animate-pulse-dot"></span> API connected</span>
+  </div>
+</div>
+
+<script>
+  (function () {
+    // Simulated auto-refresh animation for visually striking effect
+    var el = document.getElementById('live-synced');
+    if (!el) return;
+    var rows = document.querySelectorAll('#live-table tbody tr');
+
+    function refresh() {
+      el.textContent = 'Synced ' + new Date().toLocaleTimeString('en-IN', { hour12: false, timeZone: 'Asia/Kolkata' });
+      if (rows.length > 1) { // కనీసం డేటా ఉన్నప్పుడు మాత్రమే యానిమేట్ చేయాలి
+        var r = rows[Math.floor(Math.random() * (rows.length - 1))];
+        if (r && !r.innerText.includes('Waiting')) {
+          r.style.animation = 'none';
+          void r.offsetWidth; 
+          r.style.animation = 'rowFlash 1.2s ease-out';
+        }
+      }
+    }
+    setInterval(refresh, 5000);
+  })();
+</script>

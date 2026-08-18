@@ -236,5 +236,13 @@ def main():
     print(f"🎯 Total Opportunities (< ₹2000): {len(tier_1_trades) + len(tier_2_trades)} (Tier-1: {len(tier_1_trades)}, Tier-2: {len(tier_2_trades)})")
     print("="*85)
 
-if __name__ == "__main__":
-    main()
+    # ఈ లైన్స్ పాత ప్రింట్ స్టేట్‌మెంట్స్ కింద యాడ్ చేయండి 
+    # (లేదా ప్రింట్స్ తీసేసి కేవలం ఇది పెట్టినా పర్వాలేదు)
+    
+    return {
+        "tier_1": tier_1_trades,
+        "tier_2": tier_2_trades,
+        "total_count": len(tier_1_trades) + len(tier_2_trades)
+    }
+
+# if __name__ == "__main__": బ్లాక్ ని తీసేయండి, ఎందుకంటే మనం దీన్ని views.py నుండి కాల్ చేస్తాం.
