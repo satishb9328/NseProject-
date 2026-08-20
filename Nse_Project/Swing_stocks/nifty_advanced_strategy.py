@@ -29,6 +29,11 @@ import warnings
 from scipy.signal import argrelextrema
 import numpy as np
 
+try:
+    from .combo_filter import filter_combo_setups
+except ImportError:
+    from combo_filter import filter_combo_setups
+
 
 # ── గ్లోబల్ వేరియబుల్ (Global Variable) ──────────────────────────
 SECTOR_MAP = {
@@ -80,6 +85,15 @@ def save_cache(cache: dict) -> None:
             json.dump(cache, f, indent=2)
     except Exception as e:
         print(f"Cache save error: {e}")
+
+
+def save_combo_context(categories: dict) -> None:
+    try:
+        with open(COMBO_CONTEXT_FILE, "w") as f:
+            json.dump(categories, f, indent=2)
+    except Exception as e:
+        print(f"Combo context save error: {e}")
+
 
 def is_cache_fresh(cache: dict, key: str) -> bool:
     if key not in cache:
@@ -805,6 +819,14 @@ def main():
 
     try: print_entry_report(df, top_n=20)
     except NameError: pass 
+
+    categories = filter_combo_setups(df)
+    save_combo_context(categories)
+
+    print("\n  COMBO FILTER SUMMARY:")
+    print(f"    PERFECT COMBO : {len(categories.get('PERFECT_COMBO', []))} stocks")
+    print(f"    STRONG SEPA  : {len(categories.get('STRONG_SEPA', []))} stocks")
+    print(f"    SMC ACTIVE   : {len(categories.get('SMC_ACTIVE', []))} stocks")
 
     print("=" * 100)
     print(f"  Saved: {output_file}  ({len(df)} stocks)\n")

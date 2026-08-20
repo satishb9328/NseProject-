@@ -24,6 +24,7 @@ urlpatterns = [
     # 🔴 హోమ్ పేజీ (Root URL) ఓపెన్ చేయగానే ఆటోమేటిక్ గా live-dashboard/ కి వెళ్తుంది
     path('', RedirectView.as_view(url='/live-dashboard/', permanent=False)),
     
-    path('swing-ml/', include('Nse_Project.Swing_ML.urls')),
+    path('swing/', include('Nse_Project.Swing_stocks.urls')),
     path('live-dashboard/', include('Nse_Project.Live_dashboard.urls')),
+    path('gamma/', include('Nse_Project.GAMMA.urls')),
 ]

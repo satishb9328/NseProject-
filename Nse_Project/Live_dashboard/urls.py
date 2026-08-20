@@ -6,5 +6,4 @@ app_name = 'live_dashboard'
 urlpatterns = [
     path('', views.dashboard_view, name='dashboard'),
     path('api/live-options/', views.live_option_chain_api, name='live_option_chain_api'),
-    path('swing-ml/dashboard/', views.swing_ml_dashboard, name='swing_ml_dashboard'),
 ]

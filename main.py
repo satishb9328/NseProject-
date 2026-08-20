@@ -24,6 +24,8 @@ import threading
 import importlib.util
 from pathlib import Path
 
+from Nse_Project.graceful_shutdown import is_shutdown_requested, setup_signal_handlers
+
 # ── Import the Fyers WebSocket manager ───────────────────────────────────────────
 # main.py is at:  MyProject2/main.py
 # Load the broker module directly because the legacy folder name contains a space.
@@ -103,7 +105,7 @@ def tick_consumer_thread(manager: FyersSocketManager) -> None:
         • The consumer thread does the heavy lifting (SMC calc, DB writes, etc.)
     """
     logger.info("Tick consumer thread started.")
-    while True:
+    while not is_shutdown_requested():
         tick = manager.get_tick(block=True, timeout=1.0)
         if tick is None:
             continue
@@ -130,7 +132,7 @@ def price_monitor_thread(manager: FyersSocketManager) -> None:
     This demonstrates how any module (SMC scanner, order executor, dashboard)
     can read the latest price without touching the WebSocket.
     """
-    while True:
+    while not is_shutdown_requested():
         time.sleep(5)
 
         # ── Query a specific symbol ─────────────────────────────────────────────
@@ -159,6 +161,7 @@ def price_monitor_thread(manager: FyersSocketManager) -> None:
 # ════════════════════════════════════════════════════════════════════════════════
 
 def main():
+    setup_signal_handlers()
     parser = argparse.ArgumentParser(
         description="Fyers WebSocket Live Market Data Pipeline"
     )
@@ -232,10 +235,10 @@ def main():
     logger.info("=" * 60)
 
     try:
-        while True:
+        while not is_shutdown_requested():
             time.sleep(1)
     except KeyboardInterrupt:
-        logger.info("Shutdown requested...")
+        logger.info("Shutdown requested via KeyboardInterrupt...")
     finally:
         manager.stop()
         logger.info("Pipeline stopped. Goodbye.")

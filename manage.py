@@ -3,9 +3,12 @@
 import os
 import sys
 
+from Nse_Project.graceful_shutdown import setup_signal_handlers
+
 
 def main():
     """Run administrative tasks."""
+    setup_signal_handlers()
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Nse_Project.settings')
 
     try:

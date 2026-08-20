@@ -14,12 +14,12 @@
 
     <div class="grid gap-8">
       <div class="glass rounded-3xl border border-ink-700/80 p-6">
-        <div class="mb-4 flex items-center justify-between gap-4">
+        <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p class="text-xs uppercase tracking-[0.25em] text-slate-500">SMC Precision Entry Report</p>
-            <h2 class="text-xl font-semibold text-slate-100">SMC Setups</h2>
+            <p class="text-xs uppercase tracking-[0.25em] text-slate-500">PERFECT COMBO</p>
+            <h2 class="text-xl font-semibold text-slate-100">🚀 PERFECT COMBO STOCKS</h2>
           </div>
-          <span class="inline-flex items-center rounded-full bg-slate-800/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-slate-400">{{ smc_setups|length }} setups</span>
+          <span class="inline-flex items-center rounded-full bg-slate-800/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-slate-400">{{ perfect_combo|length }} symbols</span>
         </div>
 
         <div class="overflow-x-auto rounded-3xl border border-ink-700/70 bg-ink-900/70">
@@ -27,36 +27,28 @@
             <thead class="bg-slate-900/80 text-slate-300">
               <tr>
                 <th class="px-4 py-3 text-slate-300">Symbol</th>
-                <th class="px-4 py-3 text-slate-300">Signal</th>
-                <th class="px-4 py-3 text-slate-300">Direction</th>
-                <th class="px-4 py-3 text-slate-300">Entry</th>
-                <th class="px-4 py-3 text-slate-300">SL</th>
-                <th class="px-4 py-3 text-slate-300">TP</th>
-                <th class="px-4 py-3 text-slate-300">R:R</th>
-                <th class="px-4 py-3 text-slate-300">Notes</th>
+                <th class="px-4 py-3 text-slate-300">RS</th>
+                <th class="px-4 py-3 text-slate-300">VCP</th>
+                <th class="px-4 py-3 text-slate-300">Proximity</th>
+                <th class="px-4 py-3 text-slate-300">SMC Signal</th>
+                <th class="px-4 py-3 text-slate-300">Score</th>
               </tr>
             </thead>
             <tbody>
-              {% if smc_setups %}
-                {% for row in smc_setups %}
+              {% if perfect_combo %}
+                {% for row in perfect_combo %}
                   <tr class="border-t border-ink-700/60 text-slate-300 hover:bg-slate-800/70">
                     <td class="px-4 py-3 font-semibold text-slate-100">{{ row.symbol|default:'-' }}</td>
+                    <td class="px-4 py-3">{{ row.rs_vs_index|default:'-' }}</td>
+                    <td class="px-4 py-3">{{ row.vcp|default:'-' }}</td>
+                    <td class="px-4 py-3">{{ row.proximity|default:'-' }}</td>
                     <td class="px-4 py-3">{{ row.smc_signal|default:'-' }}</td>
-                    <td class="px-4 py-3">
-                      <span class="inline-flex rounded-full px-2 py-1 text-[11px] font-semibold uppercase {% if row.smc_direction == 'bullish' %}text-neon-green bg-neon-green/10{% else %}text-neon-red bg-neon-red/10{% endif %}">
-                        {{ row.smc_direction|default:'-' }}
-                      </span>
-                    </td>
-                    <td class="px-4 py-3">{{ row.entry_price|default:'-' }}</td>
-                    <td class="px-4 py-3">{{ row.stop_loss|default:'-' }}</td>
-                    <td class="px-4 py-3">{{ row.take_profit|default:'-' }}</td>
-                    <td class="px-4 py-3">{{ row.rr_ratio|default:'-' }}</td>
-                    <td class="px-4 py-3 text-slate-400">{{ row.reasons|default:'-' }}</td>
+                    <td class="px-4 py-3 text-neon-green">{{ row.score|default:'-' }}</td>
                   </tr>
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td class="px-4 py-6 text-center text-slate-500" colspan="8">No SMC setups available yet.</td>
+                  <td class="px-4 py-6 text-center text-slate-500" colspan="6">No perfect combos found today. Preserve your capital!</td>
                 </tr>
               {% endif %}
             </tbody>
@@ -65,39 +57,100 @@
       </div>
 
       <div class="glass rounded-3xl border border-ink-700/80 p-6">
-        <div class="mb-4 flex items-center justify-between gap-4">
+        <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p class="text-xs uppercase tracking-[0.25em] text-slate-500">Top 20 Composite Score</p>
-            <h2 class="text-xl font-semibold text-slate-100">Highest-Ranked Signals</h2>
+            <p class="text-xs uppercase tracking-[0.25em] text-slate-500">LIVE ALERTS HISTORY</p>
+            <h2 class="text-xl font-semibold text-slate-100">🔥 Live Alerts History</h2>
           </div>
-          <span class="inline-flex items-center rounded-full bg-slate-800/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-slate-400">{{ top_20|length }} rows</span>
+          <span class="inline-flex items-center rounded-full bg-slate-800/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-slate-400" id="alerts-history-count">0 alerts</span>
+        </div>
+
+        <div class="overflow-hidden rounded-3xl border border-ink-700/70 bg-ink-900/70">
+          <div id="live-alert-history" class="max-h-72 overflow-y-auto p-4 space-y-3">
+            <div class="rounded-2xl border border-ink-700/80 bg-ink-800/80 p-4 text-slate-500">No recent alerts yet.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass rounded-3xl border border-ink-700/80 p-6">
+        <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p class="text-xs uppercase tracking-[0.25em] text-slate-500">STRONG SEPA</p>
+            <h2 class="text-xl font-semibold text-slate-100">⭐ STRONG SEPA STOCKS</h2>
+          </div>
+          <span class="inline-flex items-center rounded-full bg-slate-800/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-slate-400">{{ strong_sepa|length }} symbols</span>
         </div>
 
         <div class="overflow-x-auto rounded-3xl border border-ink-700/70 bg-ink-900/70">
           <table class="min-w-full text-left table-auto text-sm table table-dark">
             <thead class="bg-slate-900/80 text-slate-300">
               <tr>
-                <th class="px-4 py-3 text-slate-300">Rank</th>
                 <th class="px-4 py-3 text-slate-300">Symbol</th>
-                <th class="px-4 py-3 text-slate-300">Price</th>
+                <th class="px-4 py-3 text-slate-300">RS</th>
+                <th class="px-4 py-3 text-slate-300">VCP</th>
+                <th class="px-4 py-3 text-slate-300">Proximity</th>
+                <th class="px-4 py-3 text-slate-300">SMC Signal</th>
                 <th class="px-4 py-3 text-slate-300">Score</th>
-                <th class="px-4 py-3 text-slate-300">Notes / Combo</th>
               </tr>
             </thead>
             <tbody>
-              {% if top_20 %}
-                {% for row in top_20 %}
+              {% if strong_sepa %}
+                {% for row in strong_sepa %}
                   <tr class="border-t border-ink-700/60 text-slate-300 hover:bg-slate-800/70">
-                    <td class="px-4 py-3 text-slate-400">{{ forloop.counter }}</td>
                     <td class="px-4 py-3 font-semibold text-slate-100">{{ row.symbol|default:'-' }}</td>
-                    <td class="px-4 py-3">{{ row.lastPrice|default:'-' }}</td>
-                    <td class="px-4 py-3 text-neon-green">{{ row.score|default:'-' }}</td>
-                    <td class="px-4 py-3 text-slate-400">{{ row.reasons|default:'-' }}</td>
+                    <td class="px-4 py-3">{{ row.rs_vs_index|default:'-' }}</td>
+                    <td class="px-4 py-3">{{ row.vcp|default:'-' }}</td>
+                    <td class="px-4 py-3">{{ row.proximity|default:'-' }}</td>
+                    <td class="px-4 py-3">{{ row.smc_signal|default:'-' }}</td>
+                    <td class="px-4 py-3 text-slate-300">{{ row.score|default:'-' }}</td>
                   </tr>
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td class="px-4 py-6 text-center text-slate-500" colspan="5">No top score data available yet.</td>
+                  <td class="px-4 py-6 text-center text-slate-500" colspan="6">No strong SEPA stocks present right now.</td>
+                </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="glass rounded-3xl border border-ink-700/80 p-6">
+        <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p class="text-xs uppercase tracking-[0.25em] text-slate-500">SMC ACTIVE</p>
+            <h2 class="text-xl font-semibold text-slate-100">⚠️ SMC ACTIVE STOCKS</h2>
+          </div>
+          <span class="inline-flex items-center rounded-full bg-slate-800/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-slate-400">{{ smc_active|length }} symbols</span>
+        </div>
+
+        <div class="overflow-x-auto rounded-3xl border border-ink-700/70 bg-ink-900/70">
+          <table class="min-w-full text-left table-auto text-sm table table-dark">
+            <thead class="bg-slate-900/80 text-slate-300">
+              <tr>
+                <th class="px-4 py-3 text-slate-300">Symbol</th>
+                <th class="px-4 py-3 text-slate-300">RS</th>
+                <th class="px-4 py-3 text-slate-300">VCP</th>
+                <th class="px-4 py-3 text-slate-300">Proximity</th>
+                <th class="px-4 py-3 text-slate-300">SMC Signal</th>
+                <th class="px-4 py-3 text-slate-300">Score</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% if smc_active %}
+                {% for row in smc_active %}
+                  <tr class="border-t border-ink-700/60 text-slate-300 hover:bg-slate-800/70">
+                    <td class="px-4 py-3 font-semibold text-slate-100">{{ row.symbol|default:'-' }}</td>
+                    <td class="px-4 py-3">{{ row.rs_vs_index|default:'-' }}</td>
+                    <td class="px-4 py-3">{{ row.vcp|default:'-' }}</td>
+                    <td class="px-4 py-3">{{ row.proximity|default:'-' }}</td>
+                    <td class="px-4 py-3">{{ row.smc_signal|default:'-' }}</td>
+                    <td class="px-4 py-3 text-slate-300">{{ row.score|default:'-' }}</td>
+                  </tr>
+                {% endfor %}
+              {% else %}
+                <tr>
+                  <td class="px-4 py-6 text-center text-slate-500" colspan="6">No SMC active stocks found. Keep watching for the next move.</td>
                 </tr>
               {% endif %}
             </tbody>
@@ -107,4 +160,113 @@
     </div>
   </div>
 </section>
+
+  <div id="live-alert-toast" class="fixed top-6 right-6 z-50 hidden max-w-sm rounded-3xl border border-neon-green/20 bg-ink-900/95 p-4 text-slate-100 shadow-2xl shadow-neon-green/10">
+    <p id="live-alert-toast-text" class="text-sm leading-6"></p>
+  </div>
+
+  <script>
+    (() => {
+      const toast = document.getElementById('live-alert-toast');
+      const toastText = document.getElementById('live-alert-toast-text');
+      let lastTimestamp = null;
+
+      function showToast(message) {
+        toastText.textContent = message;
+        toast.classList.remove('hidden');
+        toast.classList.add('opacity-100');
+        setTimeout(() => {
+          toast.classList.add('hidden');
+        }, 6000);
+      }
+
+      function getAlertStyle(status) {
+        if (status === 'REAL_BREAKOUT') {
+          return {
+            border: '1px solid rgba(16, 185, 129, 0.35)',
+            background: 'rgba(16, 185, 129, 0.08)',
+            badgeBg: 'bg-neon-green/15',
+            badgeText: 'text-neon-green',
+          };
+        }
+        if (status === 'FAKEOUT') {
+          return {
+            border: '1px solid rgba(248, 113, 113, 0.35)',
+            background: 'rgba(248, 113, 113, 0.08)',
+            badgeBg: 'bg-red-500/10',
+            badgeText: 'text-red-400',
+          };
+        }
+        return {
+          border: '1px solid rgba(148, 163, 184, 0.35)',
+          background: 'rgba(51, 65, 85, 0.5)',
+          badgeBg: 'bg-slate-700/70',
+          badgeText: 'text-slate-200',
+        };
+      }
+
+      async function renderAlertsHistory(alerts) {
+        const container = document.getElementById('live-alert-history');
+        const count = document.getElementById('alerts-history-count');
+        container.innerHTML = '';
+
+        if (!alerts.length) {
+          count.textContent = '0 alerts';
+          container.innerHTML = `<div class="rounded-2xl border border-ink-700/80 bg-ink-800/80 p-4 text-slate-500">No recent alerts yet.</div>`;
+          return;
+        }
+
+        count.textContent = `${alerts.length} alerts`;
+        alerts.slice(0, 10).forEach(alert => {
+          const style = getAlertStyle(alert.ofi_status);
+          const item = document.createElement('div');
+          item.className = 'rounded-2xl p-4 text-slate-200';
+          item.style.border = style.border;
+          item.style.background = style.background;
+          item.innerHTML = `
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div class="space-y-2">
+                <div class="flex items-center gap-2 text-sm text-slate-400">
+                  <span>${alert.timestamp}</span>
+                  <span class="rounded-full ${style.badgeBg} px-2 py-1 text-[10px] uppercase tracking-[0.18em] ${style.badgeText}">${alert.symbol}</span>
+                  ${alert.ofi_ratio != null ? `<span class="rounded-full bg-slate-700/70 px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-slate-100">OFI: ${Math.round(alert.ofi_ratio * 100)}%</span>` : ''}
+                </div>
+                <p class="text-slate-100">${alert.message}</p>
+              </div>
+              ${alert.ofi_status ? `<span class="rounded-full px-2 py-1 uppercase tracking-[0.18em] text-[10px] ${alert.ofi_status === 'REAL_BREAKOUT' ? 'bg-neon-green/10 text-neon-green' : alert.ofi_status === 'FAKEOUT' ? 'bg-red-500/10 text-red-400' : 'bg-slate-700/80 text-slate-200'}">${alert.ofi_status.replace('_', ' ')}</span>` : ''}
+            </div>
+          `;
+          container.appendChild(item);
+        });
+      }
+
+      async function fetchLiveAlerts() {
+        try {
+          const response = await fetch('{% url 'swing_stocks:get_live_alerts' %}');
+          if (!response.ok) return;
+          const data = await response.json();
+          const alerts = data.alerts || [];
+          if (!alerts.length) {
+            renderAlertsHistory([]);
+            return;
+          }
+
+          const latest = alerts[0];
+          if (latest.timestamp !== lastTimestamp) {
+            lastTimestamp = latest.timestamp;
+            const ofiBadge = latest.ofi_ratio != null ? ` | OFI: ${Math.round(latest.ofi_ratio * 100)}%` : '';
+            showToast(`${latest.timestamp} — ${latest.symbol}: ${latest.message}${ofiBadge}`);
+            toast.style.border = latest.ofi_status === 'REAL_BREAKOUT' ? '1px solid rgba(16, 185, 129, 0.5)' : latest.ofi_status === 'FAKEOUT' ? '1px solid rgba(248, 113, 113, 0.5)' : '1px solid rgba(148, 163, 184, 0.5)';
+          }
+
+          renderAlertsHistory(alerts);
+        } catch (err) {
+          console.warn('Live alert fetch failed:', err);
+        }
+      }
+
+      setInterval(fetchLiveAlerts, 3000);
+      fetchLiveAlerts();
+    })();
+  </script>
 {% endblock %}

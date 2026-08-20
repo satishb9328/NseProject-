@@ -1,14 +1,16 @@
+from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import render
-from django.core.cache import cache
 from pathlib import Path
 import json
+import os
 import pandas as pd
 import requests
+from Nse_Project.Swing_ML.views import get_swing_ml_context
 
-LIVE_OPTIONS_FILE = Path(__file__).resolve().parent / "live_options_data.json"
-SWING_ML_CSV_FILE = Path(__file__).resolve().parent.parent / "Swing_stocks" / "nifty200_smc_precision_screen.csv"
-SWING_ML_CACHE_KEY = 'swing_ml_signals'
+LIVE_OPTIONS_FILE = Path(__file__).resolve().parent.parent / "live_options_data.json"
+OPTION_INSTRUMENT_METADATA: dict[str, dict] = {}
+MASTER_INSTRUMENTS_URL = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.csv.gz"
 
 # 1. డేటాను తీసుకొచ్చే ఫంక్షన్
 def most_active_index_contracts():
@@ -133,25 +135,6 @@ def most_active_index_contracts():
     except Exception:
         return None
 
-# 2. వెబ్ పేజీలో చూపించడానికి Django View
-def get_swing_ml_context():
-    """Read cached Swing ML scanner results so the AI Signal Queue table renders."""
-    cache_data = cache.get(SWING_ML_CACHE_KEY)
-    if not cache_data:
-        return {
-            'tier_1_trades': [],
-            'tier_2_trades': [],
-            'scanner_warming_up': True,
-            'last_updated': None,
-        }
-    return {
-        'tier_1_trades': cache_data.get('tier_1', []),
-        'tier_2_trades': cache_data.get('tier_2', []),
-        'scanner_warming_up': False,
-        'last_updated': cache_data.get('last_updated'),
-    }
-
-
 def dashboard_view(request):
     result = most_active_index_contracts()
 
@@ -165,75 +148,209 @@ def dashboard_view(request):
     return render(request, "dashboard.html", context)
 
 
-def swing_ml_dashboard(request):
-    top_20 = []
-    smc_setups = []
-
-    if SWING_ML_CSV_FILE.exists():
-        try:
-            df = pd.read_csv(SWING_ML_CSV_FILE)
-            df = df.where(pd.notnull(df), None)
-
-            if 'score' in df.columns:
-                top_20_df = df.sort_values(by='score', ascending=False).head(20)
-            else:
-                top_20_df = df.head(20)
-
-            if 'smc_signal' in df.columns:
-                smc_setups_df = df[df['smc_signal'] != 'NO_SETUP']
-            else:
-                smc_setups_df = df.iloc[0:0]
-
-            top_20 = top_20_df.to_dict(orient='records')
-            smc_setups = smc_setups_df.to_dict(orient='records')
-        except Exception:
-            top_20 = []
-            smc_setups = []
-
-    return render(request, "swing_dashboard.html", {
-        'top_20': top_20,
-        'smc_setups': smc_setups,
-    })
-
-
 def read_live_options_data() -> dict:
+    json_path = os.path.join(settings.BASE_DIR, 'live_options_data.json')
     try:
-        if not LIVE_OPTIONS_FILE.exists():
+        print(f"API fetched, file exists: {os.path.exists(json_path)}")
+        if not os.path.exists(json_path):
             return {}
-        with LIVE_OPTIONS_FILE.open("r", encoding="utf-8") as fh:
+        with open(json_path, "r", encoding="utf-8") as fh:
             return json.load(fh)
-    except Exception:
+    except Exception as exc:
+        print(f"API fetch error reading JSON: {exc}")
         return {}
+
+
+def get_nested(raw, path):
+    if not isinstance(raw, dict):
+        return None
+    current = raw
+    for key in path:
+        if isinstance(current, dict):
+            current = current.get(key)
+        elif isinstance(current, list) and isinstance(key, int) and 0 <= key < len(current):
+            current = current[key]
+        else:
+            return None
+    return current
+
+
+def _to_number(value):
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.replace(',', '').strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _normalized_symbol_value(value) -> str | None:
+    if not isinstance(value, str):
+        return None
+    symbol = value.strip().upper().replace(" ", "")
+    return symbol if symbol else None
+
+
+def _is_strict_target_symbol(value, target_symbol: str) -> bool:
+    normalized = _normalized_symbol_value(value)
+    if not normalized:
+        return False
+
+    target = target_symbol.upper().replace(" ", "")
+    if not normalized.startswith(target):
+        return False
+
+    if target == "NIFTY":
+        exclusions = ("BANKNIFTY", "FINNIFTY", "SENSEX", "MIDCPNIFTY")
+        if any(exclusion in normalized for exclusion in exclusions):
+            return False
+
+    return True
+
+
+def _collect_symbol_candidates(item: dict) -> list[str]:
+    candidates: list[str] = []
+
+    for field in ("tradingsymbol", "symbol", "instrument_key", "underlying", "underlying_name"):
+        value = item.get(field)
+        if isinstance(value, str):
+            candidates.append(value)
+
+    raw_sample = item.get("raw_sample")
+    if isinstance(raw_sample, dict):
+        def recurse(value):
+            if isinstance(value, dict):
+                for key, nested in value.items():
+                    if isinstance(nested, str) and any(token in key.lower() for token in ("symbol", "tradingsymbol", "underlying")):
+                        candidates.append(nested)
+                    else:
+                        recurse(nested)
+            elif isinstance(value, list):
+                for nested in value:
+                    recurse(nested)
+
+        recurse(raw_sample)
+
+    return candidates
+
+
+def _belongs_to_symbol(item: dict, target_symbol: str) -> bool:
+    """Require a strict target-symbol marker from saved metadata or the raw feed payload."""
+    if not isinstance(item, dict):
+        return False
+
+    for candidate in _collect_symbol_candidates(item):
+        if _is_strict_target_symbol(candidate, target_symbol):
+            return True
+
+    return False
+
+
+def build_option_chain_rows(instrument_data: dict, target_symbol: str = "NIFTY") -> list:
+    rows = {}
+    excluded_symbols = ("BANKNIFTY", "FINNIFTY", "SENSEX", "MIDCPNIFTY")
+    target_prefix = target_symbol.upper().replace(" ", "")
+
+    for instrument_key, item in instrument_data.items():
+        if not isinstance(item, dict):
+            continue
+
+        # Lock 1: Value-based symbol filter (inspect item values, not the instrument_token key)
+        symbol = item.get("tradingsymbol") or item.get("underlying_name")
+        normalized_symbol = symbol.strip().upper().replace(" ", "") if isinstance(symbol, str) else ""
+        if not normalized_symbol or not normalized_symbol.startswith(target_prefix):
+            continue
+        if any(excluded in normalized_symbol for excluded in excluded_symbols):
+            continue
+
+        # Lock 2: Hard strike boundary (strictly 20000 <= strike <= 30000)
+        strike = item.get("strike_price", item.get("strike"))
+        if not isinstance(strike, (int, float)) or not (20000 <= strike <= 30000):
+            continue
+
+        side = (item.get('option_type') or '').upper()
+        raw = item.get('raw_sample', {})
+        if side not in {"CE", "PE"}:
+            continue
+
+        strike_key = str(int(strike) if isinstance(strike, (int, float)) and float(strike).is_integer() else strike)
+        row = rows.setdefault(strike_key, {
+            'strike': strike_key,
+            'call_oi_pct': '-',
+            'call_oi': '-',
+            'call_volume': '-',
+            'call_ltp': '-',
+            'call_coi': '-',
+            'call_coi_pct': '-',
+            'put_coi_pct': '-',
+            'put_coi': '-',
+            'put_ltp': '-',
+            'put_volume': '-',
+            'put_oi': '-',
+            'put_oi_pct': '-',
+        })
+
+        target = 'call' if side == 'CE' else 'put'
+        ltp = item.get('ltp')
+        if ltp is None:
+            ltp = get_nested(raw, ['fullFeed', 'marketFF', 'ltpc', 'ltp'])
+        oi = item.get('oi')
+        if oi is None:
+            oi = get_nested(raw, ['fullFeed', 'marketFF', 'oi'])
+        volume = item.get('volume')
+        if volume is None:
+            volume = get_nested(raw, ['fullFeed', 'marketFF', 'vtt'])
+            if volume is None:
+                volume = get_nested(raw, ['fullFeed', 'marketFF', 'marketOHLC', 'ohlc', 0, 'vol'])
+
+        coi = item.get('coi')
+        coi_pct = item.get('coi_pct')
+        if coi is None and isinstance(oi, (int, float)):
+            prev_oi = item.get('previous_oi')
+            if isinstance(prev_oi, (int, float)):
+                coi = oi - prev_oi
+                coi_pct = round((coi / prev_oi) * 100, 2) if prev_oi != 0 else None
+
+        row[f'{target}_ltp'] = ltp if ltp is not None else '-'
+        row[f'{target}_oi'] = oi if oi is not None else '-'
+        row[f'{target}_volume'] = volume if volume is not None else '-'
+        row[f'{target}_coi'] = coi if coi is not None else '-'
+        row[f'{target}_coi_pct'] = coi_pct if coi_pct is not None else '-'
+
+        call_oi = _to_number(row.get('call_oi'))
+        put_oi = _to_number(row.get('put_oi'))
+        call_coi = _to_number(row.get('call_coi'))
+        put_coi = _to_number(row.get('put_coi'))
+
+        if call_oi is not None and put_oi is not None:
+            oi_total = call_oi + put_oi
+            row['call_oi_pct'] = round((call_oi / oi_total) * 100, 1) if oi_total != 0 else 0
+            row['put_oi_pct'] = round((put_oi / oi_total) * 100, 1) if oi_total != 0 else 0
+
+        if call_coi is not None and put_coi is not None:
+            coi_total = call_coi + put_coi
+            row['call_coi_pct'] = round((call_coi / coi_total) * 100, 1) if coi_total != 0 else 0
+            row['put_coi_pct'] = round((put_coi / coi_total) * 100, 1) if coi_total != 0 else 0
+
+    def has_activity(value):
+        return isinstance(value, (int, float)) and value != 0
+
+    filtered = [
+        row for row in rows.values()
+        if has_activity(row.get('call_oi')) or has_activity(row.get('call_volume')) or
+           has_activity(row.get('put_oi')) or has_activity(row.get('put_volume'))
+    ]
+    filtered.sort(key=lambda row: float(row['strike']) if row['strike'] != '-' else float('inf'))
+    return filtered
 
 
 def live_option_chain_api(request):
     data = read_live_options_data()
-    response_data = {
+    chain = build_option_chain_rows(data.get("instrument_data", {}), target_symbol="NIFTY")
+    return JsonResponse({
         "updated_at": data.get("updated_at"),
         "expiry_date": data.get("expiry_date"),
-        "instrument_data": {},
-    }
-
-    for instrument, item in (data.get("instrument_data") or {}).items():
-        oi = item.get("oi")
-        previous_oi = item.get("previous_oi")
-        coi = None
-        oi_pct = None
-        if oi is not None and previous_oi is not None:
-            try:
-                coi = oi - previous_oi
-                oi_pct = round((coi / previous_oi) * 100, 2) if previous_oi else None
-            except Exception:
-                coi = None
-                oi_pct = None
-
-        response_data["instrument_data"][instrument] = {
-            "ltp": item.get("ltp"),
-            "volume": item.get("volume"),
-            "oi": oi,
-            "coi": coi,
-            "oi_pct": oi_pct,
-            "latest_tick_at": item.get("latest_tick_at"),
-        }
-
-    return JsonResponse(response_data)
+        "option_chain": chain,
+    })

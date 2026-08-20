@@ -27,6 +27,7 @@ INSTALLED_APPS = [
     'Nse_Project.Preopen',
     'Nse_Project.Swing_ML.apps.SwingMlConfig',
     'Nse_Project.Live_dashboard',
+    'Nse_Project.GAMMA.apps.GammaConfig',
 ]
 
 CACHES = {
