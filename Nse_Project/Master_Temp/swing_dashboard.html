@@ -78,7 +78,7 @@
             <p class="text-xs uppercase tracking-[0.25em] text-slate-500">STRONG SEPA</p>
             <h2 class="text-xl font-semibold text-slate-100">⭐ STRONG SEPA STOCKS</h2>
           </div>
-          <span class="inline-flex items-center rounded-full bg-slate-800/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-slate-400">{{ strong_sepa|length }} symbols</span>
+          <span id="strong-sepa-count" class="inline-flex items-center rounded-full bg-slate-800/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-slate-400">{{ strong_sepa|length }} symbols</span>
         </div>
 
         <div class="overflow-x-auto rounded-3xl border border-ink-700/70 bg-ink-900/70">
@@ -93,7 +93,7 @@
                 <th class="px-4 py-3 text-slate-300">Score</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody id="strong-sepa-tbody">
               {% if strong_sepa %}
                 {% for row in strong_sepa %}
                   <tr class="border-t border-ink-700/60 text-slate-300 hover:bg-slate-800/70">
@@ -267,6 +267,96 @@
 
       setInterval(fetchLiveAlerts, 3000);
       fetchLiveAlerts();
+    })();
+  </script>
+
+  <script>
+    (() => {
+      let reconnectDelay = 1000;
+
+      function renderStrongSepa(rows) {
+        const tbody = document.getElementById('strong-sepa-tbody');
+        const count = document.getElementById('strong-sepa-count');
+        if (!tbody) return;
+
+        const list = Array.isArray(rows) ? rows : [];
+        if (count) count.textContent = `${list.length} symbols`;
+
+        tbody.replaceChildren();
+        if (!list.length) {
+          const tr = document.createElement('tr');
+          const td = document.createElement('td');
+          td.colSpan = 6;
+          td.className = 'px-4 py-6 text-center text-slate-500';
+          td.textContent = 'No strong SEPA stocks present right now.';
+          tr.appendChild(td);
+          tbody.appendChild(tr);
+          return;
+        }
+
+        const columns = ['symbol', 'rs_vs_index', 'vcp', 'proximity', 'smc_signal', 'score'];
+        list.forEach(function (row) {
+          const tr = document.createElement('tr');
+          tr.className = 'border-t border-ink-700/60 text-slate-300 hover:bg-slate-800/70';
+          columns.forEach(function (key, idx) {
+            const td = document.createElement('td');
+            td.className = 'px-4 py-3' + (idx === 0 ? ' font-semibold text-slate-100' : '');
+            const value = (row && row[key] !== undefined && row[key] !== null) ? row[key] : '-';
+            td.textContent = value;
+            tr.appendChild(td);
+          });
+          tbody.appendChild(tr);
+        });
+      }
+
+      function connectSwingSepaSocket() {
+        const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+        const wsUrl = `${protocol}${window.location.host}/ws/swing/sepa/`;
+        console.log('[SwingSEPA] Connecting to WebSocket:', wsUrl);
+
+        let socket;
+        try {
+          socket = new WebSocket(wsUrl);
+        } catch (err) {
+          console.error('[SwingSEPA] Failed to create WebSocket:', err);
+          scheduleReconnect();
+          return;
+        }
+
+        socket.onopen = function (event) {
+          console.log('[SwingSEPA] WebSocket open', event);
+          reconnectDelay = 1000;
+        };
+
+        socket.onmessage = function (event) {
+          console.log('[SwingSEPA] WebSocket message received:', event.data);
+          try {
+            const payload = JSON.parse(event.data);
+            if (payload && payload.strong_sepa !== undefined) {
+              renderStrongSepa(payload.strong_sepa);
+            }
+          } catch (err) {
+            console.warn('[SwingSEPA] Could not parse WebSocket message:', err);
+          }
+        };
+
+        socket.onerror = function (event) {
+          console.error('[SwingSEPA] WebSocket error', event);
+        };
+
+        socket.onclose = function (event) {
+          console.warn('[SwingSEPA] WebSocket closed', event.code, event.reason);
+          scheduleReconnect();
+        };
+
+        function scheduleReconnect() {
+          console.log(`[SwingSEPA] Reconnecting in ${reconnectDelay}ms`);
+          setTimeout(connectSwingSepaSocket, reconnectDelay);
+          reconnectDelay = Math.min(reconnectDelay * 2, 15000);
+        }
+      }
+
+      connectSwingSepaSocket();
     })();
   </script>
 {% endblock %}

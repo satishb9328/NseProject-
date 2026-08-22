@@ -18,12 +18,14 @@ ALLOWED_HOSTS = []
 # Application definition
 # Application definition
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'channels',
     'Nse_Project.Preopen',
     'Nse_Project.Swing_ML.apps.SwingMlConfig',
     'Nse_Project.Live_dashboard',
@@ -67,6 +69,16 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'Nse_Project.wsgi.application'
+ASGI_APPLICATION = 'Nse_Project.asgi.application'
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": ["redis://127.0.0.1:6379/0"],
+        },
+    },
+}
 
 # Database
 DATABASES = {

@@ -8,6 +8,7 @@ import os
 import pathlib
 import signal
 import sys
+import urllib.parse
 from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from upstox_client.feeder.market_data_streamer_v3 import MarketDataStreamerV3
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent
 TOKEN_DIR = BASE_DIR / 'Nse_Project' / 'Brokers' / 'upstox'
 JSON_PATH = os.path.join(BASE_DIR, 'live_options_data.json')
+BASELINE_PATH = os.path.join(BASE_DIR, 'live_options_baseline.json')
 MASTER_INSTRUMENTS_URL = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.csv.gz"
 REDIS_URL = "redis://127.0.0.1:6379/0"
 REDIS_DATA_KEY = "live_options_data"
@@ -50,8 +52,11 @@ state_lock = asyncio.Lock()
 live_state = {
     "updated_at": None,
     "expiry_date": None,
+    "baseline_date": None,
+    "baseline_source": None,
     "instrument_data": {},
 }
+baseline_data: dict[str, object] = {}
 INSTRUMENT_METADATA: dict[str, dict] = {}
 
 
@@ -180,6 +185,154 @@ def atomic_write_json(path: str, data: dict) -> None:
     os.replace(tmp_path, path)
 
 
+def get_local_today() -> date:
+    return datetime.now(timezone(timedelta(hours=5, minutes=30))).date()
+
+
+def get_yesterday_date() -> date:
+    return get_local_today() - timedelta(days=1)
+
+
+def is_baseline_for_yesterday(baseline_date: str | None) -> bool:
+    if not isinstance(baseline_date, str):
+        return False
+    try:
+        return date.fromisoformat(baseline_date) == get_yesterday_date()
+    except ValueError:
+        return False
+
+
+def load_baseline_data() -> dict:
+    if not os.path.exists(BASELINE_PATH):
+        return {}
+    try:
+        with open(BASELINE_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data, dict):
+            return {}
+        return data
+    except Exception as exc:
+        logger.warning(f"⚠️ Failed to read baseline file: {exc}")
+        return {}
+
+
+def save_baseline_data(data: dict) -> None:
+    try:
+        atomic_write_json(BASELINE_PATH, data)
+        logger.info(f"✅ Saved baseline OI data to {BASELINE_PATH}")
+    except Exception as exc:
+        logger.warning(f"⚠️ Failed to write baseline file: {exc}")
+
+
+def get_baseline_oi_for_instrument(instrument_key: str) -> float | None:
+    if not baseline_data:
+        return None
+    instrument_info = baseline_data.get("instrument_data", {}).get(instrument_key)
+    if isinstance(instrument_info, dict):
+        oi = instrument_info.get("oi")
+        if isinstance(oi, (int, float)):
+            return float(oi)
+    return None
+
+
+def parse_historical_oi_row(row):
+    if isinstance(row, (list, tuple)) and len(row) > 0:
+        return row[-1]
+    if isinstance(row, dict):
+        for key in ("oi", "openInterest", "open_interest"):
+            if key in row:
+                return row[key]
+    return None
+
+
+def fetch_yesterday_historical_oi(instrument_key: str, headers: dict) -> float | None:
+    yesterday = get_yesterday_date().strftime("%Y-%m-%d")
+    encoded_key = urllib.parse.quote(str(instrument_key), safe="")
+    for interval in ("day", "1day", "daily"):
+        url = f"https://api.upstox.com/v2/historical-candle/{encoded_key}/{interval}/{yesterday}/{yesterday}"
+        try:
+            response = requests.get(url, headers=headers, timeout=15)
+            if response.status_code != 200:
+                continue
+            payload = response.json()
+            candles = None
+            if isinstance(payload, dict):
+                candles = payload.get("data", {}).get("candles") or payload.get("candles")
+            if not candles:
+                continue
+            last_row = candles[-1]
+            oi_value = parse_historical_oi_row(last_row)
+            if isinstance(oi_value, (int, float)):
+                return float(oi_value)
+            if isinstance(oi_value, str):
+                try:
+                    return float(oi_value.replace(",", ""))
+                except ValueError:
+                    continue
+        except Exception:
+            continue
+    return None
+
+
+def fetch_yesterday_baseline(instrument_keys: list[str]) -> dict:
+    token = read_access_token()
+    if not token:
+        return {}
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+    }
+    baseline_date = get_yesterday_date().isoformat()
+    output = {"baseline_date": baseline_date, "source": "upstox_historical", "instrument_data": {}}
+    for instrument_key in instrument_keys:
+        if not instrument_key:
+            continue
+        oi = fetch_yesterday_historical_oi(instrument_key, headers)
+        if oi is not None:
+            output["instrument_data"][instrument_key] = {"oi": oi}
+        fetched_count = len(output["instrument_data"])
+        if fetched_count > 0 and fetched_count % 20 == 0:
+            logger.info(f"Fetched baseline OI for {fetched_count} instruments...")
+
+    fetched_count = len(output["instrument_data"])
+    if fetched_count == 0:
+        logger.warning(
+            "No historical OI was returned for %d instruments for %s; "
+            "live COI will use the current-session baseline.",
+            len(instrument_keys),
+            baseline_date,
+        )
+    else:
+        logger.info("Fetched baseline OI for %d instruments.", fetched_count)
+    return output
+
+
+def initialize_baseline(instrument_keys: list[str]) -> None:
+    global baseline_data
+    baseline = load_baseline_data()
+    if baseline and is_baseline_for_yesterday(baseline.get("baseline_date")):
+        baseline_data = baseline
+        live_state["baseline_date"] = baseline.get("baseline_date")
+        live_state["baseline_source"] = baseline.get("source", "baseline_file")
+        logger.info(f"✅ Loaded yesterday's baseline data from {BASELINE_PATH}")
+        return
+
+    logger.info("📥 Baseline file missing or stale, attempting to fetch yesterday's OI from Upstox...")
+    baseline = fetch_yesterday_baseline(instrument_keys)
+    if baseline.get("instrument_data"):
+        baseline_data = baseline
+        live_state["baseline_date"] = baseline["baseline_date"]
+        live_state["baseline_source"] = baseline.get("source")
+        save_baseline_data(baseline)
+        logger.info("✅ Baseline data loaded and persisted for tomorrow's session.")
+    else:
+        baseline_data = {}
+        live_state["baseline_date"] = None
+        live_state["baseline_source"] = None
+        logger.warning("⚠️ Unable to load a valid yesterday baseline; live COI will fallback to the current session start.")
+
+
 def extract_live_values(decoded: dict, instrument_key: str | None = None) -> dict:
     flattened = flatten_payload(decoded)
     instrument_id = instrument_key
@@ -233,15 +386,17 @@ async def update_instrument_state(instrument: str, values: dict) -> None:
         })
         if ltp is not None:
             entry["ltp"] = ltp
-        if oi is not None:
-            if 'initial_oi' not in entry or entry.get('initial_oi') is None:
-                entry['initial_oi'] = oi
-            initial_oi = entry.get('initial_oi')
-            entry["oi"] = oi
-            if isinstance(initial_oi, (int, float)) and initial_oi != 0:
-                coi = oi - initial_oi
+            if oi is not None:
+                entry["oi"] = oi
+            baseline_oi = get_baseline_oi_for_instrument(instrument)
+            if baseline_oi is None:
+                if 'initial_oi' not in entry or entry.get('initial_oi') is None:
+                    entry['initial_oi'] = oi
+                baseline_oi = entry.get('initial_oi')
+            if isinstance(baseline_oi, (int, float)) and baseline_oi != 0:
+                coi = oi - baseline_oi
                 entry["coi"] = coi
-                entry["coi_pct"] = round((coi / initial_oi) * 100, 2)
+                entry["coi_pct"] = round((coi / baseline_oi) * 100, 2)
             else:
                 entry["coi"] = None
                 entry["coi_pct"] = None
@@ -355,6 +510,7 @@ async def run_streamer(instrument_keys: list[str], expiry_date: date) -> None:
 
     live_state["expiry_date"] = expiry_date.isoformat()
     live_state["instrument_data"] = {}
+    initialize_baseline(instrument_keys)
 
     loop = asyncio.get_running_loop()
     streamer = build_streamer(token, instrument_keys, expiry_date, loop)

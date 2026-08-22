@@ -3,6 +3,7 @@ import gzip
 import io
 import json
 import logging
+import math
 import os
 import sys
 from collections import deque
@@ -11,16 +12,24 @@ from pathlib import Path
 
 import pandas as pd
 import requests
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from upstox_client import ApiClient, Configuration
 from upstox_client.feeder.market_data_streamer_v3 import MarketDataStreamerV3
+
+try:
+    from Nse_Project.Swing_stocks.combo_filter import filter_combo_setups
+except Exception:  # pragma: no cover
+    filter_combo_setups = None
 
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent
 SWING_STOCKS_DIR = PROJECT_ROOT / 'Swing_stocks'
 COMBO_CONTEXT_FILE = SWING_STOCKS_DIR / 'combo_filter_context.json'
+TOKEN_DIR = PROJECT_ROOT / 'Brokers' / 'upstox'
 TOKEN_FILE_PATHS = [
-    PROJECT_ROOT.parent / 'Brokers' / 'upstox' / 'upstox' / 'upstox_token.json',
-    PROJECT_ROOT.parent / 'Brokers' / 'upstox' / 'upstox_v3_token.json',
+    TOKEN_DIR / 'upstox' / 'upstox_token.json',
+    TOKEN_DIR / 'upstox_v3_token.json',
 ]
 LOG_FORMAT = '%(asctime)s | %(levelname)-8s | %(message)s'
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, datefmt='%Y-%m-%d %H:%M:%S')
@@ -33,11 +42,44 @@ VOLUME_SPIKE_MULTIPLIER = 1.5
 OFI_HISTORY_LENGTH = 100
 ALERTS_FILE = Path(__file__).resolve().parent / 'live_alerts.json'
 MAX_ALERTS = 50
+SWING_SEPA_GROUP = "swing_sepa_updates"
+STRONG_SEPA_CSV = SWING_STOCKS_DIR / "nifty200_smc_precision_screen.csv"
+STRONG_SEPA_FIELDS = ("symbol", "rs_vs_index", "vcp", "proximity", "smc_signal", "score")
+
+
+def save_combo_context(categories: dict) -> None:
+    try:
+        COMBO_CONTEXT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with COMBO_CONTEXT_FILE.open('w', encoding='utf-8') as fh:
+            json.dump(categories, fh, indent=2)
+        logger.info(f"Saved combo filter context to {COMBO_CONTEXT_FILE}")
+    except Exception as exc:
+        logger.warning(f"Failed to save combo filter context: {exc}")
 
 
 def load_strong_sepa_symbols() -> list[str]:
     if not COMBO_CONTEXT_FILE.exists():
         logger.warning(f"Combo filter file not found: {COMBO_CONTEXT_FILE}")
+        if STRONG_SEPA_CSV.exists() and filter_combo_setups is not None:
+            try:
+                df = pd.read_csv(STRONG_SEPA_CSV)
+                df = df.where(pd.notnull(df), None)
+                categories = filter_combo_setups(df)
+                symbols = [
+                    str(row.get('symbol')).upper().strip()
+                    for row in categories.get('STRONG_SEPA', [])
+                    if isinstance(row, dict) and row.get('symbol')
+                ]
+                if symbols:
+                    logger.info(f"Derived {len(symbols)} strong_sepa symbols from {STRONG_SEPA_CSV}")
+                    try:
+                        save_combo_context(categories)
+                        logger.info(f"Wrote missing combo filter context to {COMBO_CONTEXT_FILE}")
+                    except Exception as exc:
+                        logger.warning(f"Could not write combo context file: {exc}")
+                    return sorted(set(symbols))
+            except Exception as exc:
+                logger.warning(f"Failed to derive strong_sepa symbols from CSV: {exc}")
         return []
 
     try:
@@ -50,6 +92,33 @@ def load_strong_sepa_symbols() -> list[str]:
     except Exception as exc:
         logger.error(f"Failed to read strong_sepa symbols: {exc}")
         return []
+
+
+def log_health_check() -> None:
+    token_path_info = []
+    loaded_token_path = None
+    for path in TOKEN_FILE_PATHS:
+        exists = path.exists()
+        token_path_info.append(f"{path} (exists={exists})")
+        if exists and loaded_token_path is None:
+            try:
+                with path.open('r', encoding='utf-8') as fh:
+                    data = json.load(fh)
+                if data.get('access_token'):
+                    loaded_token_path = path
+            except Exception:
+                pass
+
+    combo_context_exists = COMBO_CONTEXT_FILE.exists()
+    csv_exists = STRONG_SEPA_CSV.exists()
+    logger.info('--- Swing ML Collector Health Check ---')
+    logger.info('Token paths: %s', ' | '.join(token_path_info))
+    logger.info('Loaded token path: %s', loaded_token_path or 'None')
+    logger.info('Combo context file exists: %s', combo_context_exists)
+    logger.info('Strong SEPA CSV exists: %s', csv_exists)
+    if not combo_context_exists and csv_exists:
+        logger.info('Combo context missing, but strong SEPA CSV exists. Collector will attempt CSV fallback.')
+    logger.info('--- End health check ---\n')
 
 
 def load_access_token() -> str | None:
@@ -115,6 +184,57 @@ def append_alert(symbol: str, message: str, ofi_ratio: float | None = None, ofi_
     alerts = load_alerts()
     alerts.insert(0, alert)
     write_alerts(alerts[:MAX_ALERTS])
+
+    # Push the latest STRONG SEPA snapshot to connected dashboards.
+    broadcast_sepa_update()
+
+
+def _json_safe(value):
+    if value is None:
+        return None
+    if isinstance(value, float):
+        try:
+            if math.isnan(value) or math.isinf(value):
+                return None
+        except (TypeError, ValueError):
+            pass
+    return value
+
+
+def build_strong_sepa_snapshot() -> list:
+    """Build the STRONG SEPA rows the swing dashboard table renders."""
+    if filter_combo_setups is None or not STRONG_SEPA_CSV.exists():
+        return []
+    try:
+        df = pd.read_csv(STRONG_SEPA_CSV)
+        df = df.where(pd.notnull(df), None)
+        rows = filter_combo_setups(df).get("STRONG_SEPA", [])
+        return [
+            {key: _json_safe(row.get(key)) for key in STRONG_SEPA_FIELDS}
+            for row in rows
+        ]
+    except Exception as exc:
+        logger.warning(f"Failed to build strong SEPA snapshot: {exc}")
+        return []
+
+
+def broadcast_sepa_update() -> None:
+    """Push the latest STRONG SEPA snapshot to the swing_sepa_updates group."""
+    try:
+        channel_layer = get_channel_layer()
+        if channel_layer is None:
+            return
+        strong_sepa = build_strong_sepa_snapshot()
+        async_to_sync(channel_layer.group_send)(
+            SWING_SEPA_GROUP,
+            {
+                "type": "swing_sepa_update",
+                "strong_sepa": strong_sepa,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    except Exception as exc:
+        logger.warning(f"Failed to broadcast SEPA update: {exc}")
 
 
 def get_upstox_instrument_map() -> dict[str, str]:
@@ -379,6 +499,7 @@ class SwingMLStockDataCollector:
 
 
 async def main() -> None:
+    log_health_check()
     collector = SwingMLStockDataCollector()
     await collector.run()
 

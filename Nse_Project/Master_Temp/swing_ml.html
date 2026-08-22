@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Swing ML Predictions | NSE Dashboard{% endblock %}
+
+{% block content %}
+<section class="relative overflow-hidden rounded-3xl glass px-6 py-10 sm:px-10 lg:py-14">
+  <div class="pointer-events-none absolute inset-0 bg-grid opacity-60"></div>
+  <div class="relative">
+    <p class="text-xs uppercase tracking-[0.3em] text-neon-violet">Swing ML Predictions</p>
+    <h1 class="mt-2 font-display text-3xl font-bold text-slate-50">AI &amp; SMC Prediction Desk</h1>
+    <p class="mt-2 text-slate-400">Machine-learning predictions, PERFECT COMBO candidates, live alerts history, and SMC ACTIVE setups.</p>
+
+    <section class="mt-8 rounded-2xl border border-ink-700/70 bg-ink-900/60 p-6">
+      {% include "components/live_table.html" %}
+    </section>
+
+    <div class="mt-8 grid gap-6">
+      <section class="rounded-2xl border border-ink-700/70 bg-ink-900/60 p-6"><div class="flex items-center justify-between"><div><p class="text-xs uppercase tracking-[0.25em] text-slate-500">PERFECT COMBO</p><h2 class="mt-1 text-xl font-semibold text-slate-100">🚀 PERFECT COMBO STOCKS</h2></div><span class="rounded-full bg-slate-800/80 px-3 py-1 text-xs text-slate-400">{{ perfect_combo|length }} symbols</span></div><div class="mt-4 overflow-x-auto rounded-2xl border border-ink-700/70 bg-ink-900/70"><table class="min-w-full text-left text-sm"><thead class="bg-slate-900/80 text-slate-300"><tr><th class="px-4 py-3">Symbol</th><th class="px-4 py-3">RS</th><th class="px-4 py-3">VCP</th><th class="px-4 py-3">Proximity</th><th class="px-4 py-3">SMC Signal</th><th class="px-4 py-3">Score</th></tr></thead><tbody>{% for row in perfect_combo %}<tr class="border-t border-ink-700/60 text-slate-300"><td class="px-4 py-3 font-semibold text-slate-100">{{ row.symbol|default:'-' }}</td><td class="px-4 py-3">{{ row.rs_vs_index|default:'-' }}</td><td class="px-4 py-3">{{ row.vcp|default:'-' }}</td><td class="px-4 py-3">{{ row.proximity|default:'-' }}</td><td class="px-4 py-3">{{ row.smc_signal|default:'-' }}</td><td class="px-4 py-3 text-neon-green">{{ row.score|default:'-' }}</td></tr>{% empty %}<tr><td colspan="6" class="px-4 py-6 text-center text-slate-500">No perfect combos found today.</td></tr>{% endfor %}</tbody></table></div></section>
+
+      <section class="rounded-2xl border border-ink-700/70 bg-ink-900/60 p-6"><div class="flex items-center justify-between"><div><p class="text-xs uppercase tracking-[0.25em] text-slate-500">LIVE ALERTS HISTORY</p><h2 class="mt-1 text-xl font-semibold text-slate-100">🔥 Live Alerts History</h2></div><span id="alerts-history-count" class="rounded-full bg-slate-800/80 px-3 py-1 text-xs text-slate-400">0 alerts</span></div><div id="live-alert-history" class="mt-4 max-h-72 space-y-3 overflow-y-auto rounded-2xl border border-ink-700/70 bg-ink-900/70 p-4"><div class="rounded-xl border border-ink-700/80 bg-ink-800/80 p-4 text-slate-500">No recent alerts yet.</div></div></section>
+
+      <section class="rounded-2xl border border-ink-700/70 bg-ink-900/60 p-6"><div class="flex items-center justify-between"><div><p class="text-xs uppercase tracking-[0.25em] text-slate-500">SMC ACTIVE</p><h2 class="mt-1 text-xl font-semibold text-slate-100">⚠️ SMC ACTIVE STOCKS</h2></div><span class="rounded-full bg-slate-800/80 px-3 py-1 text-xs text-slate-400">{{ smc_active|length }} symbols</span></div><div class="mt-4 overflow-x-auto rounded-2xl border border-ink-700/70 bg-ink-900/70"><table class="min-w-full text-left text-sm"><thead class="bg-slate-900/80 text-slate-300"><tr><th class="px-4 py-3">Symbol</th><th class="px-4 py-3">RS</th><th class="px-4 py-3">VCP</th><th class="px-4 py-3">Proximity</th><th class="px-4 py-3">SMC Signal</th><th class="px-4 py-3">Score</th></tr></thead><tbody>{% for row in smc_active %}<tr class="border-t border-ink-700/60 text-slate-300"><td class="px-4 py-3 font-semibold text-slate-100">{{ row.symbol|default:'-' }}</td><td class="px-4 py-3">{{ row.rs_vs_index|default:'-' }}</td><td class="px-4 py-3">{{ row.vcp|default:'-' }}</td><td class="px-4 py-3">{{ row.proximity|default:'-' }}</td><td class="px-4 py-3">{{ row.smc_signal|default:'-' }}</td><td class="px-4 py-3">{{ row.score|default:'-' }}</td></tr>{% empty %}<tr><td colspan="6" class="px-4 py-6 text-center text-slate-500">No SMC active stocks found.</td></tr>{% endfor %}</tbody></table></div></section>
+    </div>
+  </div>
+</section>
+<script>
+(() => {
+  async function fetchAlerts() {
+    try {
+      const response = await fetch('{% url "swing_stocks:get_live_alerts" %}', { cache: 'no-store' });
+      if (!response.ok) return;
+      const alerts = (await response.json()).alerts || [];
+      const container = document.getElementById('live-alert-history');
+      document.getElementById('alerts-history-count').textContent = `${alerts.length} alerts`;
+      container.replaceChildren();
+      if (!alerts.length) { const empty = document.createElement('div'); empty.className = 'rounded-xl border border-ink-700/80 bg-ink-800/80 p-4 text-slate-500'; empty.textContent = 'No recent alerts yet.'; container.appendChild(empty); return; }
+      alerts.slice(0, 10).forEach(alert => { const item = document.createElement('div'); item.className = 'rounded-xl border border-ink-700/80 bg-ink-800/80 p-4'; item.textContent = `${alert.timestamp || ''} ${alert.symbol || ''}: ${alert.message || ''}`; container.appendChild(item); });
+    } catch (error) { console.warn('ML alerts fetch failed:', error); }
+  }
+  fetchAlerts();
+  setInterval(fetchAlerts, 3000);
+})();
+</script>
+{% endblock %}

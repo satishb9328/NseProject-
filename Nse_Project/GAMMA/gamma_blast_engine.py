@@ -46,17 +46,31 @@ class GammaBotError(RuntimeError):
 
 def _number(value: Any, default: float = 0.0) -> float:
     try:
-        return default if value in (None, "") else float(value)
+        number = default if value in (None, "") else float(value)
+        return number if math.isfinite(number) else default
     except (TypeError, ValueError):
         return default
 
 
-def bs_gamma(spot: float, strike: float, dte: float, rate: float, volatility: float) -> float:
+def bs_greeks(spot: float, strike: float, dte: float, rate: float, volatility: float) -> tuple[float, float, float, float]:
+    if not all(math.isfinite(value) for value in (spot, strike, dte, rate, volatility)):
+        return 0.0, 0.0, 0.0, 0.0
     if spot <= 0 or strike <= 0 or dte <= 0 or volatility <= 0:
-        return 0.0
-    d1 = (math.log(spot / strike) + (rate + 0.5 * volatility**2) * dte) / (volatility * math.sqrt(dte))
-    normal_pdf = math.exp(-0.5 * d1**2) / math.sqrt(2 * math.pi)
-    return normal_pdf / (spot * volatility * math.sqrt(dte))
+        return 0.0, 0.0, 0.0, 0.0
+    try:
+        sqrt_dte = math.sqrt(dte)
+        d1 = (math.log(spot / strike) + (rate + 0.5 * volatility**2) * dte) / (volatility * sqrt_dte)
+        d2 = d1 - volatility * sqrt_dte
+        normal_pdf = math.exp(-0.5 * d1**2) / math.sqrt(2 * math.pi)
+        gamma = normal_pdf / (spot * volatility * sqrt_dte)
+        charm_core = normal_pdf * (2 * rate * dte - d2 * volatility * sqrt_dte) / (2 * dte * volatility * sqrt_dte)
+        call_charm = -charm_core
+        put_charm = charm_core
+        vanna = -normal_pdf * d2 / volatility
+        values = (gamma, call_charm, put_charm, vanna)
+        return values if all(math.isfinite(value) for value in values) else (0.0, 0.0, 0.0, 0.0)
+    except (ArithmeticError, ValueError):
+        return 0.0, 0.0, 0.0, 0.0
 
 
 @dataclass
@@ -70,7 +84,31 @@ class OptionStrike:
     put_iv: float = 0.0
     put_ltp: float = 0.0
     put_vol: float = 0.0
+    call_coi: float = 0.0
+    put_coi: float = 0.0
     net_gex: float = 0.0
+    day_net_gex: float = 0.0
+    call_charm: float = 0.0
+    put_charm: float = 0.0
+    call_vanna: float = 0.0
+    put_vanna: float = 0.0
+    net_charm: float = 0.0
+    day_net_charm: float = 0.0
+    net_vanna: float = 0.0
+    day_net_vanna: float = 0.0
+
+
+@dataclass
+class GammaMetrics:
+    pcr: float = 0.0
+    gamma_flip_level: float = 0.0
+    net_gex: float = 0.0
+    call_wall_strike: Optional[float] = None
+    put_wall_strike: Optional[float] = None
+    call_wall: Optional[float] = None
+    put_wall: Optional[float] = None
+    net_charm: float = 0.0
+    net_vanna: float = 0.0
 
 
 @dataclass
@@ -85,6 +123,8 @@ class GammaProfile:
     put_wall: float = 0.0
     pcr: float = 0.0
     skew: float = 0.0
+    weekly_gamma: GammaMetrics = field(default_factory=GammaMetrics)
+    day_gamma: GammaMetrics = field(default_factory=GammaMetrics)
 
 
 @dataclass
@@ -124,9 +164,21 @@ class GammaProcessor:
         dte = self._fractional_dte(expiry)
         self._repair_iv_surface(strikes)
         for strike in strikes:
-            call_gamma = bs_gamma(spot, strike.strike, dte, self.risk_free_rate, strike.call_iv / 100)
-            put_gamma = bs_gamma(spot, strike.strike, dte, self.risk_free_rate, strike.put_iv / 100)
-            strike.net_gex = (strike.call_oi * call_gamma - strike.put_oi * put_gamma) * CONFIG["lot_size"] * spot
+            try:
+                call_gamma, strike.call_charm, _, strike.call_vanna = bs_greeks(spot, strike.strike, dte, self.risk_free_rate, strike.call_iv / 100)
+                put_gamma, _, strike.put_charm, strike.put_vanna = bs_greeks(spot, strike.strike, dte, self.risk_free_rate, strike.put_iv / 100)
+                strike.net_gex = (strike.call_oi * call_gamma - strike.put_oi * put_gamma) * CONFIG["lot_size"] * spot
+                strike.day_net_gex = (strike.call_coi * call_gamma - strike.put_coi * put_gamma) * CONFIG["lot_size"] * spot
+                strike.net_charm = (strike.call_oi * strike.call_charm - strike.put_oi * strike.put_charm) * CONFIG["lot_size"] * spot
+                strike.day_net_charm = (strike.call_coi * strike.call_charm - strike.put_coi * strike.put_charm) * CONFIG["lot_size"] * spot
+                strike.net_vanna = (strike.call_oi * strike.call_vanna - strike.put_oi * strike.put_vanna) * CONFIG["lot_size"] * spot
+                strike.day_net_vanna = (strike.call_coi * strike.call_vanna - strike.put_coi * strike.put_vanna) * CONFIG["lot_size"] * spot
+            except (ArithmeticError, TypeError, ValueError):
+                strike.call_charm = strike.put_charm = 0.0
+                strike.call_vanna = strike.put_vanna = 0.0
+                strike.net_gex = strike.day_net_gex = 0.0
+                strike.net_charm = strike.day_net_charm = 0.0
+                strike.net_vanna = strike.day_net_vanna = 0.0
 
         profile = GammaProfile(spot=spot, expiry=expiry, dte=dte, strikes=strikes)
         self._build_metrics(profile)
@@ -150,6 +202,7 @@ class GammaProcessor:
             call_ltp=_number(row.get("call_ltp")), call_vol=_number(row.get("call_volume")),
             put_oi=_number(row.get("put_oi")), put_iv=_number(row.get("put_iv")),
             put_ltp=_number(row.get("put_ltp")), put_vol=_number(row.get("put_volume")),
+            call_coi=_number(row.get("call_coi")), put_coi=_number(row.get("put_coi")),
         )
 
     @staticmethod
@@ -164,26 +217,92 @@ class GammaProcessor:
 
     @staticmethod
     def _build_metrics(profile: GammaProfile) -> None:
-        profile.net_gex = sum(strike.net_gex for strike in profile.strikes)
-        profile.pcr = round(sum(strike.put_oi for strike in profile.strikes) / max(sum(strike.call_oi for strike in profile.strikes), 1), 3)
+        profile.weekly_gamma = GammaProcessor._metrics_for(profile.strikes, "call_oi", "put_oi", "net_gex", "net_charm", "net_vanna", profile.spot)
+        profile.day_gamma = GammaProcessor._metrics_for(profile.strikes, "call_coi", "put_coi", "day_net_gex", "day_net_charm", "day_net_vanna", profile.spot)
+        profile.net_gex = profile.weekly_gamma.net_gex
+        profile.pcr = profile.weekly_gamma.pcr
+        profile.gamma_flip_level = profile.weekly_gamma.gamma_flip_level
         profile.call_wall = max(profile.strikes, key=lambda strike: strike.call_oi).strike
         profile.put_wall = max(profile.strikes, key=lambda strike: strike.put_oi).strike
         atm = min(profile.strikes, key=lambda strike: abs(strike.strike - profile.spot))
         profile.skew = atm.put_iv - atm.call_iv
 
+    @staticmethod
+    def _metrics_for(strikes: List[OptionStrike], call_field: str, put_field: str, gex_field: str, charm_field: str, vanna_field: str, spot: float) -> GammaMetrics:
+        call_total = sum(getattr(strike, call_field) for strike in strikes)
+        put_total = sum(getattr(strike, put_field) for strike in strikes)
+        metrics = GammaMetrics(
+            pcr=round(put_total / call_total, 3) if call_total else 0.0,
+            net_gex=sum(getattr(strike, gex_field) for strike in strikes),
+            gamma_flip_level=spot,
+            net_charm=sum(getattr(strike, charm_field) for strike in strikes),
+            net_vanna=sum(getattr(strike, vanna_field) for strike in strikes),
+        )
+        gex_by_strike = [(getattr(strike, gex_field), strike.strike) for strike in strikes]
+        positive_gex = [(gex, strike) for gex, strike in gex_by_strike if gex > 0]
+        negative_gex = [(gex, strike) for gex, strike in gex_by_strike if gex < 0]
+        metrics.call_wall_strike = max(positive_gex)[1] if positive_gex else None
+        metrics.put_wall_strike = min(negative_gex)[1] if negative_gex else None
+        metrics.call_wall = metrics.call_wall_strike
+        metrics.put_wall = metrics.put_wall_strike
         cumulative_gex = 0.0
-        profile.gamma_flip_level = profile.spot
-        for strike in sorted(profile.strikes, key=lambda item: item.strike):
+        for strike in sorted(strikes, key=lambda item: item.strike):
             previous_gex = cumulative_gex
-            cumulative_gex += strike.net_gex
+            cumulative_gex += getattr(strike, gex_field)
             if (previous_gex < 0 <= cumulative_gex) or (previous_gex >= 0 > cumulative_gex):
-                profile.gamma_flip_level = strike.strike
+                metrics.gamma_flip_level = strike.strike
                 break
+        return metrics
 
 
 class SignalEngine:
     def __init__(self) -> None:
         self.active_trade: Optional[Dict[str, Any]] = None
+        self._previous_gamma_expiry: Optional[str] = None
+        self._previous_weekly_gex: Optional[float] = None
+        self._previous_day_gex: Optional[float] = None
+        self._previous_day_pcr: Optional[float] = None
+
+    def evaluate_gamma_alerts(self, profile: GammaProfile) -> List[str]:
+        """Return edge-triggered macro and intraday alerts for one expiry."""
+        weekly = profile.weekly_gamma
+        day = profile.day_gamma
+        if profile.expiry != self._previous_gamma_expiry:
+            self._previous_gamma_expiry = profile.expiry
+            self._previous_weekly_gex = weekly.net_gex
+            self._previous_day_gex = day.net_gex
+            self._previous_day_pcr = day.pcr
+            return []
+
+        alerts = []
+        if self._crossed_below_zero(self._previous_weekly_gex, weekly.net_gex):
+            alerts.append("⚠️ Weekly Alert: Weekly GEX flipped Negative (Macro selling pressure building)")
+        elif self._crossed_above_zero(self._previous_weekly_gex, weekly.net_gex):
+            alerts.append("✅ Weekly Alert: Weekly GEX flipped Positive (Macro stability improving)")
+
+        if self._crossed_below_zero(self._previous_day_gex, day.net_gex):
+            alerts.append("⚡ Intraday Alert: Day GEX flipped Negative (Selling pressure building)")
+        elif self._crossed_above_zero(self._previous_day_gex, day.net_gex):
+            alerts.append("⚡ Intraday Alert: Day GEX flipped Positive (Buying support improving)")
+
+        previous_pcr = self._previous_day_pcr
+        if previous_pcr is not None and previous_pcr > 0 and day.pcr < previous_pcr:
+            drop = previous_pcr - day.pcr
+            if drop >= max(0.2, previous_pcr * 0.25):
+                alerts.append("⚠️ Intraday Alert: Sharp drop in Put writing detected")
+
+        self._previous_weekly_gex = weekly.net_gex
+        self._previous_day_gex = day.net_gex
+        self._previous_day_pcr = day.pcr
+        return alerts
+
+    @staticmethod
+    def _crossed_below_zero(previous: Optional[float], current: float) -> bool:
+        return previous is not None and previous >= 0 > current
+
+    @staticmethod
+    def _crossed_above_zero(previous: Optional[float], current: float) -> bool:
+        return previous is not None and previous <= 0 < current
 
     @staticmethod
     def _compute_atr(closes: Iterable[float]) -> float:
@@ -263,6 +382,7 @@ def normalize_live_payload(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         row = rows.setdefault(strike, {"strike_price": strike})
         prefix = "call" if side == "CE" else "put"
         row[f"{prefix}_oi"] = _number(item.get("oi"))
+        row[f"{prefix}_coi"] = _number(item.get("coi"))
         row[f"{prefix}_iv"] = _number(item.get("iv"))
         row[f"{prefix}_ltp"] = _number(item.get("ltp"))
         row[f"{prefix}_volume"] = _number(item.get("volume"))
@@ -339,6 +459,7 @@ class RedisGammaBot:
             "heartbeat": True,
         }
         self.last_profile: Optional[Dict[str, Any]] = None
+        self.gamma_alerts: Deque[Dict[str, Any]] = deque(maxlen=50)
         self.last_error: Optional[str] = None
         self.processed_updates = 0
 
@@ -378,6 +499,7 @@ class RedisGammaBot:
             "channel": self.channel,
             "processed_updates": self.processed_updates,
             "last_signal": self.last_signal,
+            "gamma_alerts": list(self.gamma_alerts),
             "last_profile": self.last_profile,
             "last_error": self.last_error,
             "active_trade": self.signal_engine.active_trade,
@@ -422,6 +544,11 @@ class RedisGammaBot:
             total_volume = sum(strike.call_vol + strike.put_vol for strike in profile.strikes)
             self.closes.append(profile.spot)
             self.volumes.append(total_volume)
+            for message in self.signal_engine.evaluate_gamma_alerts(profile):
+                self.gamma_alerts.append({
+                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                    "message": message,
+                })
             if self.previous_spot > 0:
                 signal = self.signal_engine.evaluate_entry(profile, self.previous_spot, self.closes, self.volumes)
                 if signal:
@@ -429,7 +556,16 @@ class RedisGammaBot:
             atr = self.signal_engine._compute_atr(self.closes)
             self.signal_engine.manage_trade(profile.spot, atr)
             self.previous_spot = profile.spot
-            self.last_profile = {"spot": profile.spot, "expiry": profile.expiry, "gamma_flip_level": profile.gamma_flip_level, "net_gex": profile.net_gex, "pcr": profile.pcr, "skew": profile.skew}
+            self.last_profile = {
+                "spot": profile.spot,
+                "expiry": profile.expiry,
+                "gamma_flip_level": profile.gamma_flip_level,
+                "net_gex": profile.net_gex,
+                "pcr": profile.pcr,
+                "skew": profile.skew,
+                "weekly_gamma": asdict(profile.weekly_gamma),
+                "day_gamma": asdict(profile.day_gamma),
+            }
             self.processed_updates += 1
             self.last_error = None
         except Exception as exc:

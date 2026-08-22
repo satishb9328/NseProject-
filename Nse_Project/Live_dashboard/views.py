@@ -3,14 +3,70 @@ from django.http import JsonResponse
 from django.shortcuts import render
 from pathlib import Path
 import json
+import math
 import os
 import pandas as pd
 import requests
+import time
 from Nse_Project.Swing_ML.views import get_swing_ml_context
 
 LIVE_OPTIONS_FILE = Path(__file__).resolve().parent.parent / "live_options_data.json"
 OPTION_INSTRUMENT_METADATA: dict[str, dict] = {}
 MASTER_INSTRUMENTS_URL = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.csv.gz"
+
+LOT_SIZE = 65  # NIFTY option lot size (used to convert OI/COI shares -> lots)
+
+# Dynamic strike boundaries derived from the most-active NIFTY contracts.
+_ACTIVE_STRIKE_BOUNDS: tuple | None = None
+_ACTIVE_STRIKE_BOUNDS_FETCHED_AT: float | None = None
+_ACTIVE_STRIKE_BOUNDS_TTL_SECONDS = 300  # refresh at most once every 5 minutes
+
+
+def _extract_active_strike_bounds(result) -> tuple | None:
+    """Return (lowest_strike, highest_strike) from most_active_index_contracts() output."""
+    try:
+        df, _ = result
+        strike_col = None
+        for col in df.columns:
+            label = col[-1] if isinstance(col, tuple) else col
+            if str(label).strip().lower() in ("strike price", "strikeprice"):
+                strike_col = col
+                break
+        if strike_col is None:
+            return None
+        strikes = pd.to_numeric(df[strike_col], errors="coerce").dropna()
+        if strikes.empty:
+            return None
+        return (float(strikes.min()), float(strikes.max()))
+    except Exception:
+        return None
+
+
+def _cache_active_strike_bounds(result) -> tuple | None:
+    global _ACTIVE_STRIKE_BOUNDS, _ACTIVE_STRIKE_BOUNDS_FETCHED_AT
+    bounds = _extract_active_strike_bounds(result)
+    if bounds is not None:
+        _ACTIVE_STRIKE_BOUNDS = bounds
+        _ACTIVE_STRIKE_BOUNDS_FETCHED_AT = time.monotonic()
+    return _ACTIVE_STRIKE_BOUNDS
+
+
+def get_active_strike_bounds(force_refresh: bool = False) -> tuple | None:
+    """Return cached (lowest, highest) active strike bounds, refreshing when stale."""
+    if (
+        not force_refresh
+        and _ACTIVE_STRIKE_BOUNDS is not None
+        and _ACTIVE_STRIKE_BOUNDS_FETCHED_AT is not None
+        and (time.monotonic() - _ACTIVE_STRIKE_BOUNDS_FETCHED_AT) < _ACTIVE_STRIKE_BOUNDS_TTL_SECONDS
+    ):
+        return _ACTIVE_STRIKE_BOUNDS
+
+    result = most_active_index_contracts()
+    if result is not None:
+        _cache_active_strike_bounds(result)
+
+    return _ACTIVE_STRIKE_BOUNDS
+
 
 # 1. డేటాను తీసుకొచ్చే ఫంక్షన్
 def most_active_index_contracts():
@@ -140,12 +196,18 @@ def dashboard_view(request):
 
     if result is not None:
         df, current_expiry = result
+        # Warm the active strike-bound cache used by the live option chain filter.
+        _cache_active_strike_bounds(result)
     else:
         df, current_expiry = None, None
 
     context = {'current_expiry': current_expiry}
     context.update(get_swing_ml_context())
     return render(request, "dashboard.html", context)
+
+
+def live_signals_view(request):
+    return render(request, "live_signals.html")
 
 
 def read_live_options_data() -> dict:
@@ -248,10 +310,41 @@ def _belongs_to_symbol(item: dict, target_symbol: str) -> bool:
     return False
 
 
-def build_option_chain_rows(instrument_data: dict, target_symbol: str = "NIFTY") -> list:
+def _json_safe_value(value):
+    if value is None:
+        return 0
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return 0
+        return value
+    if isinstance(value, int):
+        return value
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value
+    try:
+        parsed = float(value)
+        if math.isnan(parsed) or math.isinf(parsed):
+            return 0
+        return parsed
+    except Exception:
+        return 0
+
+
+def build_option_chain_rows(instrument_data: dict, target_symbol: str = "NIFTY", strike_bounds=None) -> list:
+    if not isinstance(instrument_data, dict):
+        return []
+
     rows = {}
     excluded_symbols = ("BANKNIFTY", "FINNIFTY", "SENSEX", "MIDCPNIFTY")
     target_prefix = target_symbol.upper().replace(" ", "")
+
+    # Dynamic strike window from most-active contracts; fall back to a safe NIFTY band.
+    if strike_bounds and len(strike_bounds) == 2:
+        lowest_strike, highest_strike = float(strike_bounds[0]), float(strike_bounds[1])
+    else:
+        lowest_strike, highest_strike = 20000.0, 30000.0
 
     for instrument_key, item in instrument_data.items():
         if not isinstance(item, dict):
@@ -265,17 +358,18 @@ def build_option_chain_rows(instrument_data: dict, target_symbol: str = "NIFTY")
         if any(excluded in normalized_symbol for excluded in excluded_symbols):
             continue
 
-        # Lock 2: Hard strike boundary (strictly 20000 <= strike <= 30000)
+        # Lock 2: Strict strike boundary (active min/max; fallback 20000..30000)
         strike = item.get("strike_price", item.get("strike"))
-        if not isinstance(strike, (int, float)) or not (20000 <= strike <= 30000):
+        strike = _to_number(strike)
+        if strike is None or not (lowest_strike <= strike <= highest_strike):
             continue
 
         side = (item.get('option_type') or '').upper()
-        raw = item.get('raw_sample', {})
+        raw = item.get('raw_sample', {}) if isinstance(item.get('raw_sample', {}), dict) else {}
         if side not in {"CE", "PE"}:
             continue
 
-        strike_key = str(int(strike) if isinstance(strike, (int, float)) and float(strike).is_integer() else strike)
+        strike_key = str(int(strike) if float(strike).is_integer() else strike)
         row = rows.setdefault(strike_key, {
             'strike': strike_key,
             'call_oi_pct': '-',
@@ -293,31 +387,31 @@ def build_option_chain_rows(instrument_data: dict, target_symbol: str = "NIFTY")
         })
 
         target = 'call' if side == 'CE' else 'put'
-        ltp = item.get('ltp')
+        ltp = _to_number(item.get('ltp'))
         if ltp is None:
-            ltp = get_nested(raw, ['fullFeed', 'marketFF', 'ltpc', 'ltp'])
-        oi = item.get('oi')
+            ltp = _to_number(get_nested(raw, ['fullFeed', 'marketFF', 'ltpc', 'ltp']))
+        oi = _to_number(item.get('oi'))
         if oi is None:
-            oi = get_nested(raw, ['fullFeed', 'marketFF', 'oi'])
-        volume = item.get('volume')
+            oi = _to_number(get_nested(raw, ['fullFeed', 'marketFF', 'oi']))
+        volume = _to_number(item.get('volume'))
         if volume is None:
-            volume = get_nested(raw, ['fullFeed', 'marketFF', 'vtt'])
+            volume = _to_number(get_nested(raw, ['fullFeed', 'marketFF', 'vtt']))
             if volume is None:
-                volume = get_nested(raw, ['fullFeed', 'marketFF', 'marketOHLC', 'ohlc', 0, 'vol'])
+                volume = _to_number(get_nested(raw, ['fullFeed', 'marketFF', 'marketOHLC', 'ohlc', 0, 'vol']))
 
-        coi = item.get('coi')
-        coi_pct = item.get('coi_pct')
+        coi = _to_number(item.get('coi'))
+        coi_pct = _to_number(item.get('coi_pct'))
         if coi is None and isinstance(oi, (int, float)):
-            prev_oi = item.get('previous_oi')
+            prev_oi = _to_number(item.get('previous_oi'))
             if isinstance(prev_oi, (int, float)):
                 coi = oi - prev_oi
-                coi_pct = round((coi / prev_oi) * 100, 2) if prev_oi != 0 else None
+                coi_pct = round((coi / prev_oi) * 100, 2) if prev_oi != 0 else 0
 
         row[f'{target}_ltp'] = ltp if ltp is not None else '-'
         row[f'{target}_oi'] = oi if oi is not None else '-'
         row[f'{target}_volume'] = volume if volume is not None else '-'
-        row[f'{target}_coi'] = coi if coi is not None else '-'
-        row[f'{target}_coi_pct'] = coi_pct if coi_pct is not None else '-'
+        row[f'{target}_coi'] = coi if coi is not None else 0
+        row[f'{target}_coi_pct'] = coi_pct if coi_pct is not None else 0
 
         call_oi = _to_number(row.get('call_oi'))
         put_oi = _to_number(row.get('put_oi'))
@@ -343,14 +437,33 @@ def build_option_chain_rows(instrument_data: dict, target_symbol: str = "NIFTY")
            has_activity(row.get('put_oi')) or has_activity(row.get('put_volume'))
     ]
     filtered.sort(key=lambda row: float(row['strike']) if row['strike'] != '-' else float('inf'))
+
+    # Convert OI / COI share quantities into lots (NIFTY lot size = 65).
+    for row in filtered:
+        for key in ('call_oi', 'call_coi', 'put_oi', 'put_coi'):
+            value = row.get(key)
+            if isinstance(value, (int, float)):
+                row[key] = round(value / LOT_SIZE)
+
     return filtered
+
+
+def _json_safe_row(row: dict) -> dict:
+    return {key: _json_safe_value(value) for key, value in row.items()}
 
 
 def live_option_chain_api(request):
     data = read_live_options_data()
-    chain = build_option_chain_rows(data.get("instrument_data", {}), target_symbol="NIFTY")
+    strike_bounds = get_active_strike_bounds()
+    chain = build_option_chain_rows(
+        data.get("instrument_data", {}), target_symbol="NIFTY", strike_bounds=strike_bounds
+    )
+    chain = [_json_safe_row(row) for row in chain]
     return JsonResponse({
-        "updated_at": data.get("updated_at"),
-        "expiry_date": data.get("expiry_date"),
+        "updated_at": _json_safe_value(data.get("updated_at")),
+        "expiry_date": _json_safe_value(data.get("expiry_date")),
+        "baseline_date": _json_safe_value(data.get("baseline_date")),
+        "baseline_source": _json_safe_value(data.get("baseline_source")),
+        "strike_bounds": list(strike_bounds) if strike_bounds else None,
         "option_chain": chain,
     })

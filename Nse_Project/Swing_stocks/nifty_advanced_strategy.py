@@ -143,7 +143,7 @@ def find_swing_pivots(high: np.ndarray, low: np.ndarray, n: int = 2):
     sl_idx = argrelextrema(low, np.less, order=n)[0].tolist()
     return sh_idx, sl_idx
 
-def detect_liquidity_sweep(high: np.ndarray, low: np.ndarray, close: np.ndarray, open_: np.ndarray, sh_idx: list, sl_idx: list, lookback: int = 5):
+def detect_liquidity_sweep(high: np.ndarray, low: np.ndarray, close: np.ndarray, open_: np.ndarray, sh_idx: list, sl_idx: list, lookback: int = 10):
     result = {"swept": False, "direction": None, "sweep_level": None, "sweep_bar": None, "sweep_low": None, "sweep_high": None}
     n = len(close)
     check_range = range(max(n - lookback, 1), n)
@@ -218,14 +218,14 @@ def detect_order_block(high: np.ndarray, low: np.ndarray, close: np.ndarray, ope
         if direction == "bullish":
             is_bearish_ob = close[i] < open_[i]
             next_body = close[i + 1] - open_[i + 1]
-            if is_bearish_ob and (next_body > avg_body * 1.5) and (close[i + 1] > open_[i + 1]) and (volume[i + 1] > avg_vol * 1.2):
+            if is_bearish_ob and (next_body > avg_body * 1.25) and (close[i + 1] > open_[i + 1]) and (volume[i + 1] > avg_vol * 1.1):
                 ob_low, ob_high = float(low[i]), float(high[i])
                 result.update({"found": True, "ob_high": round(ob_high, 4), "ob_low": round(ob_low, 4), "ob_mid": round((ob_low + ob_high) / 2, 4), "ob_bar": i})
                 return result
         elif direction == "bearish":
             is_bullish_ob = close[i] > open_[i]
             next_body = open_[i + 1] - close[i + 1]
-            if is_bullish_ob and (next_body > avg_body * 1.5) and (close[i + 1] < open_[i + 1]) and (volume[i + 1] > avg_vol * 1.2):
+            if is_bullish_ob and (next_body > avg_body * 1.25) and (close[i + 1] < open_[i + 1]) and (volume[i + 1] > avg_vol * 1.1):
                 ob_low, ob_high = float(low[i]), float(high[i])
                 result.update({"found": True, "ob_high": round(ob_high, 4), "ob_low": round(ob_low, 4), "ob_mid": round((ob_low + ob_high) / 2, 4), "ob_bar": i})
                 return result
@@ -280,8 +280,8 @@ def smc_entry_signal(hist: pd.DataFrame, atr_value: float | None):
         mss = detect_mss(h_arr, l_arr, c_arr, sh_idx, sl_idx, direction)
         ob = detect_order_block(h_arr, l_arr, c_arr, o_arr, v_arr, direction, sweep_bar)
 
-        if mss["confirmed"] and mss["mss_bar"] is not None and sweep_bar is not None and mss["mss_bar"] < sweep_bar: return default
-        if ob["found"] and ob["ob_bar"] is not None and mss["mss_bar"] is not None and ob["ob_bar"] > mss["mss_bar"]: return default
+        if mss["confirmed"] and mss["mss_bar"] is not None and sweep_bar is not None and mss["mss_bar"] < sweep_bar - 1: return default
+        if ob["found"] and ob["ob_bar"] is not None and mss["mss_bar"] is not None and ob["ob_bar"] > mss["mss_bar"] + 1: return default
 
         fib = premium_discount_zone(h_arr, l_arr, c_arr, direction)
         displaced = displacement_confirmed(c_arr, o_arr, v_arr, direction)
@@ -513,6 +513,14 @@ def fetch_stock_data(symbol: str, cache: dict, nifty_hist: pd.DataFrame, sector_
                 except Exception:
                     return None
             df = df.copy()
+
+        print(f"  PARQUET PATH FOR {symbol}: {parquet_path}")
+        df = df.sort_index()
+        latest_ts = df.index.max()
+        print(f"  LATEST DATA FOR {symbol}: {latest_ts}")
+        if latest_ts is None or latest_ts.date() < pd.Timestamp.now().floor("D").date():
+            print(f"  STALE DATA WARNING: {symbol} last updated on {latest_ts.date() if latest_ts is not None else 'UNKNOWN'}")
+            return None
 
         required_cols = ["Open", "High", "Low", "Close", "Volume"]
         missing_cols = [col for col in required_cols if col not in df.columns]

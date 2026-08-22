@@ -17,12 +17,18 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from django.views.generic import RedirectView  # 🔴 ఇది కొత్తగా ఇంపోర్ట్ చేయండి
+from Nse_Project.Live_dashboard.views import live_signals_view
+from Nse_Project.Swing_stocks.views import swing_stocks_view
+from Nse_Project.Swing_ML.views import swing_ml_predictions_view
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     
     # 🔴 హోమ్ పేజీ (Root URL) ఓపెన్ చేయగానే ఆటోమేటిక్ గా live-dashboard/ కి వెళ్తుంది
-    path('', RedirectView.as_view(url='/live-dashboard/', permanent=False)),
+    path('', RedirectView.as_view(url='/live-signals/', permanent=False)),
+    path('live-signals/', live_signals_view, name='live_signals'),
+    path('swing-stocks/', swing_stocks_view, name='swing_stocks'),
+    path('swing-ml/', swing_ml_predictions_view, name='swing_ml'),
     
     path('swing/', include('Nse_Project.Swing_stocks.urls')),
     path('live-dashboard/', include('Nse_Project.Live_dashboard.urls')),

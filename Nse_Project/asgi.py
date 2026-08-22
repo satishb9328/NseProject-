@@ -1,16 +1,25 @@
 """
 ASGI config for MyProject2 project.
-
-It exposes the ASGI callable as a module-level variable named ``application``.
-
-For more information on this file, see
-https://docs.djangoproject.com/en/6.0/howto/deployment/asgi/
 """
-
 import os
 
 from django.core.asgi import get_asgi_application
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Nse_Project.settings')
 
-application = get_asgi_application()
+# Prefer the Channels ASGI stack (WebSocket) when it is installed; otherwise fall
+# back to the plain Django ASGI app so the WSGI ``runserver`` keeps working unchanged.
+try:
+    from channels.routing import ProtocolTypeRouter, URLRouter
+
+    from Nse_Project.Swing_stocks.routing import websocket_urlpatterns
+
+    application = ProtocolTypeRouter(
+        {
+            "http": get_asgi_application(),
+            "websocket": URLRouter(websocket_urlpatterns),
+        }
+    )
+except Exception:
+    application = get_asgi_application()
+

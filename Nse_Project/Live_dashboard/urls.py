@@ -5,5 +5,6 @@ app_name = 'live_dashboard'
 
 urlpatterns = [
     path('', views.dashboard_view, name='dashboard'),
+    path('live-signals/', views.live_signals_view, name='live_signals'),
     path('api/live-options/', views.live_option_chain_api, name='live_option_chain_api'),
 ]

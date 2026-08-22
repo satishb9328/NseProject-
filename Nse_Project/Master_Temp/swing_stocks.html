@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Swing Stocks | NSE Dashboard{% endblock %}
+
+{% block content %}
+<section class="relative overflow-hidden rounded-3xl glass px-6 py-10 sm:px-10 lg:py-14">
+  <div class="pointer-events-none absolute inset-0 bg-grid opacity-60"></div>
+  <div class="relative">
+    <p class="text-xs uppercase tracking-[0.3em] text-neon-green">Swing Stocks</p>
+    <h1 class="mt-2 font-display text-3xl font-bold text-slate-50">Traditional Swing Scanner</h1>
+    <p class="mt-2 text-slate-400">STRONG SEPA and traditional scanner results, kept separate from ML predictions.</p>
+
+    <div class="mt-8 rounded-2xl border border-ink-700/70 bg-ink-900/60 p-6">
+      <div class="flex items-center justify-between gap-3">
+        <div><p class="text-xs uppercase tracking-[0.25em] text-slate-500">STRONG SEPA</p><h2 class="mt-1 text-xl font-semibold text-slate-100">⭐ STRONG SEPA STOCKS</h2></div>
+        <span id="strong-sepa-count" class="rounded-full bg-slate-800/80 px-3 py-1 text-xs text-slate-400">{{ strong_sepa|length }} symbols</span>
+      </div>
+      <div class="mt-4 overflow-x-auto rounded-2xl border border-ink-700/70 bg-ink-900/70">
+        <table class="min-w-full text-left text-sm"><thead class="bg-slate-900/80 text-slate-300"><tr><th class="px-4 py-3">Symbol</th><th class="px-4 py-3">RS</th><th class="px-4 py-3">VCP</th><th class="px-4 py-3">Proximity</th><th class="px-4 py-3">SMC Signal</th><th class="px-4 py-3">Score</th></tr></thead>
+        <tbody id="strong-sepa-tbody">{% for row in strong_sepa %}<tr class="border-t border-ink-700/60 text-slate-300"><td class="px-4 py-3 font-semibold text-slate-100">{{ row.symbol|default:'-' }}</td><td class="px-4 py-3">{{ row.rs_vs_index|default:'-' }}</td><td class="px-4 py-3">{{ row.vcp|default:'-' }}</td><td class="px-4 py-3">{{ row.proximity|default:'-' }}</td><td class="px-4 py-3">{{ row.smc_signal|default:'-' }}</td><td class="px-4 py-3">{{ row.score|default:'-' }}</td></tr>{% empty %}<tr><td colspan="6" class="px-4 py-6 text-center text-slate-500">No strong SEPA stocks present right now.</td></tr>{% endfor %}</tbody></table>
+      </div>
+    </div>
+  </div>
+</section>
+<script>
+(() => {
+  let reconnectDelay = 1000;
+  function renderStrongSepa(rows) {
+    const tbody = document.getElementById('strong-sepa-tbody');
+    const count = document.getElementById('strong-sepa-count');
+    if (!tbody) return;
+    const list = Array.isArray(rows) ? rows : [];
+    if (count) count.textContent = `${list.length} symbols`;
+    tbody.replaceChildren();
+    if (!list.length) { const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 6; td.className = 'px-4 py-6 text-center text-slate-500'; td.textContent = 'No strong SEPA stocks present right now.'; tr.appendChild(td); tbody.appendChild(tr); return; }
+    ['symbol', 'rs_vs_index', 'vcp', 'proximity', 'smc_signal', 'score'].forEach(() => {});
+    list.forEach(row => { const tr = document.createElement('tr'); tr.className = 'border-t border-ink-700/60 text-slate-300'; ['symbol', 'rs_vs_index', 'vcp', 'proximity', 'smc_signal', 'score'].forEach((key, index) => { const td = document.createElement('td'); td.className = `px-4 py-3${index === 0 ? ' font-semibold text-slate-100' : ''}`; td.textContent = row?.[key] ?? '-'; tr.appendChild(td); }); tbody.appendChild(tr); });
+  }
+  function connect() {
+    const protocol = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const socket = new WebSocket(`${protocol}${location.host}/ws/swing/sepa/`);
+    socket.onopen = () => { reconnectDelay = 1000; };
+    socket.onmessage = event => { try { const payload = JSON.parse(event.data); if (payload?.strong_sepa !== undefined) renderStrongSepa(payload.strong_sepa); } catch (error) { console.warn('Swing SEPA message failed:', error); } };
+    socket.onclose = () => { setTimeout(connect, reconnectDelay); reconnectDelay = Math.min(reconnectDelay * 2, 15000); };
+    socket.onerror = () => socket.close();
+  }
+  connect();
+})();
+</script>
+{% endblock %}

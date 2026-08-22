@@ -5,46 +5,57 @@
 {% block content %}
 
 <!-- ===================== HERO ===================== -->
-<section id="hero" class="relative overflow-hidden rounded-3xl glass px-6 sm:px-10 py-14 lg:py-20 scroll-mt-24">
+<section id="hero" class="relative overflow-hidden rounded-3xl glass px-6 sm:px-10 pt-6 pb-12 lg:pt-8 lg:pb-14 scroll-mt-24">
   <div class="pointer-events-none absolute inset-0 bg-grid opacity-60"></div>
   <div class="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full bg-neon-green/20 blur-3xl animate-float"></div>
   <div class="pointer-events-none absolute -bottom-24 -left-24 h-72 w-72 rounded-full bg-neon-red/15 blur-3xl animate-float" style="animation-delay:-3s"></div>
 
   <div class="relative max-w-4xl">
-    <span class="inline-flex items-center gap-2 rounded-full border border-neon-green/30 bg-neon-green/10 px-3 py-1.5 text-xs font-semibold text-neon-green">
-      <span class="h-2 w-2 rounded-full bg-neon-green animate-pulse-dot shadow-glow-green"></span>
-      LIVE · NSE_FO Queue Tick Monitoring
-    </span>
-
-    <div style="margin: 20px 0; text-align: left;">
-      <div style="color: #00ff9d; font-size: 14px; font-weight: bold; margin-bottom: 10px; text-align: left;">Expiry: {{ current_expiry }}</div>
+    <div class="mt-0 text-left">
+      <div class="mb-2 text-left text-sm font-semibold text-[#00ff9d]">Expiry: {{ current_expiry }}</div>
       <style>
         .option-chain-table { font-size: 11px; width: 100%; text-align: center; border-collapse: collapse; }
-        .option-chain-table th { background-color: rgba(0, 255, 157, 0.1); color: #00ff9d; font-weight: 600; padding: 6px 4px; border: 1px solid #333; white-space: nowrap; text-transform: uppercase; }
+        .option-chain-table th { font-weight: 600; padding: 6px 4px; border: 1px solid #333; white-space: nowrap; text-transform: uppercase; }
         .option-chain-table td { padding: 4px; border: 1px solid #333; white-space: nowrap; }
+        .option-chain-table th.call-side,
+        .option-chain-table td.call-side { background-color: rgba(248, 113, 113, 0.14); color: #dc2626; }
+        .option-chain-table th.put-side,
+        .option-chain-table td.put-side { background-color: rgba(34, 197, 94, 0.14); color: #15803d; }
+        .option-chain-table th.strike-header,
+        .option-chain-table td.strike-cell { background-color: rgba(148, 163, 184, 0.08); color: #64748b; }
+        .option-chain-table tr.atm-row td { background: rgba(56, 189, 248, 0.16); box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.6); color: #e0f2fe; font-weight: 700; }
       </style>
-      <div style="overflow-x: auto;">
-        <table id="option-chain-table" class="option-chain-table">
+      <div id="sentiment-bar" class="mb-3 rounded-xl border px-4 py-3 text-sm font-semibold bg-yellow-900/30 text-yellow-400 border-yellow-700 transition-all duration-700 ease-in-out">
+        <span class="font-bold">📊 LIVE SENTIMENT</span>
+        <span class="opacity-60"> | </span>
+        <span>BIAS: <span id="sentiment-bias">+0%</span></span>
+        <span class="opacity-60"> | </span>
+        <span>MOMENTUM: <span id="sentiment-momentum">0%</span> <span id="sentiment-momentum-label">(Quiet)</span></span>
+        <span class="opacity-60"> | </span>
+        <span>SCORE: <span id="sentiment-score">50/100</span> <span id="sentiment-score-label">(Fair / Neutral Zone)</span></span>
+      </div>
+      <div class="overflow-x-auto">
+        <table id="option-chain-table" class="option-chain-table w-full text-center border-collapse text-[11px]">
           <thead>
             <tr>
-              <th>CALL OI%</th>
-              <th>CALL OI</th>
-              <th>CALL VOL</th>
-              <th>CALL LTP</th>
-              <th>CALL COI</th>
-              <th>CALL COI%</th>
-              <th>STRIKE</th>
-              <th>PUT COI%</th>
-              <th>PUT COI</th>
-              <th>PUT LTP</th>
-              <th>PUT VOL</th>
-              <th>PUT OI</th>
-              <th>PUT OI%</th>
+              <th class="call-side border border-red-700 border-b-2 border-slate-600 bg-red-900/30 px-2 py-1 text-xs font-bold uppercase text-red-400 whitespace-nowrap">CALL OI%</th>
+              <th class="call-side border border-red-700 border-b-2 border-slate-600 bg-red-900/30 px-2 py-1 text-xs font-bold uppercase text-red-400 whitespace-nowrap">CALL OI</th>
+              <th class="call-side border border-red-700 border-b-2 border-slate-600 bg-red-900/30 px-2 py-1 text-xs font-bold uppercase text-red-400 whitespace-nowrap">CALL VOL</th>
+              <th class="call-side border border-red-700 border-b-2 border-slate-600 bg-red-900/30 px-2 py-1 text-xs font-bold uppercase text-red-400 whitespace-nowrap">CALL LTP</th>
+              <th class="call-side border border-red-700 border-b-2 border-slate-600 bg-red-900/30 px-2 py-1 text-xs font-bold uppercase text-red-400 whitespace-nowrap">CALL COI</th>
+              <th class="call-side border border-red-700 border-b-2 border-slate-600 bg-red-900/30 px-2 py-1 text-xs font-bold uppercase text-red-400 whitespace-nowrap">CALL COI%</th>
+              <th class="strike-header border border-slate-700 border-b-2 border-slate-600 bg-slate-900/20 px-2 py-1 text-xs font-bold uppercase text-slate-300 whitespace-nowrap">STRIKE</th>
+              <th class="put-side border border-emerald-700 border-b-2 border-slate-600 bg-emerald-900/30 px-2 py-1 text-xs font-bold uppercase text-emerald-400 whitespace-nowrap">PUT COI%</th>
+              <th class="put-side border border-emerald-700 border-b-2 border-slate-600 bg-emerald-900/30 px-2 py-1 text-xs font-bold uppercase text-emerald-400 whitespace-nowrap">PUT COI</th>
+              <th class="put-side border border-emerald-700 border-b-2 border-slate-600 bg-emerald-900/30 px-2 py-1 text-xs font-bold uppercase text-emerald-400 whitespace-nowrap">PUT LTP</th>
+              <th class="put-side border border-emerald-700 border-b-2 border-slate-600 bg-emerald-900/30 px-2 py-1 text-xs font-bold uppercase text-emerald-400 whitespace-nowrap">PUT VOL</th>
+              <th class="put-side border border-emerald-700 border-b-2 border-slate-600 bg-emerald-900/30 px-2 py-1 text-xs font-bold uppercase text-emerald-400 whitespace-nowrap">PUT OI</th>
+              <th class="put-side border border-emerald-700 border-b-2 border-slate-600 bg-emerald-900/30 px-2 py-1 text-xs font-bold uppercase text-emerald-400 whitespace-nowrap">PUT OI%</th>
             </tr>
           </thead>
           <tbody id="live-options-tbody">
             <tr>
-              <td colspan="13" style="padding: 12px; color: #cbd5e1;">Loading live option chain data…</td>
+              <td colspan="13" class="px-3 py-2 text-slate-300">Loading live option chain data…</td>
             </tr>
           </tbody>
         </table>
@@ -54,6 +65,7 @@
       const liveOptionsBody = document.getElementById('live-options-tbody');
       const liveUrl = '{% url "live_dashboard:live_option_chain_api" %}';
       const syncLabel = document.getElementById('live-synced');
+      let currentSpot = null;
 
       function formatNumber(value) {
         if (value === null || value === undefined) return '-';
@@ -66,6 +78,85 @@
         if (typeof value === 'number') return `${value.toFixed(1)}%`;
         const num = Number(value);
         return Number.isFinite(num) ? `${num.toFixed(1)}%` : '-';
+      }
+
+      function toNumber(value) {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : 0;
+      }
+
+      function formatSignedPct(value) {
+        const rounded = Math.round(value);
+        return (rounded >= 0 ? '+' : '') + rounded + '%';
+      }
+
+      const SENTIMENT_THEMES = {
+        bullish: ['bg-green-900/30', 'text-green-400', 'border-green-700'],
+        neutral: ['bg-yellow-900/30', 'text-yellow-400', 'border-yellow-700'],
+        bearish: ['bg-red-900/30', 'text-red-400', 'border-red-700'],
+      };
+
+      function updateSentimentBar(rows) {
+        const bar = document.getElementById('sentiment-bar');
+        if (!bar) return;
+
+        let callOi = 0, putOi = 0, callCoi = 0, putCoi = 0;
+        (rows || []).forEach(function (row) {
+          callOi += toNumber(row.call_oi);
+          putOi += toNumber(row.put_oi);
+          callCoi += toNumber(row.call_coi);
+          putCoi += toNumber(row.put_coi);
+        });
+
+        const totalOi = callOi + putOi;
+        const ceOip = totalOi > 0 ? (callOi / totalOi) * 100 : 0;
+        const peOip = totalOi > 0 ? (putOi / totalOi) * 100 : 0;
+        const bias = peOip - ceOip;
+        const totalCoi = callCoi + putCoi;
+        const momentum = totalOi > 0 ? (totalCoi / totalOi) * 100 : 0;
+        const momentumAbs = Math.abs(momentum);
+
+        // Sentiment score: 50 = neutral; positive bias (bullish) and OI build lift it.
+        let score = Math.round(50 + bias * 0.5 + momentum);
+        score = Math.max(0, Math.min(100, score));
+
+        let themeKey, scoreLabel;
+        if (score >= 65) {
+          themeKey = 'bullish';
+          scoreLabel = 'Strong Bullish';
+        } else if (score <= 34) {
+          themeKey = 'bearish';
+          scoreLabel = 'Danger / Strong Bearish';
+        } else {
+          themeKey = 'neutral';
+          scoreLabel = 'Fair / Neutral Zone';
+        }
+
+        let momentumLabel, explosive = false;
+        if (momentumAbs < 5) {
+          momentumLabel = 'Quiet';
+        } else if (momentumAbs <= 10) {
+          momentumLabel = 'Healthy Trend';
+        } else {
+          momentumLabel = 'EXPLOSIVE!';
+          explosive = true;
+        }
+
+        Object.keys(SENTIMENT_THEMES).forEach(function (key) {
+          SENTIMENT_THEMES[key].forEach(function (cls) { bar.classList.remove(cls); });
+        });
+        SENTIMENT_THEMES[themeKey].forEach(function (cls) { bar.classList.add(cls); });
+
+        document.getElementById('sentiment-bias').textContent = formatSignedPct(bias);
+        document.getElementById('sentiment-momentum').textContent = formatSignedPct(momentum);
+        document.getElementById('sentiment-score').textContent = Math.round(score) + '/100';
+
+        const momentumLabelEl = document.getElementById('sentiment-momentum-label');
+        momentumLabelEl.textContent = '(' + momentumLabel + ')';
+        momentumLabelEl.classList.remove('font-bold', 'text-orange-500');
+        if (explosive) momentumLabelEl.classList.add('font-bold', 'text-orange-500');
+
+        document.getElementById('sentiment-score-label').textContent = '(' + scoreLabel + ')';
       }
 
       let prevOptionChainRows = null;
@@ -87,12 +178,44 @@
           formatNumber(row.put_oi),
           formatPercent(row.put_oi_pct),
         ];
-        cells.forEach(function (text) {
+        const baseCellClasses = 'border border-slate-700 px-2 py-1 text-slate-200 whitespace-nowrap';
+        const callOiHighlight = Number(row.call_oi_pct) > 55 ? ' bg-red-900/40 text-red-300 font-bold' : '';
+        const putOiHighlight = Number(row.put_oi_pct) > 55 ? ' bg-green-900/40 text-green-300 font-bold' : '';
+
+        cells.forEach(function (text, index) {
           const td = document.createElement('td');
+          td.className = baseCellClasses + (index === 0 ? callOiHighlight : index === 12 ? putOiHighlight : '');
           td.textContent = text;
           tr.appendChild(td);
         });
         return tr;
+      }
+
+      function trimOptionChainRows(rows, spot) {
+        const normalized = rows
+          .map((row) => ({ ...row, strike: Number(row.strike) }))
+          .filter((row) => Number.isFinite(row.strike))
+          .sort((a, b) => a.strike - b.strike);
+
+        if (normalized.length <= 31) {
+          return normalized;
+        }
+
+        let atmIndex = Math.floor(normalized.length / 2);
+        if (Number.isFinite(spot)) {
+          let smallestDiff = Infinity;
+          normalized.forEach((row, index) => {
+            const diff = Math.abs(row.strike - spot);
+            if (diff < smallestDiff) {
+              smallestDiff = diff;
+              atmIndex = index;
+            }
+          });
+        }
+
+        const start = Math.max(0, atmIndex - 15);
+        const end = Math.min(normalized.length, atmIndex + 16);
+        return normalized.slice(start, end);
       }
 
       function renderEmptyState(message, isError) {
@@ -108,24 +231,53 @@
 
       function renderRows(data) {
         const rows = data.option_chain || [];
+        updateSentimentBar(rows);
         if (rows.length === 0) {
           renderEmptyState('No live option data available.', false);
           prevOptionChainRows = null;
           return;
         }
 
+        const trimmed = trimOptionChainRows(rows, currentSpot);
+
         // State comparison: skip the expensive full-table rebuild when nothing changed.
-        const signature = JSON.stringify(rows);
+        const signature = JSON.stringify(trimmed);
         if (signature === prevOptionChainRows) {
           return;
         }
         prevOptionChainRows = signature;
 
         const fragment = document.createDocumentFragment();
-        rows.forEach(function (row) {
+        trimmed.forEach(function (row) {
           fragment.appendChild(buildOptionRow(row));
         });
         liveOptionsBody.replaceChildren(fragment);
+        highlightAtmRow();
+      }
+
+      function highlightAtmRow() {
+        if (!liveOptionsBody || !Number.isFinite(currentSpot)) return;
+        const rows = liveOptionsBody.querySelectorAll('tr');
+        let closestRow = null;
+        let closestDiff = Infinity;
+
+        rows.forEach(function (tr) {
+          const strikeCell = tr.children[6]; // STRIKE column (0-indexed 6)
+          if (!strikeCell) return;
+          const strike = Number(strikeCell.textContent);
+          if (!Number.isFinite(strike)) return;
+          const diff = Math.abs(strike - currentSpot);
+          if (diff < closestDiff) {
+            closestDiff = diff;
+            closestRow = tr;
+          }
+        });
+
+        rows.forEach(function (tr) {
+          tr.classList.remove('atm-row');
+        });
+
+        if (closestRow) closestRow.classList.add('atm-row');
       }
 
       async function refreshOptionChain() {
@@ -185,6 +337,13 @@
         const pcrText = formatGammaValue(pcr);
         const flipText = formatGammaValue(gammaFlip);
         const gexText = formatGammaValue(netGex);
+
+        // Track the numeric spot so the ATM strike row can be highlighted.
+        const spotNum = Number(spot);
+        if (Number.isFinite(spotNum) && spotNum !== currentSpot) {
+          currentSpot = spotNum;
+          highlightAtmRow();
+        }
 
         const spotEl = document.getElementById('live-spot');
         const pcrEl = document.getElementById('live-pcr');

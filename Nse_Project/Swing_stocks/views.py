@@ -76,6 +76,26 @@ def swing_dashboard(request):
     return render(request, "swing_dashboard.html", context)
 
 
+def swing_stocks_view(request):
+    context = {
+        "perfect_combo": [],
+        "strong_sepa": [],
+        "smc_active": [],
+    }
+    if SWING_STOCKS_CSV_FILE.exists():
+        try:
+            df = pd.read_csv(SWING_STOCKS_CSV_FILE).where(lambda value: pd.notnull(value), None)
+            categories = filter_combo_setups(df)
+            context.update({
+                "perfect_combo": categories.get("PERFECT_COMBO", []),
+                "strong_sepa": categories.get("STRONG_SEPA", []),
+                "smc_active": categories.get("SMC_ACTIVE", []),
+            })
+        except Exception:
+            pass
+    return render(request, "swing_stocks.html", context)
+
+
 def get_live_alerts(request):
     alerts = load_live_alerts()
     return JsonResponse({'alerts': alerts})

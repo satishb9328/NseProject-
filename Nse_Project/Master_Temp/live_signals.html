@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+
+{% block title %}Live Signals | NSE Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+  .option-chain-table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.25; text-align: center; }
+  .option-chain-table th { white-space: nowrap; font-weight: 700; line-height: 1.25; text-transform: uppercase; }
+  .option-chain-table td { white-space: nowrap; line-height: 1.25; }
+  .option-chain-table th.call-side, .option-chain-table td.call-side { background: rgba(248, 113, 113, .14); color: #fca5a5; }
+  .option-chain-table th.put-side, .option-chain-table td.put-side { background: rgba(34, 197, 94, .14); color: #86efac; }
+  .option-chain-table th.strike-header, .option-chain-table td.strike-cell { background: rgba(148, 163, 184, .08); color: #cbd5e1; }
+  .option-chain-table tr.atm-row td { background: rgba(56, 189, 248, .16); box-shadow: inset 0 0 0 1px rgba(56, 189, 248, .6); color: #e0f2fe; font-weight: 700; }
+  .dominance-track { height: 3px; margin-top: 3px; overflow: hidden; border-radius: 999px; background: rgba(148, 163, 184, .18); }
+  .dominance-fill { height: 100%; border-radius: inherit; transition: width .35s ease; }
+  .sentiment-bar { transition: background-color .7s ease, color .7s ease, border-color .7s ease; }
+  .gamma-alert-feed { scrollbar-width: thin; scrollbar-color: rgba(56, 189, 248, .45) rgba(7, 11, 20, .8); }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="relative overflow-hidden rounded-3xl glass px-6 py-1 sm:px-10 lg:py-1">
+  <div class="pointer-events-none absolute inset-0 bg-grid opacity-60"></div>
+  <div class="relative">
+    <p class="float-right text-[10px] uppercase tracking-[.3em] text-neon-green">Live Signals</p>
+    <h1 class="mt-1 font-display text-lg font-bold text-slate-50">Gamma Intelligence</h1>
+
+    <section id="gamma-snapshot" class="mt-1 border-y border-ink-700/60 py-1">
+      <div class="mb-3 flex items-center justify-between gap-3 text-xs">
+        <span class="uppercase tracking-wider text-slate-500">SPOT</span><span id="live-spot" class="font-mono font-semibold text-slate-50">--</span>
+        <span id="live-expiry" class="ml-auto font-mono text-slate-500">Expiry --</span>
+      </div>
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div class="rounded-xl border border-sky-500/30 bg-sky-950/20 p-3">
+          <div class="mb-1 flex items-center justify-between"><h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-sky-300">NIFTY WEEKLY GAMMA</h2><span class="text-[10px] uppercase tracking-wider text-slate-500">Total OI</span></div>
+          <div class="grid grid-cols-3 gap-2 text-xs">
+            <div><span class="block uppercase tracking-wider text-slate-500">PCR</span><span id="weekly-pcr" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
+            <div><span class="block uppercase tracking-wider text-slate-500">GAMMA FLIP</span><span id="weekly-gamma-flip" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
+            <div><span class="block uppercase tracking-wider text-slate-500">NET GEX</span><span id="weekly-net-gex" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
+            <div class="col-span-3 mt-1 grid grid-cols-2 gap-2 border-t border-sky-500/20 pt-2 text-[11px]"><span class="font-medium text-orange-300">CALL WALL (Res): <span id="weekly-call-wall" class="font-mono">--</span></span><span class="text-right font-medium text-emerald-300">PUT WALL (Sup): <span id="weekly-put-wall" class="font-mono">--</span></span></div>
+            <div class="col-span-3 grid grid-cols-2 gap-2 text-[11px]"><span class="font-medium text-slate-400">NET CHARM: <span id="weekly-net-charm" class="font-mono text-slate-200">--</span></span><span class="text-right font-medium text-slate-400">NET VANNA: <span id="weekly-net-vanna" class="font-mono text-slate-200">--</span></span></div>
+          </div>
+          <p id="weekly-net-gex-summary" class="mt-2 text-[11px] font-medium text-slate-400">--</p>
+        </div>
+        <div class="rounded-xl border border-amber-500/30 bg-amber-950/20 p-3">
+          <div class="mb-1 flex items-center justify-between"><h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-amber-300">NIFTY DAY GAMMA</h2><span class="text-[10px] uppercase tracking-wider text-slate-500">Today COI</span></div>
+          <div class="grid grid-cols-3 gap-2 text-xs">
+            <div><span class="block uppercase tracking-wider text-slate-500">PCR</span><span id="day-pcr" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
+            <div><span class="block uppercase tracking-wider text-slate-500">GAMMA FLIP</span><span id="day-gamma-flip" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
+            <div><span class="block uppercase tracking-wider text-slate-500">NET GEX</span><span id="day-net-gex" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
+            <div class="col-span-3 mt-1 grid grid-cols-2 gap-2 border-t border-amber-500/20 pt-2 text-[11px]"><span class="font-medium text-orange-300">CALL WALL (Res): <span id="day-call-wall" class="font-mono">--</span></span><span class="text-right font-medium text-emerald-300">PUT WALL (Sup): <span id="day-put-wall" class="font-mono">--</span></span></div>
+            <div class="col-span-3 grid grid-cols-2 gap-2 text-[11px]"><span class="font-medium text-slate-400">NET CHARM: <span id="day-net-charm" class="font-mono text-slate-200">--</span></span><span class="text-right font-medium text-slate-400">NET VANNA: <span id="day-net-vanna" class="font-mono text-slate-200">--</span></span></div>
+          </div>
+          <p id="day-net-gex-summary" class="mt-2 text-[11px] font-medium text-slate-400">--</p>
+        </div>
+      </div>
+      <div class="mt-2 border-t border-ink-800/70 pt-2">
+        <div class="flex items-center gap-2 text-[10px] uppercase tracking-[.18em] text-neon-violet"><span>Live Gamma Options Signals</span><span class="text-slate-700">|</span><span class="text-slate-600">stream</span></div>
+        <div id="live-gamma-alerts" class="gamma-alert-feed mt-1 h-8 overflow-y-auto text-xs leading-5 text-slate-300"><p class="text-slate-500">Waiting for gamma status updates...</p></div>
+      </div>
+    </section>
+
+    <section id="option-chain" class="mt-6">
+      <div id="sentiment-bar" class="sentiment-bar mb-0 flex items-center justify-between gap-3 rounded-xl border border-yellow-700 bg-yellow-900/30 px-3 py-2 text-sm font-semibold text-yellow-400">
+        <div class="flex flex-wrap items-center gap-1">
+          <span class="font-bold">📊 LIVE SENTIMENT</span><span class="opacity-60"> | </span><span>BIAS: <span id="sentiment-bias">+0%</span></span><span class="opacity-60"> | </span><span>MOMENTUM: <span id="sentiment-momentum">0%</span> <span id="sentiment-momentum-label">(Quiet)</span></span><span class="opacity-60"> | </span><span>SCORE: <span id="sentiment-score">50/100</span> <span id="sentiment-score-label">(Fair / Neutral Zone)</span></span>
+        </div>
+        <label class="flex shrink-0 items-center gap-2 text-[10px] uppercase tracking-wider text-yellow-200">Expiry<select id="expiry-filter" class="rounded-lg border border-yellow-700/70 bg-ink-950/80 px-2 py-1 text-xs normal-case tracking-normal text-slate-200"><option value="all">Loading expiries...</option></select></label>
+        <button id="scalper-playground-open" type="button" class="scalper-playground-trigger shrink-0 rounded-lg border border-cyan-400/50 bg-cyan-400/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-200 transition hover:bg-cyan-400/20" aria-haspopup="dialog" aria-controls="scalper-playground-modal">🎮 Scalper's Playground</button>
+      </div>
+
+      <div class="overflow-x-auto rounded-2xl glass">
+        <table id="option-chain-table" class="option-chain-table min-w-[1000px] text-xs leading-snug">
+          <thead><tr>
+            <th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-red-300">CALL OI%</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-red-300">CALL OI</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-red-300">CALL VOL</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-red-300">CALL LTP</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-red-300">CALL COI</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-red-300">CALL COI%</th><th class="strike-header border border-slate-700 border-b-2 px-2 py-1.5 text-xs text-slate-300">STRIKE</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-emerald-300">PUT COI%</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-emerald-300">PUT COI</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-emerald-300">PUT LTP</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-emerald-300">PUT VOL</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-emerald-300">PUT OI</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-emerald-300">PUT OI%</th>
+          </tr></thead>
+          <tbody id="live-options-tbody"><tr><td colspan="13" class="px-2 py-4 text-xs leading-snug text-slate-500">Loading live option chain...</td></tr></tbody>
+        </table>
+      </div>
+      <div class="mt-2 flex justify-between text-xs text-slate-500"><span>ATM strike is highlighted in blue.</span><span id="live-synced">Waiting for data...</span></div>
+    </section>
+
+  </div>
+</section>
+
+<!-- SCALPER'S PLAYGROUND: standalone removable component -->
+<style>
+  .scalper-playground-trigger { animation: scalper-playground-pulse 2.4s ease-in-out infinite; }
+  @keyframes scalper-playground-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(34, 211, 238, .18); } 50% { box-shadow: 0 0 0 5px rgba(34, 211, 238, 0); } }
+  .scalper-playground-track { background: repeating-linear-gradient(90deg, rgba(148, 163, 184, .12) 0 1px, transparent 1px 24px); }
+  .scalper-playground-ball { animation: scalper-playground-bounce 3.2s ease-in-out infinite alternate; bottom: var(--scalper-ball-bottom, 46%); }
+  @keyframes scalper-playground-bounce { from { transform: translateY(0); } to { transform: translateY(var(--scalper-ball-travel, -100px)); } }
+</style>
+<div id="scalper-playground-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="scalper-playground-title">
+  <div class="w-full max-w-lg rounded-2xl border border-cyan-400/25 bg-ink-950 p-5 shadow-2xl shadow-cyan-950/40">
+    <div class="flex items-start justify-between gap-4">
+      <div><p class="text-[10px] uppercase tracking-[.24em] text-cyan-300">Action Zone</p><h2 id="scalper-playground-title" class="mt-1 font-display text-xl font-bold text-slate-50">Scalper's Playground</h2></div>
+      <button id="scalper-playground-close" type="button" class="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-300 transition hover:border-slate-500 hover:text-white" aria-label="Close Scalper's Playground">Close [X]</button>
+    </div>
+    <div class="scalper-playground-track relative mt-5 h-56 rounded-xl border border-slate-800 px-3 py-4">
+      <div class="absolute inset-x-3 top-3 flex items-center justify-between rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs font-semibold text-red-300"><span>CALL WALL</span><span id="scalper-call-wall">24400</span></div>
+      <div class="scalper-playground-ball absolute left-1/2 h-4 w-4 -translate-x-1/2 rounded-full bg-cyan-300 shadow-[0_0_16px_rgba(103,232,249,.9)]" style="--scalper-ball-travel: 120px;" aria-label="NIFTY spot"></div>
+      <div class="absolute inset-x-3 bottom-3 flex items-center justify-between rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-xs font-semibold text-emerald-300"><span>PUT WALL</span><span id="scalper-put-wall">24200</span></div>
+      <span class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[10px] uppercase tracking-[.18em] text-slate-600">NIFTY <span id="scalper-spot">--</span></span>
+    </div>
+    <div class="mt-4 rounded-xl border border-rose-400/25 bg-rose-400/5 p-3">
+      <div class="flex items-center justify-between text-xs"><span class="font-semibold text-rose-200">⏱ Charm / Vanna time risk</span><span id="scalper-decay-label" class="font-mono text-rose-300">Heavy decay</span></div>
+      <div class="mt-2 h-2 overflow-hidden rounded-full bg-slate-800"><div id="scalper-decay-bar" class="h-full w-full rounded-full bg-rose-400 transition-[width] duration-1000"></div></div>
+      <p class="mt-2 text-[10px] text-slate-500">Negative Charm can erode option premium while you wait.</p>
+    </div>
+    <div class="mt-4 rounded-xl border border-cyan-400/20 bg-cyan-400/5 p-3"><p class="text-[10px] uppercase tracking-[.18em] text-cyan-300">Scalping Signal</p><p id="scalper-signal" class="mt-1 text-sm font-semibold text-slate-100">Waiting for live spot...</p></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(() => {
+  const body = document.getElementById('live-options-tbody');
+  const synced = document.getElementById('live-synced');
+  const expiryFilter = document.getElementById('expiry-filter');
+  const alerts = document.getElementById('live-gamma-alerts');
+  const seenSignals = new Set();
+  let allRows = [], loadedExpiry = null, currentSpot = null, previousSignature = '', expiryInitialized = false;
+
+  const number = value => { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : 0; };
+  const fmt = value => value === null || value === undefined || value === '-' ? '-' : typeof value === 'number' ? value.toLocaleString('en-IN') : value;
+  const pct = value => value === null || value === undefined || value === '-' ? '-' : `${Number(value).toFixed(1)}%`;
+  const signedPct = value => `${value >= 0 ? '+' : ''}${Math.round(value)}%`;
+  const profileValue = (profile, ...keys) => keys.reduce((value, key) => value ?? profile?.[key], null) ?? '--';
+  const themes = { bullish: ['bg-green-900/30', 'text-green-400', 'border-green-700'], neutral: ['bg-yellow-900/30', 'text-yellow-400', 'border-yellow-700'], bearish: ['bg-red-900/30', 'text-red-400', 'border-red-700'] };
+  const GEX_NEUTRAL_THRESHOLD = 5000000000;
+
+  function netGexTier(value) {
+    const amount = Number(value);
+    if (!Number.isFinite(amount)) return { colorClass: 'text-slate-50', summary: '--' };
+    if (amount > GEX_NEUTRAL_THRESHOLD) return { colorClass: 'text-green-400', summary: '🟢 Positive Gamma: Stable Market / Buy Dips' };
+    if (amount < -GEX_NEUTRAL_THRESHOLD) return { colorClass: 'text-red-400', summary: '🔴 Negative Gamma: Volatile / Sell Rallies' };
+    return { colorClass: 'text-yellow-400', summary: '🟡 Range-bound: Choppy / Transition Zone' };
+  }
+
+  function updateSentiment(rows) {
+    let callOi = 0, putOi = 0, callCoi = 0, putCoi = 0;
+    rows.forEach(row => { callOi += number(row.call_oi); putOi += number(row.put_oi); callCoi += number(row.call_coi); putCoi += number(row.put_coi); });
+    const totalOi = callOi + putOi, bias = totalOi ? ((putOi - callOi) / totalOi) * 100 : 0;
+    const momentum = totalOi ? ((callCoi + putCoi) / totalOi) * 100 : 0;
+    const score = Math.max(0, Math.min(100, Math.round(50 + bias * .5 + momentum)));
+    const theme = score >= 65 ? 'bullish' : score <= 34 ? 'bearish' : 'neutral';
+    const explosive = Math.abs(momentum) > 10;
+    const label = Math.abs(momentum) < 5 ? 'Quiet' : Math.abs(momentum) <= 10 ? 'Healthy Trend' : 'EXPLOSIVE!';
+    const bar = document.getElementById('sentiment-bar');
+    Object.values(themes).flat().forEach(cls => bar.classList.remove(cls)); themes[theme].forEach(cls => bar.classList.add(cls));
+    document.getElementById('sentiment-bias').textContent = signedPct(bias);
+    document.getElementById('sentiment-momentum').textContent = signedPct(momentum);
+    const momentumEl = document.getElementById('sentiment-momentum-label'); momentumEl.textContent = `(${label})`; momentumEl.classList.toggle('font-bold', explosive); momentumEl.classList.toggle('text-orange-500', explosive);
+    document.getElementById('sentiment-score').textContent = `${score}/100`;
+    document.getElementById('sentiment-score-label').textContent = `(${theme === 'bullish' ? 'Strong Bullish' : theme === 'bearish' ? 'Danger / Strong Bearish' : 'Fair / Neutral Zone'})`;
+  }
+
+  function cell(text, classes) { const td = document.createElement('td'); td.className = classes; td.textContent = text; return td; }
+  function addDominanceBar(td, value, color) { const track = document.createElement('div'); track.className = 'dominance-track'; const fill = document.createElement('div'); fill.className = 'dominance-fill'; fill.style.width = `${Math.max(0, Math.min(100, number(value)))}%`; fill.style.background = color; track.appendChild(fill); td.appendChild(track); }
+  function buildRow(row) {
+    const tr = document.createElement('tr'); tr.className = 'border-t border-slate-700/70 hover:bg-slate-800/40 transition-colors';
+    const values = [pct(row.call_oi_pct), fmt(row.call_oi), fmt(row.call_volume), fmt(row.call_ltp), fmt(row.call_coi), pct(row.call_coi_pct), fmt(row.strike), pct(row.put_coi_pct), fmt(row.put_coi), fmt(row.put_ltp), fmt(row.put_volume), fmt(row.put_oi), pct(row.put_oi_pct)];
+    values.forEach((value, index) => {
+      let classes = 'border border-slate-700 px-2 py-1.5 text-xs leading-snug font-medium text-slate-200 whitespace-nowrap';
+      if ([3, 4, 8, 9].includes(index)) classes += ' font-semibold';
+      if (index === 6) classes += ' strike-cell font-bold';
+      if (index === 0 && number(row.call_oi_pct) > 55) classes += ' bg-red-900/40 text-red-300 font-bold';
+      if (index === 12 && number(row.put_oi_pct) > 55) classes += ' bg-green-900/40 text-green-300 font-bold';
+      if ([4, 5].includes(index) && number(row.call_coi) > 0) classes += ' text-green-300';
+      if ([4, 5].includes(index) && number(row.call_coi) < 0) classes += ' text-red-300';
+      if ([7, 8].includes(index) && number(row.put_coi) > 0) classes += ' text-green-300';
+      if ([7, 8].includes(index) && number(row.put_coi) < 0) classes += ' text-red-300';
+      const td = cell(value, classes);
+      if (index === 0) addDominanceBar(td, row.call_oi_pct, '#f87171');
+      if (index === 12) addDominanceBar(td, row.put_oi_pct, '#4ade80');
+      tr.appendChild(td);
+    });
+    return tr;
+  }
+
+  function renderRows() {
+    const selectedExpiry = expiryFilter.value;
+    const available = allRows
+      .filter(row => {
+        const rowExpiry = row.expiry || row.expiry_date;
+        return selectedExpiry === 'all' || !rowExpiry || rowExpiry === selectedExpiry;
+      })
+      .sort((left, right) => number(left.strike) - number(right.strike));
+
+    if (!available.length) {
+      body.replaceChildren();
+      const emptyRow = document.createElement('tr');
+      const emptyCell = cell('No strikes match the selected expiry.', 'px-2 py-4 text-xs leading-snug text-slate-500');
+      emptyCell.colSpan = 13;
+      emptyRow.appendChild(emptyCell);
+      body.appendChild(emptyRow);
+      return;
+    }
+
+    let atmIndex = Math.floor(available.length / 2);
+    if (Number.isFinite(currentSpot)) {
+      atmIndex = available.reduce((closestIndex, row, index) => {
+        const closestDistance = Math.abs(number(available[closestIndex].strike) - currentSpot);
+        const distance = Math.abs(number(row.strike) - currentSpot);
+        return distance < closestDistance ? index : closestIndex;
+      }, 0);
+    }
+
+    const start = Math.max(0, Math.min(atmIndex - 15, available.length - 31));
+    const filtered = available.slice(start, start + 31);
+    const signature = JSON.stringify(filtered);
+    if (signature === previousSignature) { highlightAtm(); return; }
+    previousSignature = signature; body.replaceChildren();
+    if (!filtered.length) { const tr = document.createElement('tr'); const td = cell('No strikes match the current filters.', 'px-2 py-4 text-xs leading-snug text-slate-500'); td.colSpan = 13; tr.appendChild(td); body.appendChild(tr); return; }
+    const fragment = document.createDocumentFragment(); filtered.forEach(row => fragment.appendChild(buildRow(row))); body.appendChild(fragment); highlightAtm();
+  }
+
+  function highlightAtm() { if (!Number.isFinite(currentSpot)) return; let closest = null, distance = Infinity; body.querySelectorAll('tr').forEach(row => { const strike = number(row.children[6]?.textContent); const diff = Math.abs(strike - currentSpot); if (Number.isFinite(strike) && diff < distance) { distance = diff; closest = row; } row.classList.remove('atm-row'); }); if (closest) closest.classList.add('atm-row'); }
+  function exposureColor(element, value) { const amount = Number(value); element.classList.remove('text-green-400', 'text-red-400', 'text-slate-200'); element.classList.add(Number.isFinite(amount) && amount > 0 ? 'text-green-400' : Number.isFinite(amount) && amount < 0 ? 'text-red-400' : 'text-slate-200'); }
+  function renderProfile(profile) { if (!profile || typeof profile !== 'object') return; const spot = profileValue(profile, 'spot', 'Spot', 'spot_price'); const weekly = profile.weekly_gamma || profile; const day = profile.day_gamma || {}; currentSpot = Number(spot); document.getElementById('live-spot').textContent = fmt(spot); document.getElementById('live-expiry').textContent = `Expiry ${profile.expiry || '--'}`; [['weekly', weekly], ['day', day]].forEach(([prefix, metrics]) => { const netGex = profileValue(metrics, 'net_gex', 'netGEX', 'net_gex_value'); const gexTier = netGexTier(netGex); document.getElementById(`${prefix}-pcr`).textContent = fmt(profileValue(metrics, 'pcr', 'PCR')); document.getElementById(`${prefix}-gamma-flip`).textContent = fmt(profileValue(metrics, 'gamma_flip_level', 'gamma_flip', 'gammaFlip', 'gamma_flip_value')); document.getElementById(`${prefix}-call-wall`).textContent = fmt(metrics.call_wall ?? metrics.call_wall_strike); document.getElementById(`${prefix}-put-wall`).textContent = fmt(metrics.put_wall ?? metrics.put_wall_strike); const charmElement = document.getElementById(`${prefix}-net-charm`); const vannaElement = document.getElementById(`${prefix}-net-vanna`); charmElement.textContent = fmt(metrics.net_charm); vannaElement.textContent = fmt(metrics.net_vanna); exposureColor(charmElement, metrics.net_charm); exposureColor(vannaElement, metrics.net_vanna); const gexElement = document.getElementById(`${prefix}-net-gex`); const summaryElement = document.getElementById(`${prefix}-net-gex-summary`); gexElement.textContent = fmt(netGex); gexElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); gexElement.classList.add(gexTier.colorClass); summaryElement.textContent = gexTier.summary; summaryElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-400'); summaryElement.classList.add(gexTier.colorClass); }); renderRows(); }
+  function renderSignal(signal) { if (signal == null) return; const text = typeof signal === 'string' ? signal : signal.message || JSON.stringify(signal); if (seenSignals.has(text)) return; seenSignals.add(text); if (alerts.querySelector('p')) alerts.replaceChildren(); const item = document.createElement('div'); item.className = 'rounded-xl border border-neon-blue/20 bg-ink-900/90 p-3'; const timestamp = typeof signal === 'object' && signal.timestamp ? new Date(signal.timestamp).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }) : new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }); item.textContent = `${timestamp}  ${text}`; alerts.prepend(item); while (alerts.children.length > 8) alerts.lastChild.remove(); }
+
+  async function refreshOptions() { try { const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); loadedExpiry = data.expiry_date || null; allRows = Array.isArray(data.option_chain) ? data.option_chain.sort((a, b) => number(a.strike) - number(b.strike)) : []; populateExpiry(); updateSentiment(allRows); renderRows(); synced.textContent = `Synced ${new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })}`; } catch (error) { console.warn('Option-chain fetch failed:', error); } }
+  async function refreshGamma() { try { const response = await fetch('/gamma/status/', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); const status = data?.status || data; if (status?.last_profile) renderProfile(status.last_profile); if (Array.isArray(status?.gamma_alerts)) status.gamma_alerts.forEach(renderSignal); if (status?.last_signal != null) renderSignal(status.last_signal); } catch (error) { console.warn('Gamma status fetch failed:', error); } }
+
+  function populateExpiry() {
+    const selected = expiryFilter.value;
+    const expiries = [...new Set([
+      loadedExpiry,
+      ...allRows.map(row => row.expiry || row.expiry_date),
+    ].filter(Boolean).map(String))].sort();
+
+    expiryFilter.replaceChildren(new Option('All loaded expiries', 'all'));
+    expiries.forEach(expiry => expiryFilter.appendChild(new Option(expiry, expiry)));
+
+    const preferredExpiry = !expiryInitialized && expiries.includes(String(loadedExpiry))
+      ? String(loadedExpiry)
+      : selected;
+    expiryFilter.value = expiries.includes(preferredExpiry) ? preferredExpiry : 'all';
+    expiryInitialized = true;
+  }
+  function refreshFilters() { renderRows(); }
+  expiryFilter.addEventListener('change', refreshFilters);
+  refreshOptions(); refreshGamma(); setInterval(refreshOptions, 1000); setInterval(refreshGamma, 2000);
+
+  // SCALPER'S PLAYGROUND: standalone removable interaction.
+  const scalperModal = document.getElementById('scalper-playground-modal');
+  const scalperOpen = document.getElementById('scalper-playground-open');
+  const scalperClose = document.getElementById('scalper-playground-close');
+  let scalperDecay = 100;
+  function updateScalperPlayground() {
+    const spot = number(document.getElementById('live-spot')?.textContent);
+    const callWall = number(document.getElementById('weekly-call-wall')?.textContent) || 24400;
+    const putWall = number(document.getElementById('weekly-put-wall')?.textContent) || 24200;
+    document.getElementById('scalper-call-wall').textContent = fmt(callWall);
+    document.getElementById('scalper-put-wall').textContent = fmt(putWall);
+    document.getElementById('scalper-spot').textContent = spot ? fmt(spot) : '--';
+    const signal = document.getElementById('scalper-signal');
+    if (!spot) signal.textContent = 'Waiting for live spot...';
+    else if (Math.abs(spot - putWall) <= 50) signal.textContent = 'Spot near Support - Quick CE Scalp';
+    else if (Math.abs(spot - callWall) <= 50) signal.textContent = 'Spot near Resistance - Quick PE Scalp';
+    else signal.textContent = 'Spot between walls - Wait for a clean setup';
+  }
+  function closeScalperPlayground() { scalperModal.classList.add('hidden'); scalperModal.classList.remove('flex'); }
+  scalperOpen.addEventListener('click', () => { updateScalperPlayground(); scalperModal.classList.remove('hidden'); scalperModal.classList.add('flex'); scalperClose.focus(); });
+  scalperClose.addEventListener('click', closeScalperPlayground);
+  scalperModal.addEventListener('click', event => { if (event.target === scalperModal) closeScalperPlayground(); });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && !scalperModal.classList.contains('hidden')) closeScalperPlayground(); });
+  setInterval(() => { if (!scalperModal.classList.contains('hidden')) { scalperDecay = scalperDecay <= 8 ? 100 : scalperDecay - 1; document.getElementById('scalper-decay-bar').style.width = `${scalperDecay}%`; updateScalperPlayground(); } }, 1000);
+})();
+</script>
+{% endblock %}
