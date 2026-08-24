@@ -1,3 +1,4 @@
+import asyncio
 import os
 import threading
 
@@ -25,25 +26,25 @@ class SwingMlConfig(AppConfig):
         self.scheduler = scheduler
         print('🟢 Swing_ML scheduler started')
 
-        self._start_sepa_websocket_engine()
+        self._start_sepa_rest_collector()
 
-    def _start_sepa_websocket_engine(self):
+    def _start_sepa_rest_collector(self):
         if getattr(self, 'collector_thread', None) is not None:
             return
 
         try:
             from .ml_stockdata_collector import main as collector_main
         except Exception as exc:
-            print(f'❌ Failed to import SEPA websocket collector: {exc}')
+            print(f'❌ Failed to import SEPA REST snapshot collector: {exc}')
             return
 
         def run_collector() -> None:
             try:
-                collector_main()
+                asyncio.run(collector_main())
             except Exception as exc:
-                print(f'❌ SEPA websocket collector failed: {exc}')
+                print(f'❌ SEPA REST snapshot collector failed: {exc}')
 
-        thread = threading.Thread(target=run_collector, name='SEPAWebSocketCollector', daemon=True)
+        thread = threading.Thread(target=run_collector, name='SEPARestSnapshotCollector', daemon=True)
         thread.start()
         self.collector_thread = thread
-        print('🟢 Live Upstox WebSocket Engine Started for SEPA Stocks')
+        print('🟢 Upstox REST snapshot collector started for SEPA stocks (5-minute interval)')

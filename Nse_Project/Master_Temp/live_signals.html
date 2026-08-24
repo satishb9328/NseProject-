@@ -22,14 +22,16 @@
 <section class="relative overflow-hidden rounded-3xl glass px-6 py-1 sm:px-10 lg:py-1">
   <div class="pointer-events-none absolute inset-0 bg-grid opacity-60"></div>
   <div class="relative">
-    <p class="float-right text-[10px] uppercase tracking-[.3em] text-neon-green">Live Signals</p>
-    <h1 class="mt-1 font-display text-lg font-bold text-slate-50">Gamma Intelligence</h1>
-
-    <section id="gamma-snapshot" class="mt-1 border-y border-ink-700/60 py-1">
-      <div class="mb-3 flex items-center justify-between gap-3 text-xs">
-        <span class="uppercase tracking-wider text-slate-500">SPOT</span><span id="live-spot" class="font-mono font-semibold text-slate-50">--</span>
-        <span id="live-expiry" class="ml-auto font-mono text-slate-500">Expiry --</span>
+    <div class="flex items-center justify-between w-full mb-3 gap-4">
+      <div class="text-xl font-bold text-slate-50">Gamma Intelligence</div>
+      <div class="flex items-center gap-8 text-sm font-semibold text-slate-300">
+        <span>SPOT: <span id="live-spot" class="text-white font-mono">--</span></span>
+        <span>Expiry: <span id="live-expiry" class="text-white font-mono">--</span></span>
       </div>
+      <div class="text-sm font-bold text-neon-green uppercase tracking-[.3em]">Live Signals</div>
+    </div>
+
+    <section id="gamma-snapshot" class="mt-0">
       <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
         <div class="rounded-xl border border-sky-500/30 bg-sky-950/20 p-3">
           <div class="mb-1 flex items-center justify-between"><h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-sky-300">NIFTY WEEKLY GAMMA</h2><span class="text-[10px] uppercase tracking-wider text-slate-500">Total OI</span></div>
@@ -54,13 +56,11 @@
           <p id="day-net-gex-summary" class="mt-2 text-[11px] font-medium text-slate-400">--</p>
         </div>
       </div>
-      <div class="mt-2 border-t border-ink-800/70 pt-2">
-        <div class="flex items-center gap-2 text-[10px] uppercase tracking-[.18em] text-neon-violet"><span>Live Gamma Options Signals</span><span class="text-slate-700">|</span><span class="text-slate-600">stream</span></div>
-        <div id="live-gamma-alerts" class="gamma-alert-feed mt-1 h-8 overflow-y-auto text-xs leading-5 text-slate-300"><p class="text-slate-500">Waiting for gamma status updates...</p></div>
-      </div>
     </section>
 
-    <section id="option-chain" class="mt-6">
+    <div class="flex w-full flex-col items-start gap-4 mt-4 lg:flex-row">
+      <div class="min-w-0 flex-grow overflow-x-auto">
+    <section id="option-chain" class="mt-0">
       <div id="sentiment-bar" class="sentiment-bar mb-0 flex items-center justify-between gap-3 rounded-xl border border-yellow-700 bg-yellow-900/30 px-3 py-2 text-sm font-semibold text-yellow-400">
         <div class="flex flex-wrap items-center gap-1">
           <span class="font-bold">📊 LIVE SENTIMENT</span><span class="opacity-60"> | </span><span>BIAS: <span id="sentiment-bias">+0%</span></span><span class="opacity-60"> | </span><span>MOMENTUM: <span id="sentiment-momentum">0%</span> <span id="sentiment-momentum-label">(Quiet)</span></span><span class="opacity-60"> | </span><span>SCORE: <span id="sentiment-score">50/100</span> <span id="sentiment-score-label">(Fair / Neutral Zone)</span></span>
@@ -69,16 +69,29 @@
         <button id="scalper-playground-open" type="button" class="scalper-playground-trigger shrink-0 rounded-lg border border-cyan-400/50 bg-cyan-400/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-200 transition hover:bg-cyan-400/20" aria-haspopup="dialog" aria-controls="scalper-playground-modal">🎮 Scalper's Playground</button>
       </div>
 
-      <div class="overflow-x-auto rounded-2xl glass">
+      <div class="rounded-2xl glass">
         <table id="option-chain-table" class="option-chain-table min-w-[1000px] text-xs leading-snug">
           <thead><tr>
-            <th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-red-300">CALL OI%</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-red-300">CALL OI</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-red-300">CALL VOL</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-red-300">CALL LTP</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-red-300">CALL COI</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-red-300">CALL COI%</th><th class="strike-header border border-slate-700 border-b-2 px-2 py-1.5 text-xs text-slate-300">STRIKE</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-emerald-300">PUT COI%</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-emerald-300">PUT COI</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-emerald-300">PUT LTP</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-emerald-300">PUT VOL</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-emerald-300">PUT OI</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1.5 text-xs text-emerald-300">PUT OI%</th>
+            <th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL OI%</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL OI</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL VOL</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL LTP</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL COI</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL COI%</th><th class="strike-header border border-slate-700 border-b-2 px-2 py-1 text-xs text-slate-300">STRIKE</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT COI%</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT COI</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT LTP</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT VOL</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT OI</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT OI%</th>
           </tr></thead>
-          <tbody id="live-options-tbody"><tr><td colspan="13" class="px-2 py-4 text-xs leading-snug text-slate-500">Loading live option chain...</td></tr></tbody>
+          <tbody id="live-options-tbody"><tr><td colspan="13" class="px-2 py-2 text-xs leading-snug text-slate-500">Loading live option chain...</td></tr></tbody>
         </table>
       </div>
       <div class="mt-2 flex justify-between text-xs text-slate-500"><span>ATM strike is highlighted in blue.</span><span id="live-synced">Waiting for data...</span></div>
     </section>
+      </div>
+
+      <aside class="flex w-80 flex-shrink-0 flex-col gap-4 lg:sticky lg:top-3" aria-label="Gamma signals terminal">
+        <section class="rounded-xl border border-slate-700 bg-gray-900/90 p-3 shadow-card">
+          <h2 class="border-b border-slate-700 pb-2 text-[11px] font-bold uppercase tracking-[.18em] text-amber-300">Daily Gamma Signals</h2>
+          <div id="daily-signals-stream" class="gamma-alert-feed mt-2 max-h-64 space-y-2 overflow-y-auto text-xs leading-5 text-slate-300"><p class="text-slate-500">Waiting for daily signals...</p></div>
+        </section>
+        <section class="rounded-xl border border-slate-700 bg-gray-900/90 p-3 shadow-card">
+          <h2 class="border-b border-slate-700 pb-2 text-[11px] font-bold uppercase tracking-[.18em] text-sky-300">Weekly Gamma Signals</h2>
+          <div id="weekly-signals-stream" class="gamma-alert-feed mt-2 max-h-64 space-y-2 overflow-y-auto text-xs leading-5 text-slate-300"><p class="text-slate-500">Waiting for weekly signals...</p></div>
+        </section>
+      </aside>
+    </div>
 
   </div>
 </section>
@@ -119,7 +132,7 @@
   const body = document.getElementById('live-options-tbody');
   const synced = document.getElementById('live-synced');
   const expiryFilter = document.getElementById('expiry-filter');
-  const alerts = document.getElementById('live-gamma-alerts');
+  const signalStreams = { weekly: document.getElementById('weekly-signals-stream'), daily: document.getElementById('daily-signals-stream') };
   const seenSignals = new Set();
   let allRows = [], loadedExpiry = null, currentSpot = null, previousSignature = '', expiryInitialized = false;
 
@@ -163,7 +176,7 @@
     const tr = document.createElement('tr'); tr.className = 'border-t border-slate-700/70 hover:bg-slate-800/40 transition-colors';
     const values = [pct(row.call_oi_pct), fmt(row.call_oi), fmt(row.call_volume), fmt(row.call_ltp), fmt(row.call_coi), pct(row.call_coi_pct), fmt(row.strike), pct(row.put_coi_pct), fmt(row.put_coi), fmt(row.put_ltp), fmt(row.put_volume), fmt(row.put_oi), pct(row.put_oi_pct)];
     values.forEach((value, index) => {
-      let classes = 'border border-slate-700 px-2 py-1.5 text-xs leading-snug font-medium text-slate-200 whitespace-nowrap';
+      let classes = 'border border-slate-700 px-2 py-1 text-xs leading-snug font-medium text-slate-200 whitespace-nowrap';
       if ([3, 4, 8, 9].includes(index)) classes += ' font-semibold';
       if (index === 6) classes += ' strike-cell font-bold';
       if (index === 0 && number(row.call_oi_pct) > 55) classes += ' bg-red-900/40 text-red-300 font-bold';
@@ -192,7 +205,7 @@
     if (!available.length) {
       body.replaceChildren();
       const emptyRow = document.createElement('tr');
-      const emptyCell = cell('No strikes match the selected expiry.', 'px-2 py-4 text-xs leading-snug text-slate-500');
+      const emptyCell = cell('No strikes match the selected expiry.', 'px-2 py-2 text-xs leading-snug text-slate-500');
       emptyCell.colSpan = 13;
       emptyRow.appendChild(emptyCell);
       body.appendChild(emptyRow);
@@ -213,14 +226,14 @@
     const signature = JSON.stringify(filtered);
     if (signature === previousSignature) { highlightAtm(); return; }
     previousSignature = signature; body.replaceChildren();
-    if (!filtered.length) { const tr = document.createElement('tr'); const td = cell('No strikes match the current filters.', 'px-2 py-4 text-xs leading-snug text-slate-500'); td.colSpan = 13; tr.appendChild(td); body.appendChild(tr); return; }
+    if (!filtered.length) { const tr = document.createElement('tr'); const td = cell('No strikes match the current filters.', 'px-2 py-2 text-xs leading-snug text-slate-500'); td.colSpan = 13; tr.appendChild(td); body.appendChild(tr); return; }
     const fragment = document.createDocumentFragment(); filtered.forEach(row => fragment.appendChild(buildRow(row))); body.appendChild(fragment); highlightAtm();
   }
 
   function highlightAtm() { if (!Number.isFinite(currentSpot)) return; let closest = null, distance = Infinity; body.querySelectorAll('tr').forEach(row => { const strike = number(row.children[6]?.textContent); const diff = Math.abs(strike - currentSpot); if (Number.isFinite(strike) && diff < distance) { distance = diff; closest = row; } row.classList.remove('atm-row'); }); if (closest) closest.classList.add('atm-row'); }
   function exposureColor(element, value) { const amount = Number(value); element.classList.remove('text-green-400', 'text-red-400', 'text-slate-200'); element.classList.add(Number.isFinite(amount) && amount > 0 ? 'text-green-400' : Number.isFinite(amount) && amount < 0 ? 'text-red-400' : 'text-slate-200'); }
-  function renderProfile(profile) { if (!profile || typeof profile !== 'object') return; const spot = profileValue(profile, 'spot', 'Spot', 'spot_price'); const weekly = profile.weekly_gamma || profile; const day = profile.day_gamma || {}; currentSpot = Number(spot); document.getElementById('live-spot').textContent = fmt(spot); document.getElementById('live-expiry').textContent = `Expiry ${profile.expiry || '--'}`; [['weekly', weekly], ['day', day]].forEach(([prefix, metrics]) => { const netGex = profileValue(metrics, 'net_gex', 'netGEX', 'net_gex_value'); const gexTier = netGexTier(netGex); document.getElementById(`${prefix}-pcr`).textContent = fmt(profileValue(metrics, 'pcr', 'PCR')); document.getElementById(`${prefix}-gamma-flip`).textContent = fmt(profileValue(metrics, 'gamma_flip_level', 'gamma_flip', 'gammaFlip', 'gamma_flip_value')); document.getElementById(`${prefix}-call-wall`).textContent = fmt(metrics.call_wall ?? metrics.call_wall_strike); document.getElementById(`${prefix}-put-wall`).textContent = fmt(metrics.put_wall ?? metrics.put_wall_strike); const charmElement = document.getElementById(`${prefix}-net-charm`); const vannaElement = document.getElementById(`${prefix}-net-vanna`); charmElement.textContent = fmt(metrics.net_charm); vannaElement.textContent = fmt(metrics.net_vanna); exposureColor(charmElement, metrics.net_charm); exposureColor(vannaElement, metrics.net_vanna); const gexElement = document.getElementById(`${prefix}-net-gex`); const summaryElement = document.getElementById(`${prefix}-net-gex-summary`); gexElement.textContent = fmt(netGex); gexElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); gexElement.classList.add(gexTier.colorClass); summaryElement.textContent = gexTier.summary; summaryElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-400'); summaryElement.classList.add(gexTier.colorClass); }); renderRows(); }
-  function renderSignal(signal) { if (signal == null) return; const text = typeof signal === 'string' ? signal : signal.message || JSON.stringify(signal); if (seenSignals.has(text)) return; seenSignals.add(text); if (alerts.querySelector('p')) alerts.replaceChildren(); const item = document.createElement('div'); item.className = 'rounded-xl border border-neon-blue/20 bg-ink-900/90 p-3'; const timestamp = typeof signal === 'object' && signal.timestamp ? new Date(signal.timestamp).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }) : new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }); item.textContent = `${timestamp}  ${text}`; alerts.prepend(item); while (alerts.children.length > 8) alerts.lastChild.remove(); }
+  function renderProfile(profile) { if (!profile || typeof profile !== 'object') return; const spot = profileValue(profile, 'spot', 'Spot', 'spot_price'); const weekly = profile.weekly_gamma || profile; const day = profile.day_gamma || {}; currentSpot = Number(spot); document.getElementById('live-spot').textContent = fmt(spot); document.getElementById('live-expiry').textContent = profile.expiry || '--'; [['weekly', weekly], ['day', day]].forEach(([prefix, metrics]) => { const netGex = profileValue(metrics, 'net_gex', 'netGEX', 'net_gex_value'); const gexTier = netGexTier(netGex); document.getElementById(`${prefix}-pcr`).textContent = fmt(profileValue(metrics, 'pcr', 'PCR')); document.getElementById(`${prefix}-gamma-flip`).textContent = fmt(profileValue(metrics, 'gamma_flip_level', 'gamma_flip', 'gammaFlip', 'gamma_flip_value')); document.getElementById(`${prefix}-call-wall`).textContent = fmt(metrics.call_wall ?? metrics.call_wall_strike); document.getElementById(`${prefix}-put-wall`).textContent = fmt(metrics.put_wall ?? metrics.put_wall_strike); const charmElement = document.getElementById(`${prefix}-net-charm`); const vannaElement = document.getElementById(`${prefix}-net-vanna`); charmElement.textContent = fmt(metrics.net_charm); vannaElement.textContent = fmt(metrics.net_vanna); exposureColor(charmElement, metrics.net_charm); exposureColor(vannaElement, metrics.net_vanna); const gexElement = document.getElementById(`${prefix}-net-gex`); const summaryElement = document.getElementById(`${prefix}-net-gex-summary`); gexElement.textContent = fmt(netGex); gexElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); gexElement.classList.add(gexTier.colorClass); summaryElement.textContent = gexTier.summary; summaryElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-400'); summaryElement.classList.add(gexTier.colorClass); }); renderRows(); }
+  function renderSignal(signal) { if (signal == null) return; const text = typeof signal === 'string' ? signal : signal.message || JSON.stringify(signal); if (seenSignals.has(text)) return; seenSignals.add(text); const stream = /weekly|macro/i.test(text) ? signalStreams.weekly : signalStreams.daily; if (!stream) return; if (stream.querySelector('p')) stream.replaceChildren(); const item = document.createElement('div'); item.className = 'rounded-lg border border-slate-700/80 bg-ink-800/80 p-2'; const timestamp = typeof signal === 'object' && signal.timestamp ? new Date(signal.timestamp).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }) : new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }); item.textContent = `${timestamp}  ${text}`; stream.prepend(item); while (stream.children.length > 8) stream.lastChild.remove(); }
 
   async function refreshOptions() { try { const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); loadedExpiry = data.expiry_date || null; allRows = Array.isArray(data.option_chain) ? data.option_chain.sort((a, b) => number(a.strike) - number(b.strike)) : []; populateExpiry(); updateSentiment(allRows); renderRows(); synced.textContent = `Synced ${new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })}`; } catch (error) { console.warn('Option-chain fetch failed:', error); } }
   async function refreshGamma() { try { const response = await fetch('/gamma/status/', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); const status = data?.status || data; if (status?.last_profile) renderProfile(status.last_profile); if (Array.isArray(status?.gamma_alerts)) status.gamma_alerts.forEach(renderSignal); if (status?.last_signal != null) renderSignal(status.last_signal); } catch (error) { console.warn('Gamma status fetch failed:', error); } }

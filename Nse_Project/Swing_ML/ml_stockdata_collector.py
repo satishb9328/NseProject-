@@ -14,8 +14,6 @@ import pandas as pd
 import requests
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
-from upstox_client import ApiClient, Configuration
-from upstox_client.feeder.market_data_streamer_v3 import MarketDataStreamerV3
 
 try:
     from Nse_Project.Swing_stocks.combo_filter import filter_combo_setups
@@ -30,6 +28,8 @@ TOKEN_DIR = PROJECT_ROOT / 'Brokers' / 'upstox'
 TOKEN_FILE_PATHS = [
     TOKEN_DIR / 'upstox' / 'upstox_token.json',
     TOKEN_DIR / 'upstox_v3_token.json',
+    TOKEN_DIR / 'upstox_login_details.json',
+    PROJECT_ROOT.parent / 'upstox' / 'upstox_token.json',
 ]
 LOG_FORMAT = '%(asctime)s | %(levelname)-8s | %(message)s'
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, datefmt='%Y-%m-%d %H:%M:%S')
@@ -45,6 +45,11 @@ MAX_ALERTS = 50
 SWING_SEPA_GROUP = "swing_sepa_updates"
 STRONG_SEPA_CSV = SWING_STOCKS_DIR / "nifty200_smc_precision_screen.csv"
 STRONG_SEPA_FIELDS = ("symbol", "rs_vs_index", "vcp", "proximity", "smc_signal", "score")
+
+# REST snapshot polling configuration (replaces the MarketDataStreamerV3 WebSocket feed).
+UPSTOX_QUOTE_URL = "https://api.upstox.com/v2/market-quote/quotes"
+SNAPSHOT_INTERVAL_SECONDS = 300
+QUOTE_REQUEST_TIMEOUT = 15
 
 
 def save_combo_context(categories: dict) -> None:
@@ -122,20 +127,32 @@ def log_health_check() -> None:
 
 
 def load_access_token() -> str | None:
+    # Multiple token files exist on disk and are not always kept in sync, so the
+    # first-found file may hold a stale/expired token. Pick whichever candidate
+    # was written most recently instead of trusting TOKEN_FILE_PATHS order.
+    candidates: list[tuple[float, Path, str]] = []
     for path in TOKEN_FILE_PATHS:
-        if path.exists():
-            try:
-                with path.open('r', encoding='utf-8') as fh:
-                    data = json.load(fh)
-                token = data.get('access_token')
-                if token:
-                    logger.info(f"Loaded Upstox token from {path}")
-                    return token
+        if not path.exists():
+            continue
+        try:
+            with path.open('r', encoding='utf-8') as fh:
+                data = json.load(fh)
+            token = data.get('access_token')
+            if token:
+                candidates.append((path.stat().st_mtime, path, token))
+            else:
                 logger.warning(f"Token file exists but access_token missing: {path}")
-            except Exception as exc:
-                logger.warning(f"Failed to read token file {path}: {exc}")
-    logger.error('No valid Upstox token found.')
-    return None
+        except Exception as exc:
+            logger.warning(f"Failed to read token file {path}: {exc}")
+
+    if not candidates:
+        logger.error('No valid Upstox token found.')
+        return None
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    newest_mtime, newest_path, newest_token = candidates[0]
+    logger.info(f"Loaded Upstox token from {newest_path} (most recently updated).")
+    return newest_token
 
 
 def load_alerts() -> list[dict]:
@@ -258,63 +275,6 @@ def get_upstox_instrument_map() -> dict[str, str]:
     return instrument_dict
 
 
-def flatten_payload(payload, prefix=''):
-    flattened = {}
-    if isinstance(payload, dict):
-        for key, value in payload.items():
-            full_key = f"{prefix}.{key}" if prefix else str(key)
-            flattened.update(flatten_payload(value, full_key))
-    elif isinstance(payload, list):
-        for index, value in enumerate(payload):
-            full_key = f"{prefix}[{index}]" if prefix else str(index)
-            flattened.update(flatten_payload(value, full_key))
-    else:
-        flattened[prefix] = payload
-    return flattened
-
-
-def extract_symbol_and_volume(message: object) -> tuple[str | None, float | None, float | None, float | None, float | None, float | None]:
-    if message is None:
-        return None, None, None, None, None, None
-
-    if isinstance(message, str):
-        try:
-            message = json.loads(message)
-        except Exception:
-            return None, None, None, None, None, None
-
-    flattened = flatten_payload(message)
-    symbol = None
-    volume = None
-    ltp = None
-    ltq = None
-    bid = None
-    ask = None
-
-    for key, value in flattened.items():
-        key_lower = str(key).lower()
-        if symbol is None and any(token in key_lower for token in ['tradingsymbol', 'symbol', 'instrument', 'instrumentkey']):
-            if isinstance(value, str) and value.strip():
-                symbol = value.strip().upper()
-        if volume is None and ('volume' in key_lower or 'tradedvolume' in key_lower or key_lower.endswith('qty')):
-            if isinstance(value, (int, float)):
-                volume = float(value)
-        if ltp is None and any(token in key_lower for token in ['lasttradedprice', 'ltp', 'lastprice', 'price']):
-            if isinstance(value, (int, float)):
-                ltp = float(value)
-        if ltq is None and any(token in key_lower for token in ['lasttradedqty', 'ltq', 'quantity', 'qty']):
-            if isinstance(value, (int, float)):
-                ltq = float(value)
-        if bid is None and ('bestbid' in key_lower or 'bidprice' in key_lower or key_lower == 'bid'):
-            if isinstance(value, (int, float)):
-                bid = float(value)
-        if ask is None and ('bestask' in key_lower or 'askprice' in key_lower or key_lower == 'ask'):
-            if isinstance(value, (int, float)):
-                ask = float(value)
-
-    return symbol, volume, ltp, ltq, bid, ask
-
-
 class SwingMLStockDataCollector:
     def __init__(self):
         self.strong_sepa_symbols = load_strong_sepa_symbols()
@@ -322,6 +282,8 @@ class SwingMLStockDataCollector:
         self.volume_history: dict[str, deque[float]] = {}
         self.ofi_history: dict[str, deque[dict]] = {}
         self.ofi_sums: dict[str, dict[str, float]] = {}
+        self.last_volume: dict[str, float] = {}
+        self.key_to_symbol: dict[str, str] = {}
 
     def get_subscribe_keys(self) -> list[str]:
         if not self.strong_sepa_symbols:
@@ -330,10 +292,13 @@ class SwingMLStockDataCollector:
 
         result = []
         missing = []
+        self.key_to_symbol = {}
         for symbol in self.strong_sepa_symbols:
             key = self.instrument_map.get(symbol)
             if key:
-                result.append(str(key))
+                key = str(key)
+                result.append(key)
+                self.key_to_symbol[key] = symbol
             else:
                 missing.append(symbol)
 
@@ -388,83 +353,89 @@ class SwingMLStockDataCollector:
             return None
         return (sums['buy'] - sums['sell']) / (sums['total'] + 1)
 
-    def build_streamer(self, token: str, instrument_keys: list[str], loop: asyncio.AbstractEventLoop) -> MarketDataStreamerV3:
-        config = Configuration()
-        config.access_token = token
-        api_client = ApiClient(configuration=config)
+    def fetch_quotes(self, token: str, instrument_keys: list[str]) -> dict:
+        """Blocking call to the Upstox Market Quote REST API (run off the event loop thread)."""
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Accept': 'application/json',
+        }
+        params = {'instrument_key': ','.join(instrument_keys)}
+        response = requests.get(UPSTOX_QUOTE_URL, headers=headers, params=params, timeout=QUOTE_REQUEST_TIMEOUT)
+        response.raise_for_status()
+        payload = response.json()
+        return payload.get('data', {}) or {}
 
-        streamer = MarketDataStreamerV3(
-            api_client=api_client,
-            instrumentKeys=instrument_keys,
-            mode=MarketDataStreamerV3.Mode['FULL'],
-        )
+    def process_quote(self, symbol: str, quote: dict) -> None:
+        ltp = quote.get('last_price')
+        volume = quote.get('volume')
+        depth = quote.get('depth') or {}
+        buy_levels = depth.get('buy') or []
+        sell_levels = depth.get('sell') or []
+        bid = buy_levels[0].get('price') if buy_levels else None
+        ask = sell_levels[0].get('price') if sell_levels else None
 
-        def on_open(*args):
-            logger.info('✅ Upstox feed socket opened.')
-            if not instrument_keys:
-                logger.error('❌ No instrument keys available to subscribe.')
-                return
+        if ltp is None or volume is None:
+            logger.debug(f'Quote for {symbol} missing last_price or volume, skipping.')
+            return
+
+        ltp = float(ltp)
+        volume = float(volume)
+
+        # Upstox quotes report cumulative day volume, so the delta since the last
+        # snapshot approximates the traded quantity over the 5-minute window.
+        last_volume = self.last_volume.get(symbol)
+        self.last_volume[symbol] = volume
+        ltq = max(volume - last_volume, 0.0) if last_volume is not None else None
+
+        ofi_ratio = self.update_ofi(symbol, ltp, ltq, bid, ask)
+
+        if self.detect_volume_spike(symbol, volume):
+            alert_suffix = ''
+            ofi_status = None
+            if ofi_ratio is not None:
+                if ofi_ratio > 0.3:
+                    alert_suffix = ' 🟢 REAL BREAKOUT: Volume Spike + Massive Buying'
+                    ofi_status = 'REAL_BREAKOUT'
+                elif ofi_ratio < -0.2:
+                    alert_suffix = ' 🔴 FAKEOUT ALERT: Volume Spike but Sellers Dominate'
+                    ofi_status = 'FAKEOUT'
+                else:
+                    alert_suffix = ' ⚪ Volume Spike with mixed order flow'
+                    ofi_status = 'NEUTRAL'
+
+            alert_msg = f"🚀 VOLUME SPIKE DETECTED in {symbol} - Possible PERFECT COMBO Entry Triggered!{alert_suffix}"
+            logger.warning(alert_msg)
+
+            if ofi_status == 'REAL_BREAKOUT' and ltp > 0:
+                qty = int(RISK_PER_TRADE / ltp)
+                if qty <= 0:
+                    logger.warning(f'⚠️ Computed zero quantity for {symbol} at LTP {ltp}')
+                if AUTO_TRADE_ENABLED:
+                    place_auto_buy_order(symbol, qty, ltp)
+                    exec_msg = f"🟢 [REAL TRADE] Placed Market BUY for {qty} shares of {symbol}"
+                    logger.info(exec_msg)
+                    append_alert(symbol, exec_msg, ofi_ratio=ofi_ratio, ofi_status='REAL_TRADE')
+                else:
+                    exec_msg = f"🟢 [PAPER TRADE] Would have bought {qty} shares of {symbol} at {ltp}"
+                    logger.info(exec_msg)
+                    append_alert(symbol, exec_msg, ofi_ratio=ofi_ratio, ofi_status='PAPER_TRADE')
+
+            append_alert(symbol, alert_msg, ofi_ratio=ofi_ratio, ofi_status=ofi_status)
+
+    def process_snapshot(self, data: dict) -> None:
+        # Upstox keys the response by "EXCHANGE:SYMBOL" rather than instrument_key,
+        # so match quotes back to our symbols via each quote's own instrument_token field.
+        for quote in data.values():
+            if not isinstance(quote, dict):
+                continue
+            key = str(quote.get('instrument_token') or '')
+            symbol = self.key_to_symbol.get(key)
+            if symbol is None:
+                continue
             try:
-                streamer.subscribe(instrument_keys, mode=MarketDataStreamerV3.Mode['FULL'])
-                logger.info(f'📡 Subscribed to {len(instrument_keys)} strong_sepa instruments.')
+                self.process_quote(symbol, quote)
             except Exception as exc:
-                logger.error(f'❌ Failed to subscribe on open: {exc}')
-
-        def on_message(*args):
-            message = args[-1] if args else None
-            symbol, volume, ltp, ltq, bid, ask = extract_symbol_and_volume(message)
-            if symbol and volume is not None:
-                ofi_ratio = self.update_ofi(symbol, ltp, ltq, bid, ask)
-                if self.detect_volume_spike(symbol, volume):
-                    alert_suffix = ''
-                    ofi_status = None
-                    if ofi_ratio is not None:
-                        if ofi_ratio > 0.3:
-                            alert_suffix = ' 🟢 REAL BREAKOUT: Volume Spike + Massive Buying'
-                            ofi_status = 'REAL_BREAKOUT'
-                        elif ofi_ratio < -0.2:
-                            alert_suffix = ' 🔴 FAKEOUT ALERT: Volume Spike but Sellers Dominate'
-                            ofi_status = 'FAKEOUT'
-                        else:
-                            alert_suffix = ' ⚪ Volume Spike with mixed order flow'
-                            ofi_status = 'NEUTRAL'
-
-                    alert_msg = f"🚀 LIVE VOLUME SPIKE DETECTED in {symbol} - Possible PERFECT COMBO Entry Triggered!{alert_suffix}"
-                    logger.warning(alert_msg)
-
-                    if ofi_status == 'REAL_BREAKOUT' and ltp is not None and ltp > 0:
-                        qty = int(RISK_PER_TRADE / ltp)
-                        if qty <= 0:
-                            logger.warning(f'⚠️ Computed zero quantity for {symbol} at LTP {ltp}')
-                        if AUTO_TRADE_ENABLED:
-                            order = place_auto_buy_order(symbol, qty, ltp)
-                            exec_msg = f"🟢 [REAL TRADE] Placed Market BUY for {qty} shares of {symbol}"
-                            logger.info(exec_msg)
-                            append_alert(symbol, exec_msg, ofi_ratio=ofi_ratio, ofi_status='REAL_TRADE')
-                        else:
-                            exec_msg = f"🟢 [PAPER TRADE] Would have bought {qty} shares of {symbol} at {ltp}"
-                            logger.info(exec_msg)
-                            append_alert(symbol, exec_msg, ofi_ratio=ofi_ratio, ofi_status='PAPER_TRADE')
-
-                    append_alert(symbol, alert_msg, ofi_ratio=ofi_ratio, ofi_status=ofi_status)
-            else:
-                logger.debug('Received message missing symbol or volume.')
-
-        def on_error(*args):
-            error = args[-1] if args else None
-            logger.error(f'❌ Upstox feed error: {error}')
-
-        def on_close(*args):
-            code = args[0] if len(args) > 0 else None
-            msg = args[1] if len(args) > 1 else None
-            logger.warning(f'🔌 Upstox feed closed: {code} {msg}')
-
-        streamer.on(streamer.Event['OPEN'], on_open)
-        streamer.on(streamer.Event['MESSAGE'], on_message)
-        streamer.on(streamer.Event['ERROR'], on_error)
-        streamer.on(streamer.Event['CLOSE'], on_close)
-        streamer.auto_reconnect(True, interval=5, retry_count=5)
-        return streamer
+                logger.warning(f'Failed to process quote for {symbol}: {exc}')
 
     async def run(self) -> None:
         token = load_access_token()
@@ -476,26 +447,26 @@ class SwingMLStockDataCollector:
             return
 
         loop = asyncio.get_running_loop()
-        streamer = self.build_streamer(token, instrument_keys, loop)
-        logger.info('🔌 Connecting to Upstox strong_sepa live feed...')
-        streamer.connect()
+        logger.info(
+            f'📡 Starting Upstox REST snapshot loop for {len(instrument_keys)} strong_sepa instruments '
+            f'(every {SNAPSHOT_INTERVAL_SECONDS}s).'
+        )
 
         try:
             while True:
-                await asyncio.sleep(1)
+                try:
+                    # Reload the token every cycle so a refreshed token file takes effect
+                    # on the next snapshot without requiring a server restart.
+                    token = await loop.run_in_executor(None, load_access_token) or token
+                    data = await loop.run_in_executor(None, self.fetch_quotes, token, instrument_keys)
+                    self.process_snapshot(data)
+                    broadcast_sepa_update()
+                except Exception as exc:
+                    logger.error(f'❌ Failed to fetch/process SEPA quote snapshot: {exc}')
+
+                await asyncio.sleep(SNAPSHOT_INTERVAL_SECONDS)
         except asyncio.CancelledError:
-            pass
-        finally:
-            if hasattr(streamer, 'disconnect'):
-                try:
-                    streamer.disconnect()
-                except Exception:
-                    pass
-            elif hasattr(streamer, 'close'):
-                try:
-                    streamer.close()
-                except Exception:
-                    pass
+            logger.info('🛑 SEPA REST snapshot loop cancelled.')
 
 
 async def main() -> None:
