@@ -30,7 +30,7 @@ def get_scheduler():
 
 
 def run_live_scanner():
-    print('🟢 Swing_ML scheduler job is running')
+    print('[ACTIVE] Swing_ML scheduler job is running')
     try:
         from .live_ml_scanner import main as get_live_signals
 
@@ -48,10 +48,10 @@ def run_live_scanner():
         )
 
         print(
-            '✅ Swing_ML scan completed:',
+            '[OK] Swing_ML scan completed:',
             'tier_1=%d' % len(result.get('tier_1', [])),
             'tier_2=%d' % len(result.get('tier_2', [])),
         )
     except Exception as exc:
         logger.exception('Swing_ML scheduler job failed: %s', exc)
-        print('❌ Swing_ML scheduler job failed:', exc)
+        print('[ERROR] Swing_ML scheduler job failed:', exc)

@@ -24,9 +24,9 @@ if STRATEGY_PATH not in sys.path:
 
 try:
     from nifty_advanced_strategy import smc_entry_signal
-    print("✅ Advanced SMC Strategy Linked Successfully!")
+    print("[OK] Advanced SMC Strategy Linked Successfully!")
 except ImportError:
-    print("⚠️ Warning: nifty_advanced_strategy.py not found. SMC filtering will be skipped.")
+    print("[WARN] Warning: nifty_advanced_strategy.py not found. SMC filtering will be skipped.")
     smc_entry_signal = None
 
 # 🔴 కరెక్ట్ చేసిన టోకెన్ పాత్ (User Provided Path)
@@ -53,13 +53,13 @@ def get_access_token():
             if token:
                 return token
             else:
-                print(f"⚠️ Token file found, but 'access_token' is missing inside it.")
+                print(f"[WARN] Token file found, but 'access_token' is missing inside it.")
                 return None
     except FileNotFoundError:
-        print(f"❌ Token file not found at: {TOKEN_FILE_PATH}")
+        print(f"[ERROR] Token file not found at: {TOKEN_FILE_PATH}")
         return None
     except Exception as e:
-        print(f"❌ Error reading token JSON: {e}")
+        print(f"[ERROR] Error reading token JSON: {e}")
         return None
 
 def get_upstox_instrument_dict():
@@ -129,25 +129,25 @@ def prepare_live_features(df_5m):
 # =====================================================================
 def main():
     print("\n" + "="*85)
-    print(" 🚀 NIFTY 200 - AI + SMC LIVE TRADING SCANNER (< ₹2000 ONLY)")
+    print("  NIFTY 200 - AI + SMC LIVE TRADING SCANNER (< Rs.2000 ONLY)")
     print("="*85)
 
     if not os.path.exists(MODEL_PATH):
-        print("❌ AI Model not found! Please run train_model.py first.")
+        print("[ERROR] AI Model not found! Please run train_model.py first.")
         return
     model = joblib.load(MODEL_PATH)
-    print("✅ AI Brain (XGBoost) Loaded Successfully.")
+    print("[OK] AI Brain (XGBoost) Loaded Successfully.")
 
     token = get_access_token()
     if not token:
-        print("❌ Upstox Token Invalid or Missing. Exiting.")
+        print("[ERROR] Upstox Token Invalid or Missing. Exiting.")
         return
     headers = {'Accept': 'application/json', 'Authorization': f'Bearer {token}'}
     
     upstox_keys = get_upstox_instrument_dict()
     files = [f for f in os.listdir(HISTORY_DIR) if f.endswith("_5m.parquet")]
     
-    print(f"📡 Scanning {len(files)} Stocks Live. Please wait...\n")
+    print(f"[INFO] Scanning {len(files)} Stocks Live. Please wait...\n")
     
     tier_1_trades = [] 
     tier_2_trades = [] 
@@ -209,31 +209,31 @@ def main():
     # OUTPUT DISPLAY FORMATTING
     # =====================================================================
     print("="*85)
-    print(" 🏆 TIER-1: THE ULTIMATE TRADES (SMC + AI CONFLUENCE)")
+    print("  TIER-1: THE ULTIMATE TRADES (SMC + AI CONFLUENCE)")
     print("    (Order Block/FVG + AI > 60% probability | LTP < 2000)")
     print("="*85)
     if tier_1_trades:
         print(f"{'SYMBOL':<15} | {'LTP':<8} | {'AI WIN %':<10} | {'SMC SIGNAL':<18} | {'ACTION'}")
         print("-" * 85)
         for t in tier_1_trades:
-            print(f"{t['Symbol']:<15} | ₹{t['LTP']:<7.2f} | {t['Win_Prob']:>5.1f}%     | {t['SMC']:<18} | {t['Action']}")
+            print(f"{t['Symbol']:<15} | Rs.{t['LTP']:<7.2f} | {t['Win_Prob']:>5.1f}%     | {t['SMC']:<18} | {t['Action']}")
     else:
-        print("   ⏳ No Tier-1 setups found right now. Wait for the market to form order blocks.")
+        print("    No Tier-1 setups found right now. Wait for the market to form order blocks.")
 
     print("\n" + "="*85)
-    print(" 🟢 TIER-2: AI MOMENTUM TRADES (AI CONFIDENCE ONLY)")
+    print(" [ACTIVE] TIER-2: AI MOMENTUM TRADES (AI CONFIDENCE ONLY)")
     print("    (No strict SMC setup, but AI > 65% win chance | LTP < 2000)")
     print("="*85)
     if tier_2_trades:
         print(f"{'SYMBOL':<15} | {'LTP':<8} | {'AI WIN %':<10} | {'SMC SIGNAL':<18} | {'ACTION'}")
         print("-" * 85)
         for t in tier_2_trades:
-            print(f"{t['Symbol']:<15} | ₹{t['LTP']:<7.2f} | {t['Win_Prob']:>5.1f}%     | {t['SMC']:<18} | {t['Action']}")
+            print(f"{t['Symbol']:<15} | Rs.{t['LTP']:<7.2f} | {t['Win_Prob']:>5.1f}%     | {t['SMC']:<18} | {t['Action']}")
     else:
-        print("   ⏳ No Tier-2 momentum setups found.")
+        print("    No Tier-2 momentum setups found.")
 
     print("\n" + "="*85)
-    print(f"🎯 Total Opportunities (< ₹2000): {len(tier_1_trades) + len(tier_2_trades)} (Tier-1: {len(tier_1_trades)}, Tier-2: {len(tier_2_trades)})")
+    print(f" Total Opportunities (< Rs.2000): {len(tier_1_trades) + len(tier_2_trades)} (Tier-1: {len(tier_1_trades)}, Tier-2: {len(tier_2_trades)})")
     print("="*85)
 
     # ఈ లైన్స్ పాత ప్రింట్ స్టేట్‌మెంట్స్ కింద యాడ్ చేయండి 

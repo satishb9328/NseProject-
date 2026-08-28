@@ -27,21 +27,21 @@ class GammaConfig(AppConfig):
             for attempt in range(1, 6):
                 try:
                     if bot.is_running:
-                        print('🟢 GAMMA Redis listener already running')
+                        print('[ACTIVE] GAMMA Redis listener already running')
                         return
                     bot.start()
-                    print('🟢 GAMMA Redis listener started (daemon thread)')
+                    print('[ACTIVE] GAMMA Redis listener started (daemon thread)')
                     return
                 except GammaBotError as exc:
                     if attempt == 5:
-                        print(f'❌ GAMMA engine failed to start after 5 attempts: {exc}')
+                        print(f'[ERROR] GAMMA engine failed to start after 5 attempts: {exc}')
                         return
                     time.sleep(2)
                 except Exception as exc:
-                    print(f'❌ GAMMA engine failed: {exc}')
+                    print(f'[ERROR] GAMMA engine failed: {exc}')
                     return
 
         thread = threading.Thread(target=run_gamma_bot, name='GammaRedisListener', daemon=True)
         thread.start()
         self.gamma_thread = thread
-        print('🟢 GAMMA engine start scheduled')
+        print('[ACTIVE] GAMMA engine start scheduled')

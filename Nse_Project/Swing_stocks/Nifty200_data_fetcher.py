@@ -1,35 +1,146 @@
 import os
+import sys
 import time
 import datetime
 import json
 import urllib.parse
+from pathlib import Path
+
 import requests
 import pandas as pd
 
+# Console hardening: this script prints emoji/box-drawing characters and is now a
+# GATING pipeline step, so a cp1252 console must not crash it with
+# UnicodeEncodeError (which would return a non-zero code and halt the launcher).
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # =====================================================================
-# 1. CONFIGURATION
+# 1. CONFIGURATION  (BASE_DIR-relative — no hardcoded absolute paths)
 # =====================================================================
-TOKEN_FILE_PATH = r"C:\Program Files\MyProject2\Nse_Project\Brokers\upstox\upstox\upstox_token.json"
-SAVE_PATH = r"D:\Api data\ML_HISTO_DATA\Upstox_History"
+
+# ...\MyProject2\Nse_Project\Swing_stocks
+BASE_DIR = Path(__file__).resolve().parent
+# ...\MyProject2\Nse_Project
+PROJECT_ROOT = BASE_DIR.parent
+# ...\MyProject2
+REPO_ROOT = PROJECT_ROOT.parent
+
+TOKEN_DIR = PROJECT_ROOT / "Brokers" / "upstox"
+
+# అన్ని తెలిసిన టోకెన్ లొకేషన్స్ (freshest valid one wins).
+# Mirrors the convention used by Live_dashboard/upstox_live_feed.py,
+# Swing_ML/ml_stockdata_collector.py and test_upstox_token.py.
+TOKEN_FILE_PATHS = [
+    TOKEN_DIR / "upstox_v3_token.json",
+    TOKEN_DIR / "upstox" / "upstox_token.json",
+    TOKEN_DIR / "upstox_login_details.json",
+    REPO_ROOT / "upstox" / "upstox_token.json",
+]
+
+# Shared data contract with nifty_advanced_strategy.py.
+# Override for both processes at once via the UPSTOX_HISTORY_DIR env var.
+DEFAULT_HISTORY_DIR = r"D:\Api data\ML_HISTO_DATA\Upstox_History"
+SAVE_PATH = os.environ.get("UPSTOX_HISTORY_DIR", DEFAULT_HISTORY_DIR)
+
+# Process exit codes (consumed by start_trading_system.bat)
+EXIT_OK = 0
+EXIT_INIT_FAILED = 1
+EXIT_NO_TOKEN = 2
+EXIT_TOKEN_EXPIRED = 3
+EXIT_ALL_FAILED = 4
+
+def _read_token_file(path: Path) -> dict | None:
+    """ఒక టోకెన్ JSON ఫైల్‌ను చదివి, dict గా return చేస్తుంది."""
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            data = json.load(file)
+        return data if isinstance(data, dict) else None
+    except Exception as exc:
+        print(f"   [WARN] Could not parse {path.name}: {exc}")
+        return None
+
+
+def _token_expiry(payload: dict):
+    """'expires_at' ను datetime గా return చేస్తుంది (తెలియకపోతే None)."""
+    raw = payload.get("expires_at")
+    if not raw:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(str(raw))
+    except Exception:
+        return None
+
 
 def get_access_token():
-    """నేరుగా JSON ఫైల్ నుండి టోకెన్‌ను చదివే ఫంక్షన్"""
-    try:
-        with open(TOKEN_FILE_PATH, 'r') as file:
-            data = json.load(file)
-            token = data.get("access_token")
-            if token:
-                print(f"✅ Successfully loaded Upstox token from JSON!\n")
-                return token
-            else:
-                print("❌ Token file exists, but 'access_token' is missing.")
-                return None
-    except FileNotFoundError:
-        print(f"❌ File not found at: {TOKEN_FILE_PATH}")
-        return None
-    except Exception as e:
-        print(f"❌ Error reading JSON file: {e}")
-        return None
+    """తెలిసిన అన్ని లొకేషన్స్ నుండి చెల్లుబాటు అయ్యే (non-expired) టోకెన్‌ను వెతుకుతుంది.
+
+    Returns
+    -------
+    (token, path, expiry) on success, else (None, None, None).
+    Prefers the newest *unexpired* token; falls back to the newest expired one
+    only to produce a precise error message.
+    """
+    now = datetime.datetime.now()
+    valid, expired, missing = [], [], []
+
+    for path in TOKEN_FILE_PATHS:
+        if not path.exists():
+            missing.append(path)
+            continue
+
+        payload = _read_token_file(path)
+        if not payload:
+            continue
+
+        token = payload.get("access_token")
+        if not token:
+            print(f"   [WARN] {path.name} exists but has no 'access_token'.")
+            continue
+
+        expiry = _token_expiry(payload)
+        # Sort key: prefer explicit expiry, else file mtime.
+        sort_key = expiry.timestamp() if expiry else path.stat().st_mtime
+
+        if expiry is not None and now >= expiry:
+            expired.append((sort_key, path, token, expiry))
+        else:
+            valid.append((sort_key, path, token, expiry))
+
+    if valid:
+        valid.sort(key=lambda item: item[0], reverse=True)
+        _, path, token, expiry = valid[0]
+        exp_txt = expiry.strftime("%Y-%m-%d %H:%M:%S") if expiry else "unknown"
+        print("✅ Upstox token loaded successfully!")
+        print(f"   Source : {path}")
+        print(f"   Expires: {exp_txt}\n")
+        return token, path, expiry
+
+    # ── Nothing usable — emit an actionable diagnosis ────────────────────
+    print("\n" + "!" * 70)
+    print("❌ FATAL: No VALID Upstox access token found.")
+    print("!" * 70)
+
+    if expired:
+        expired.sort(key=lambda item: item[0], reverse=True)
+        print("   Found token file(s), but ALL are EXPIRED:")
+        for _, path, _, expiry in expired:
+            exp_txt = expiry.strftime("%Y-%m-%d %H:%M:%S") if expiry else "unknown"
+            print(f"     - {path}  (expired at {exp_txt})")
+        print("\n   ACTION: Regenerate the token, then re-run:")
+        print("     python Nse_Project\\Brokers\\upstox\\get_upstox_token_manual.py")
+    else:
+        print("   No token file exists at any known location:")
+        for path in missing:
+            print(f"     - {path}")
+        print("\n   ACTION: Generate a token first:")
+        print("     python Nse_Project\\Brokers\\upstox\\get_upstox_token_manual.py")
+
+    print("!" * 70 + "\n")
+    return None, None, None
 
 # =====================================================================
 # 2. HELPER FUNCTIONS
@@ -144,12 +255,17 @@ def fetch_stock_5m_data(symbol, instrument_key, headers, existing_last_date=None
 # =====================================================================
 
 def main():
-    ACCESS_TOKEN = get_access_token()
+    ACCESS_TOKEN, token_path, token_expiry = get_access_token()
     if not ACCESS_TOKEN:
-        print("❌ Access token not found or invalid. Exiting gracefully...")
-        return
+        # 🔴 Non-zero exit so start_trading_system.bat can halt the pipeline.
+        return EXIT_NO_TOKEN
 
-    os.makedirs(SAVE_PATH, exist_ok=True)
+    try:
+        os.makedirs(SAVE_PATH, exist_ok=True)
+    except Exception as exc:
+        print(f"❌ Cannot create/access SAVE_PATH '{SAVE_PATH}': {exc}")
+        return EXIT_INIT_FAILED
+
     print(f"📁 Save Directory Ready: {SAVE_PATH}\n")
     
     headers = {
@@ -161,8 +277,8 @@ def main():
     upstox_keys = get_upstox_instrument_dict()
     
     if not symbols or not upstox_keys:
-        print("❌ Initialization failed. Exiting...")
-        return
+        print("❌ Initialization failed (no symbols or no instrument keys). Exiting...")
+        return EXIT_INIT_FAILED
 
     print("🚀 Starting Daily EOD Data Fetch for NIFTY 200...")
     print("=" * 60)
@@ -171,6 +287,7 @@ def main():
     updated = 0
     up_to_date = 0
     failed = 0
+    token_died = False
 
     for idx, symbol in enumerate(symbols, 1):
         instrument_key = upstox_keys.get(symbol)
@@ -203,7 +320,9 @@ def main():
             new_df = fetch_stock_5m_data(symbol, instrument_key, headers, existing_last_date)
         except RuntimeError as e:
             if str(e) == "TOKEN_EXPIRED":
-                print("\n🚨 STOPPING PROCESS: Please update your Upstox Token and run again.")
+                print("\n🚨 STOPPING PROCESS: Upstox token expired mid-run.")
+                print("   Regenerate the token and re-run this fetcher before scanning.")
+                token_died = True
                 break
             raise
             
@@ -241,5 +360,43 @@ def main():
     print(f"📁 All files saved in    : {SAVE_PATH}")
     print("=" * 60)
 
+    # ── FRESHNESS VERIFICATION ──────────────────────────────────────────
+    # The scanner rejects data older than MAX_DATA_AGE_DAYS, so prove here
+    # that the corpus actually advanced instead of silently reporting success.
+    newest = None
+    try:
+        for name in os.listdir(SAVE_PATH):
+            if not name.endswith("_5m.parquet"):
+                continue
+            try:
+                sample = pd.read_parquet(os.path.join(SAVE_PATH, name), columns=["Datetime"])
+                if sample.empty:
+                    continue
+                last_ts = pd.to_datetime(sample["Datetime"], errors="coerce").max()
+                if pd.notna(last_ts) and (newest is None or last_ts > newest):
+                    newest = last_ts
+            except Exception:
+                continue
+    except Exception as exc:
+        print(f"⚠️ Could not verify corpus freshness: {exc}")
+
+    if newest is not None:
+        age_days = (datetime.date.today() - newest.date()).days
+        print(f"🕒 Newest candle in corpus : {newest}  (age: {age_days} calendar day(s))")
+    print("=" * 60)
+
+    # ── EXIT CODE ───────────────────────────────────────────────────────
+    if token_died:
+        return EXIT_TOKEN_EXPIRED
+
+    # Nothing written AND nothing already current => hard failure.
+    if (successful + updated + up_to_date) == 0:
+        print("❌ No symbol was downloaded, updated, or already current.")
+        return EXIT_ALL_FAILED
+
+    return EXIT_OK
+
+
 if __name__ == "__main__":
-    main()
+    # 🔴 Propagate the status to the shell so the launcher can gate the scanner.
+    sys.exit(main())

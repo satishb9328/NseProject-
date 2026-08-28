@@ -93,7 +93,7 @@ def save_token(token_data):
             print(f"\n❌ Failed to save token using centralized manager")
             return False
     except ImportError:
-            # Fallback: manual write to the exact absolute path expected by the live feed
+            # Fallback: manual write to the dynamic directory where this script lives
             print("⚠️  Could not import upstox_token_manager, using fallback save...")
             current_time = int(time.time())
             token_info = {
@@ -105,7 +105,11 @@ def save_token(token_data):
                 "expires_at": datetime.fromtimestamp(current_time + expires_in).isoformat(),
                 "saved_at": datetime.now().isoformat()
             }
-            target_path = r"C:\Program Files\MyProject2\Nse_Project\Brokers\upstox\upstox_v3_token.json"
+            
+            # Dynamic path resolution (Resolves to current script's folder)
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            target_path = os.path.join(current_dir, "upstox_v3_token.json")
+            
             try:
                 os.makedirs(os.path.dirname(target_path), exist_ok=True)
                 with open(target_path, 'w', encoding='utf-8') as f:
@@ -115,6 +119,7 @@ def save_token(token_data):
             except Exception as e:
                 print(f"❌ Failed to save to {target_path}: {e}")
                 return False
+
 def main():
     print("="*80)
     print("UPSTOX TOKEN GENERATOR - MANUAL METHOD")

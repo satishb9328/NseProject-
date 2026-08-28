@@ -24,7 +24,7 @@ class SwingMlConfig(AppConfig):
         scheduler = get_scheduler()
         scheduler.start()
         self.scheduler = scheduler
-        print('🟢 Swing_ML scheduler started')
+        print('[ACTIVE] Swing_ML scheduler started')
 
         self._start_sepa_rest_collector()
 
@@ -35,16 +35,16 @@ class SwingMlConfig(AppConfig):
         try:
             from .ml_stockdata_collector import main as collector_main
         except Exception as exc:
-            print(f'❌ Failed to import SEPA REST snapshot collector: {exc}')
+            print(f'[ERROR] Failed to import SEPA REST snapshot collector: {exc}')
             return
 
         def run_collector() -> None:
             try:
                 asyncio.run(collector_main())
             except Exception as exc:
-                print(f'❌ SEPA REST snapshot collector failed: {exc}')
+                print(f'[ERROR] SEPA REST snapshot collector failed: {exc}')
 
         thread = threading.Thread(target=run_collector, name='SEPARestSnapshotCollector', daemon=True)
         thread.start()
         self.collector_thread = thread
-        print('🟢 Upstox REST snapshot collector started for SEPA stocks (5-minute interval)')
+        print('[ACTIVE] Upstox REST snapshot collector started for SEPA stocks (5-minute interval)')

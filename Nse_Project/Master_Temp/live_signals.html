@@ -15,6 +15,13 @@
   .dominance-fill { height: 100%; border-radius: inherit; transition: width .35s ease; }
   .sentiment-bar { transition: background-color .7s ease, color .7s ease, border-color .7s ease; }
   .gamma-alert-feed { scrollbar-width: thin; scrollbar-color: rgba(56, 189, 248, .45) rgba(7, 11, 20, .8); }
+  /* ---- Volume Velocity (shares/sec) ---- */
+  .option-chain-table td.vel-cell { font-variant-numeric: tabular-nums; color: #94a3b8; }
+  .option-chain-table td.vel-hot-call { color: #4ade80; font-weight: 800; background-color: rgba(34, 197, 94, .18); text-shadow: 0 0 6px rgba(74, 222, 128, .95), 0 0 12px rgba(74, 222, 128, .6); animation: vel-pulse-call 1s ease-in-out infinite; }
+  .option-chain-table td.vel-hot-put { color: #f87171; font-weight: 800; background-color: rgba(239, 68, 68, .18); text-shadow: 0 0 6px rgba(248, 113, 113, .95), 0 0 12px rgba(248, 113, 113, .6); animation: vel-pulse-put 1s ease-in-out infinite; }
+  @keyframes vel-pulse-call { 0%, 100% { box-shadow: inset 0 0 6px rgba(74, 222, 128, .35); } 50% { box-shadow: inset 0 0 16px rgba(74, 222, 128, .85); } }
+  @keyframes vel-pulse-put { 0%, 100% { box-shadow: inset 0 0 6px rgba(248, 113, 113, .35); } 50% { box-shadow: inset 0 0 16px rgba(248, 113, 113, .85); } }
+  @media (prefers-reduced-motion: reduce) { .option-chain-table td.vel-hot-call, .option-chain-table td.vel-hot-put { animation: none; } }
 </style>
 {% endblock %}
 
@@ -25,7 +32,7 @@
     <div class="flex items-center justify-between w-full mb-3 gap-4">
       <div class="text-xl font-bold text-slate-50">Gamma Intelligence</div>
       <div class="flex items-center gap-8 text-sm font-semibold text-slate-300">
-        <span>SPOT: <span id="live-spot" class="text-white font-mono">--</span></span>
+        <span>SPOT: <span id="live-spot-price" class="text-white font-mono transition-colors duration-300">--</span><span id="live-spot" class="hidden">--</span></span>
         <span>Expiry: <span id="live-expiry" class="text-white font-mono">--</span></span>
       </div>
       <div class="text-sm font-bold text-neon-green uppercase tracking-[.3em]">Live Signals</div>
@@ -58,6 +65,23 @@
       </div>
     </section>
 
+    <section id="preopen-trap-snapshot" class="mt-3 rounded-xl border border-fuchsia-500/30 bg-fuchsia-950/20 p-3">
+      <div class="mb-1 flex items-center justify-between">
+        <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-fuchsia-300">PRE-OPEN GAMMA TRAP</h2>
+        <span class="text-[10px] uppercase tracking-wider text-slate-500">09:00 - 09:07 IEP</span>
+      </div>
+      <div class="grid grid-cols-3 gap-2 text-xs">
+        <div><span class="block uppercase tracking-wider text-slate-500">MAX IEP</span><span class="mt-1 block font-mono text-lg font-semibold text-slate-50">{{ preopen_max }}</span></div>
+        <div><span class="block uppercase tracking-wider text-slate-500">MIN IEP</span><span class="mt-1 block font-mono text-lg font-semibold text-slate-50">{{ preopen_min }}</span></div>
+        <div><span class="block uppercase tracking-wider text-slate-500">FINAL IEP</span><span class="mt-1 block font-mono text-lg font-semibold text-slate-50">{{ preopen_final }}</span></div>
+        <div class="col-span-3 mt-1 grid grid-cols-2 gap-2 border-t border-fuchsia-500/20 pt-2 text-[11px]">
+          <span class="font-medium text-orange-300">CALL WALL: <span class="font-mono">{{ call_wall }}</span></span>
+          <span class="text-right font-medium text-emerald-300">PUT WALL: <span class="font-mono">{{ put_wall }}</span></span>
+        </div>
+      </div>
+      <p class="mt-2 text-center text-sm font-bold uppercase tracking-[.2em] {% if 'HIGH PROBABILITY' in trap_signal %}text-neon-green{% else %}text-slate-500{% endif %}">{{ trap_signal }}</p>
+    </section>
+
     <div class="flex w-full flex-col items-start gap-4 mt-4 lg:flex-row">
       <div class="min-w-0 flex-grow overflow-x-auto">
     <section id="option-chain" class="mt-0">
@@ -72,9 +96,9 @@
       <div class="rounded-2xl glass">
         <table id="option-chain-table" class="option-chain-table min-w-[1000px] text-xs leading-snug">
           <thead><tr>
-            <th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL OI%</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL OI</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL VOL</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL LTP</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL COI</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL COI%</th><th class="strike-header border border-slate-700 border-b-2 px-2 py-1 text-xs text-slate-300">STRIKE</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT COI%</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT COI</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT LTP</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT VOL</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT OI</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT OI%</th>
+            <th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL OI%</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL OI</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL VOL</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300" title="Call volume velocity in shares/sec over a rolling 3s window">CALL VEL</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL LTP</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL COI</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL COI%</th><th class="strike-header border border-slate-700 border-b-2 px-2 py-1 text-xs text-slate-300">STRIKE</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT COI%</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT COI</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT LTP</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300" title="Put volume velocity in shares/sec over a rolling 3s window">PUT VEL</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT VOL</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT OI</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT OI%</th>
           </tr></thead>
-          <tbody id="live-options-tbody"><tr><td colspan="13" class="px-2 py-2 text-xs leading-snug text-slate-500">Loading live option chain...</td></tr></tbody>
+          <tbody id="live-options-tbody"><tr><td colspan="15" class="px-2 py-2 text-xs leading-snug text-slate-500">Loading live option chain...</td></tr></tbody>
         </table>
       </div>
       <div class="mt-2 flex justify-between text-xs text-slate-500"><span>ATM strike is highlighted in blue.</span><span id="live-synced">Waiting for data...</span></div>
@@ -144,12 +168,24 @@
   const themes = { bullish: ['bg-green-900/30', 'text-green-400', 'border-green-700'], neutral: ['bg-yellow-900/30', 'text-yellow-400', 'border-yellow-700'], bearish: ['bg-red-900/30', 'text-red-400', 'border-red-700'] };
   const GEX_NEUTRAL_THRESHOLD = 5000000000;
 
-  function netGexTier(value) {
+  function netGexTier(value, pcr) {
     const amount = Number(value);
+    const pcrNum = Number(pcr);
     if (!Number.isFinite(amount)) return { colorClass: 'text-slate-50', summary: '--' };
+    // Intraday gamma playbook: negative GEX + bearish PCR => market weak / BUY PE.
+    if (amount < 0 && Number.isFinite(pcrNum) && pcrNum < 0.7) return { colorClass: 'text-red-400', summary: '🔴 Negative Gamma: Market Weak / BUY PE' };
+    if (amount > 0 && Number.isFinite(pcrNum) && pcrNum >= 0.7) return { colorClass: 'text-green-400', summary: '🟢 Positive Gamma: Stable Market / Buy Dips' };
     if (amount > GEX_NEUTRAL_THRESHOLD) return { colorClass: 'text-green-400', summary: '🟢 Positive Gamma: Stable Market / Buy Dips' };
-    if (amount < -GEX_NEUTRAL_THRESHOLD) return { colorClass: 'text-red-400', summary: '🔴 Negative Gamma: Volatile / Sell Rallies' };
+    if (amount < -GEX_NEUTRAL_THRESHOLD) return { colorClass: 'text-red-400', summary: '🔴 Negative Gamma: Market Weak / BUY PE' };
     return { colorClass: 'text-yellow-400', summary: '🟡 Range-bound: Choppy / Transition Zone' };
+  }
+
+  function signalTier(signal) {
+    const text = typeof signal === 'string' ? signal : '';
+    if (text.startsWith('🔴')) return { colorClass: 'text-red-400', summary: text };
+    if (text.startsWith('🟢')) return { colorClass: 'text-green-400', summary: text };
+    if (text.startsWith('🟡')) return { colorClass: 'text-yellow-400', summary: text };
+    return { colorClass: 'text-slate-400', summary: text || '--' };
   }
 
   function updateSentiment(rows) {
@@ -172,22 +208,34 @@
 
   function cell(text, classes) { const td = document.createElement('td'); td.className = classes; td.textContent = text; return td; }
   function addDominanceBar(td, value, color) { const track = document.createElement('div'); track.className = 'dominance-track'; const fill = document.createElement('div'); fill.className = 'dominance-fill'; fill.style.width = `${Math.max(0, Math.min(100, number(value)))}%`; fill.style.background = color; track.appendChild(fill); td.appendChild(track); }
+
+  // Volume Velocity: shares/sec above this is an explosive breakout and gets a glow.
+  const VELOCITY_GLOW_THRESHOLD = 50000;
+  function vel(value) { const n = Number(value); if (!Number.isFinite(n) || n <= 0) return '-'; if (n >= 1000000) return `${(n / 1000000).toFixed(2)}M`; if (n >= 1000) return `${(n / 1000).toFixed(1)}k`; return String(Math.round(n)); }
+  function velHot(value) { const n = Number(value); return Number.isFinite(n) && n > VELOCITY_GLOW_THRESHOLD; }
+
   function buildRow(row) {
     const tr = document.createElement('tr'); tr.className = 'border-t border-slate-700/70 hover:bg-slate-800/40 transition-colors';
-    const values = [pct(row.call_oi_pct), fmt(row.call_oi), fmt(row.call_volume), fmt(row.call_ltp), fmt(row.call_coi), pct(row.call_coi_pct), fmt(row.strike), pct(row.put_coi_pct), fmt(row.put_coi), fmt(row.put_ltp), fmt(row.put_volume), fmt(row.put_oi), pct(row.put_oi_pct)];
+    //  0 CALL OI%  1 CALL OI  2 CALL VOL  3 CALL VEL  4 CALL LTP  5 CALL COI  6 CALL COI%
+    //  7 STRIKE    8 PUT COI% 9 PUT COI  10 PUT LTP  11 PUT VEL  12 PUT VOL  13 PUT OI  14 PUT OI%
+    const CALL_VEL = 3, PUT_VEL = 11, STRIKE = 7, PUT_OI_PCT = 14;
+    const values = [pct(row.call_oi_pct), fmt(row.call_oi), fmt(row.call_volume), vel(row.call_velocity), fmt(row.call_ltp), fmt(row.call_coi), pct(row.call_coi_pct), fmt(row.strike), pct(row.put_coi_pct), fmt(row.put_coi), fmt(row.put_ltp), vel(row.put_velocity), fmt(row.put_volume), fmt(row.put_oi), pct(row.put_oi_pct)];
     values.forEach((value, index) => {
       let classes = 'border border-slate-700 px-2 py-1 text-xs leading-snug font-medium text-slate-200 whitespace-nowrap';
-      if ([3, 4, 8, 9].includes(index)) classes += ' font-semibold';
-      if (index === 6) classes += ' strike-cell font-bold';
+      if ([4, 5, 9, 10].includes(index)) classes += ' font-semibold';
+      if (index === STRIKE) classes += ' strike-cell font-bold';
       if (index === 0 && number(row.call_oi_pct) > 55) classes += ' bg-red-900/40 text-red-300 font-bold';
-      if (index === 12 && number(row.put_oi_pct) > 55) classes += ' bg-green-900/40 text-green-300 font-bold';
-      if ([4, 5].includes(index) && number(row.call_coi) > 0) classes += ' text-green-300';
-      if ([4, 5].includes(index) && number(row.call_coi) < 0) classes += ' text-red-300';
-      if ([7, 8].includes(index) && number(row.put_coi) > 0) classes += ' text-green-300';
-      if ([7, 8].includes(index) && number(row.put_coi) < 0) classes += ' text-red-300';
+      if (index === PUT_OI_PCT && number(row.put_oi_pct) > 55) classes += ' bg-green-900/40 text-green-300 font-bold';
+      if ([5, 6].includes(index) && number(row.call_coi) > 0) classes += ' text-green-300';
+      if ([5, 6].includes(index) && number(row.call_coi) < 0) classes += ' text-red-300';
+      if ([8, 9].includes(index) && number(row.put_coi) > 0) classes += ' text-green-300';
+      if ([8, 9].includes(index) && number(row.put_coi) < 0) classes += ' text-red-300';
+      if (index === CALL_VEL) classes += ' vel-cell' + (velHot(row.call_velocity) ? ' vel-hot-call' : '');
+      if (index === PUT_VEL) classes += ' vel-cell' + (velHot(row.put_velocity) ? ' vel-hot-put' : '');
       const td = cell(value, classes);
+      if (index === CALL_VEL || index === PUT_VEL) { const exact = Number(index === CALL_VEL ? row.call_velocity : row.put_velocity); td.title = Number.isFinite(exact) && exact > 0 ? `${exact.toLocaleString('en-IN')} shares/sec` : 'No volume in the last 3s'; }
       if (index === 0) addDominanceBar(td, row.call_oi_pct, '#f87171');
-      if (index === 12) addDominanceBar(td, row.put_oi_pct, '#4ade80');
+      if (index === PUT_OI_PCT) addDominanceBar(td, row.put_oi_pct, '#4ade80');
       tr.appendChild(td);
     });
     return tr;
@@ -206,7 +254,7 @@
       body.replaceChildren();
       const emptyRow = document.createElement('tr');
       const emptyCell = cell('No strikes match the selected expiry.', 'px-2 py-2 text-xs leading-snug text-slate-500');
-      emptyCell.colSpan = 13;
+      emptyCell.colSpan = 15;
       emptyRow.appendChild(emptyCell);
       body.appendChild(emptyRow);
       return;
@@ -226,16 +274,44 @@
     const signature = JSON.stringify(filtered);
     if (signature === previousSignature) { highlightAtm(); return; }
     previousSignature = signature; body.replaceChildren();
-    if (!filtered.length) { const tr = document.createElement('tr'); const td = cell('No strikes match the current filters.', 'px-2 py-2 text-xs leading-snug text-slate-500'); td.colSpan = 13; tr.appendChild(td); body.appendChild(tr); return; }
+    if (!filtered.length) { const tr = document.createElement('tr'); const td = cell('No strikes match the current filters.', 'px-2 py-2 text-xs leading-snug text-slate-500'); td.colSpan = 15; tr.appendChild(td); body.appendChild(tr); return; }
     const fragment = document.createDocumentFragment(); filtered.forEach(row => fragment.appendChild(buildRow(row))); body.appendChild(fragment); highlightAtm();
   }
 
-  function highlightAtm() { if (!Number.isFinite(currentSpot)) return; let closest = null, distance = Infinity; body.querySelectorAll('tr').forEach(row => { const strike = number(row.children[6]?.textContent); const diff = Math.abs(strike - currentSpot); if (Number.isFinite(strike) && diff < distance) { distance = diff; closest = row; } row.classList.remove('atm-row'); }); if (closest) closest.classList.add('atm-row'); }
+  function highlightAtm() { if (!Number.isFinite(currentSpot)) return; let closest = null, distance = Infinity; body.querySelectorAll('tr').forEach(row => { const strike = number(row.children[7]?.textContent); const diff = Math.abs(strike - currentSpot); if (Number.isFinite(strike) && diff < distance) { distance = diff; closest = row; } row.classList.remove('atm-row'); }); if (closest) closest.classList.add('atm-row'); }
   function exposureColor(element, value) { const amount = Number(value); element.classList.remove('text-green-400', 'text-red-400', 'text-slate-200'); element.classList.add(Number.isFinite(amount) && amount > 0 ? 'text-green-400' : Number.isFinite(amount) && amount < 0 ? 'text-red-400' : 'text-slate-200'); }
-  function renderProfile(profile) { if (!profile || typeof profile !== 'object') return; const spot = profileValue(profile, 'spot', 'Spot', 'spot_price'); const weekly = profile.weekly_gamma || profile; const day = profile.day_gamma || {}; currentSpot = Number(spot); document.getElementById('live-spot').textContent = fmt(spot); document.getElementById('live-expiry').textContent = profile.expiry || '--'; [['weekly', weekly], ['day', day]].forEach(([prefix, metrics]) => { const netGex = profileValue(metrics, 'net_gex', 'netGEX', 'net_gex_value'); const gexTier = netGexTier(netGex); document.getElementById(`${prefix}-pcr`).textContent = fmt(profileValue(metrics, 'pcr', 'PCR')); document.getElementById(`${prefix}-gamma-flip`).textContent = fmt(profileValue(metrics, 'gamma_flip_level', 'gamma_flip', 'gammaFlip', 'gamma_flip_value')); document.getElementById(`${prefix}-call-wall`).textContent = fmt(metrics.call_wall ?? metrics.call_wall_strike); document.getElementById(`${prefix}-put-wall`).textContent = fmt(metrics.put_wall ?? metrics.put_wall_strike); const charmElement = document.getElementById(`${prefix}-net-charm`); const vannaElement = document.getElementById(`${prefix}-net-vanna`); charmElement.textContent = fmt(metrics.net_charm); vannaElement.textContent = fmt(metrics.net_vanna); exposureColor(charmElement, metrics.net_charm); exposureColor(vannaElement, metrics.net_vanna); const gexElement = document.getElementById(`${prefix}-net-gex`); const summaryElement = document.getElementById(`${prefix}-net-gex-summary`); gexElement.textContent = fmt(netGex); gexElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); gexElement.classList.add(gexTier.colorClass); summaryElement.textContent = gexTier.summary; summaryElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-400'); summaryElement.classList.add(gexTier.colorClass); }); renderRows(); }
+  function renderProfile(profile) { if (!profile || typeof profile !== 'object') return; const spot = profileValue(profile, 'spot', 'Spot', 'spot_price'); const weekly = profile.weekly_gamma || profile; const day = profile.day_gamma || {}; if (!haveIndexSpot) { currentSpot = Number(spot); const el = document.getElementById('live-spot-price'); if (el) el.textContent = fmt(spot); } document.getElementById('live-spot').textContent = fmt(spot); document.getElementById('live-expiry').textContent = profile.expiry || '--'; [['weekly', weekly], ['day', day]].forEach(([prefix, metrics]) => { const netGex = profileValue(metrics, 'net_gex', 'netGEX', 'net_gex_value'); const pcr = profileValue(metrics, 'pcr', 'PCR'); const gexTier = metrics.signal ? signalTier(metrics.signal) : netGexTier(netGex, pcr); document.getElementById(`${prefix}-pcr`).textContent = fmt(profileValue(metrics, 'pcr', 'PCR')); document.getElementById(`${prefix}-gamma-flip`).textContent = fmt(profileValue(metrics, 'gamma_flip_level', 'gamma_flip', 'gammaFlip', 'gamma_flip_value')); document.getElementById(`${prefix}-call-wall`).textContent = fmt(metrics.call_wall ?? metrics.call_wall_strike); document.getElementById(`${prefix}-put-wall`).textContent = fmt(metrics.put_wall ?? metrics.put_wall_strike); const charmElement = document.getElementById(`${prefix}-net-charm`); const vannaElement = document.getElementById(`${prefix}-net-vanna`); charmElement.textContent = fmt(metrics.net_charm); vannaElement.textContent = fmt(metrics.net_vanna); exposureColor(charmElement, metrics.net_charm); exposureColor(vannaElement, metrics.net_vanna); const gexElement = document.getElementById(`${prefix}-net-gex`); const summaryElement = document.getElementById(`${prefix}-net-gex-summary`); gexElement.textContent = fmt(netGex); gexElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); gexElement.classList.add(gexTier.colorClass); summaryElement.textContent = gexTier.summary; summaryElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-400'); summaryElement.classList.add(gexTier.colorClass); }); renderRows(); }
   function renderSignal(signal) { if (signal == null) return; const text = typeof signal === 'string' ? signal : signal.message || JSON.stringify(signal); if (seenSignals.has(text)) return; seenSignals.add(text); const stream = /weekly|macro/i.test(text) ? signalStreams.weekly : signalStreams.daily; if (!stream) return; if (stream.querySelector('p')) stream.replaceChildren(); const item = document.createElement('div'); item.className = 'rounded-lg border border-slate-700/80 bg-ink-800/80 p-2'; const timestamp = typeof signal === 'object' && signal.timestamp ? new Date(signal.timestamp).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }) : new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }); item.textContent = `${timestamp}  ${text}`; stream.prepend(item); while (stream.children.length > 8) stream.lastChild.remove(); }
 
-  async function refreshOptions() { try { const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); loadedExpiry = data.expiry_date || null; allRows = Array.isArray(data.option_chain) ? data.option_chain.sort((a, b) => number(a.strike) - number(b.strike)) : []; populateExpiry(); updateSentiment(allRows); renderRows(); synced.textContent = `Synced ${new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })}`; } catch (error) { console.warn('Option-chain fetch failed:', error); } }
+  // ---- Live index SPOT ----
+  // Fed by the fast option-chain poll (data.spot_price) which carries the direct
+  // NSE_INDEX|Nifty 50 websocket tick. renderProfile()'s spot is derived/slower and
+  // must not overwrite it, otherwise SPOT freezes when the Gamma worker lags.
+  const spotPriceEl = document.getElementById('live-spot-price');
+  let lastSpotValue = null, haveIndexSpot = false;
+
+  function formatSpot(value) { const n = Number(value); return (!Number.isFinite(n) || n <= 0) ? '--' : n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+  function updateSpotPrice(data) {
+    const n = Number(data && data.spot_price);
+    if (!Number.isFinite(n) || n <= 0) return;   // keep the last good value
+    haveIndexSpot = true;
+    currentSpot = n;
+    const text = formatSpot(n);
+    if (spotPriceEl && spotPriceEl.textContent !== text) {
+      spotPriceEl.classList.remove('text-green-400', 'text-red-400', 'text-white');
+      if (lastSpotValue !== null && n > lastSpotValue) spotPriceEl.classList.add('text-green-400');
+      else if (lastSpotValue !== null && n < lastSpotValue) spotPriceEl.classList.add('text-red-400');
+      else spotPriceEl.classList.add('text-white');
+      spotPriceEl.textContent = text;
+    }
+    const legacy = document.getElementById('live-spot');
+    if (legacy && legacy.textContent !== text) legacy.textContent = text;
+    lastSpotValue = n;
+    highlightAtm();
+  }
+
+  async function refreshOptions() { try { const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); loadedExpiry = data.expiry_date || null; updateSpotPrice(data); allRows = Array.isArray(data.option_chain) ? data.option_chain.sort((a, b) => number(a.strike) - number(b.strike)) : []; populateExpiry(); updateSentiment(allRows); renderRows(); updateScalperPlayground(); synced.textContent = `Synced ${new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })}`; } catch (error) { console.warn('Option-chain fetch failed:', error); } }
   async function refreshGamma() { try { const response = await fetch('/gamma/status/', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); const status = data?.status || data; if (status?.last_profile) renderProfile(status.last_profile); if (Array.isArray(status?.gamma_alerts)) status.gamma_alerts.forEach(renderSignal); if (status?.last_signal != null) renderSignal(status.last_signal); } catch (error) { console.warn('Gamma status fetch failed:', error); } }
 
   function populateExpiry() {
@@ -264,9 +340,17 @@
   const scalperClose = document.getElementById('scalper-playground-close');
   let scalperDecay = 100;
   function updateScalperPlayground() {
-    const spot = number(document.getElementById('live-spot')?.textContent);
-    const callWall = number(document.getElementById('weekly-call-wall')?.textContent) || 24400;
-    const putWall = number(document.getElementById('weekly-put-wall')?.textContent) || 24200;
+    // Use the numeric currentSpot global (set by renderProfile). Reading the
+    // comma-formatted #live-spot text ("24,168.45") makes Number() return NaN.
+    const spot = Number.isFinite(currentSpot) ? currentSpot : 0;
+    // Walls are also rendered via fmt() (comma-formatted), so strip non-numeric
+    // characters before parsing to avoid silently falling back to hardcoded walls.
+    const parsePrice = value => {
+      const parsed = Number(String(value ?? '').replace(/[^0-9.-]/g, ''));
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const callWall = parsePrice(document.getElementById('weekly-call-wall')?.textContent) || 24400;
+    const putWall = parsePrice(document.getElementById('weekly-put-wall')?.textContent) || 24200;
     document.getElementById('scalper-call-wall').textContent = fmt(callWall);
     document.getElementById('scalper-put-wall').textContent = fmt(putWall);
     document.getElementById('scalper-spot').textContent = spot ? fmt(spot) : '--';

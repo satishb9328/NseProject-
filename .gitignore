@@ -27,6 +27,9 @@ dist/
 
 # Project-generated market cache/output files
 nifty_yf_cache.json
+# Live feed runtime artifacts: single-instance lock + persisted previous-day OI baseline
+logs/upstox_live_feed.lock
+poi_baseline/
 nifty200_advanced_strategy_screen.csv
 Nse Project/Swing_stocks/nifty_yf_cache.json
 Nse Project/Swing_stocks/nifty200_advanced_strategy_screen.csv

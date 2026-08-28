@@ -23,6 +23,9 @@ import yfinance as yf
 import pandas_ta as ta
 import json
 import os
+import sys
+import threading
+from collections import Counter
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import warnings
@@ -52,6 +55,14 @@ SECTOR_MAP = {
 
 warnings.filterwarnings("ignore")
 
+# Console hardening: this module prints box-drawing/em-dash characters, which
+# raise UnicodeEncodeError on a cp1252 console when PYTHONIOENCODING is unset.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -59,16 +70,117 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # ════════════════════════════════════════════════════════════════════════════════
 
 CACHE_FILE         = os.path.join(BASE_DIR, "nifty_yf_cache.json")
+OUTPUT_CSV         = os.path.join(BASE_DIR, "nifty200_smc_precision_screen.csv")
+# 🔴 FIX: was referenced by save_combo_context() but never defined -> NameError
+#         was silently swallowed, so this file was never written by the scanner.
+COMBO_CONTEXT_FILE = os.path.join(BASE_DIR, "combo_filter_context.json")
+STATUS_FILE        = os.path.join(BASE_DIR, "scan_status.json")
+
 CACHE_EXPIRY_HOURS = 6
 MAX_WORKERS        = 5
+
+# ── DATA SOURCE (shared contract with Nifty200_data_fetcher.py) ─────────────────
+# Both processes honour UPSTOX_HISTORY_DIR so they can never drift apart.
+DEFAULT_HISTORY_DIR = r"D:\Api data\ML_HISTO_DATA\Upstox_History"
+HISTORY_DIR         = os.environ.get("UPSTOX_HISTORY_DIR", DEFAULT_HISTORY_DIR)
+
+# ── DATA FRESHNESS ─────────────────────────────────────────────────────────────
+# 🔴 FIX: the old gate demanded latest_ts.date() == today, which is unsatisfiable
+#         on weekends, exchange holidays, and any run that precedes the day's
+#         fetch. We now allow N *trading sessions* of age (weekend-aware), so
+#         Friday's close is still "fresh" when scanned on Saturday or Monday.
+MAX_DATA_AGE_DAYS = 3
+
 SWING_LOOKBACK     = 10   
 ATR_SL_MULTIPLIER  = 0.5  
 MIN_RR             = 2.0  
+
+# ── SCORING SCALE ──────────────────────────────────────────────────────────────
+# Maximum attainable raw points, used to normalise the composite onto 0-100.
+#   PE 10 + ROE 10 + RSI 10 + MACD 10 + ADX 5                          =  45
+#   order_flow 20 + structure 20 + vcp 20 + rs 20 + proximity 20
+#   + breakout 15 + volume_trend 15                                    = 130
+#   SMC confluence 7 x 2                                               =  14
+#                                                                       -----
+#                                                                        189
+# 🔴 The old divisor 1.64 matched a 164-point ceiling, i.e. it was calibrated
+#    for the *broken* state in which RSI/MACD/ADX were never computed and thus
+#    always contributed 0. Now that those 25 points are live, the ceiling is
+#    189 and the divisor becomes 1.89 to preserve a true 0-100 scale.
+SCORE_MAX_POINTS = 189.0
+SCORE_NORMALIZER = SCORE_MAX_POINTS / 100.0   # -> 1.89
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# RUN TELEMETRY  — thread-safe skip-reason tally + serialised logging
+# ════════════════════════════════════════════════════════════════════════════════
+
+# 🔴 FIX: replaces the catch-all "No stocks matched the LTP filter" message.
+#         Every rejection path now records *why*, so the terminal reflects
+#         reality instead of blaming the LTP filter for everything.
+SKIP_REASONS = {
+    "missing_file":       "Parquet file not found",
+    "unreadable_parquet": "Parquet unreadable / corrupt",
+    "empty_parquet":      "Parquet contained no rows",
+    "bad_datetime_index": "Datetime index unparseable",
+    "stale_data":         "Data older than the freshness limit",
+    "missing_columns":    "Required OHLCV column(s) absent",
+    "short_history":      "Fewer than 20 daily bars",
+    "exception":          "Unhandled exception in worker",
+    "ltp_filtered":       "LTP outside configured range",
+}
+
+_TALLY = Counter()
+_TALLY_LOCK = threading.Lock()
+# 🔴 FIX: 5 worker threads printing multi-line f-strings without a lock was
+#         physically fusing log records together (e.g. two symbols on one line).
+_PRINT_LOCK = threading.Lock()
+
+
+def _log(message: str) -> None:
+    """Serialised print so concurrent workers cannot interleave output."""
+    with _PRINT_LOCK:
+        print(message)
+
+
+def _tally(reason: str, count: int = 1) -> None:
+    with _TALLY_LOCK:
+        _TALLY[reason] += count
+
+
+def _tally_snapshot() -> dict:
+    with _TALLY_LOCK:
+        return dict(_TALLY)
+
+
 
 
 # ════════════════════════════════════════════════════════════════════════════════
 # CACHE HELPERS
 # ════════════════════════════════════════════════════════════════════════════════
+
+def _json_default(obj):
+    """NumPy/pandas-aware JSON coercion.
+
+    Exposed by the fix above: clean_result now carries numpy scalars (e.g. the
+    SMC `confluence` sum), which json.dump cannot serialise. Previously invisible
+    because every symbol was skipped, so the cache was never populated.
+    """
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        val = float(obj)
+        return val if np.isfinite(val) else None
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, (pd.Timestamp, datetime)):
+        return obj.isoformat()
+    if obj is pd.NaT or (isinstance(obj, float) and not np.isfinite(obj)):
+        return None
+    return str(obj)
+
 
 def load_cache() -> dict:
     if os.path.exists(CACHE_FILE):
@@ -82,7 +194,7 @@ def load_cache() -> dict:
 def save_cache(cache: dict) -> None:
     try:
         with open(CACHE_FILE, "w") as f:
-            json.dump(cache, f, indent=2)
+            json.dump(cache, f, indent=2, default=_json_default)
     except Exception as e:
         print(f"Cache save error: {e}")
 
@@ -90,9 +202,18 @@ def save_cache(cache: dict) -> None:
 def save_combo_context(categories: dict) -> None:
     try:
         with open(COMBO_CONTEXT_FILE, "w") as f:
-            json.dump(categories, f, indent=2)
+            json.dump(categories, f, indent=2, default=_json_default)
     except Exception as e:
         print(f"Combo context save error: {e}")
+
+
+def save_run_status(status: dict) -> None:
+    """Machine-readable heartbeat so the dashboard can detect a failed/empty scan."""
+    try:
+        with open(STATUS_FILE, "w") as f:
+            json.dump(status, f, indent=2, default=_json_default)
+    except Exception as e:
+        print(f"Run status save error: {e}")
 
 
 def is_cache_fresh(cache: dict, key: str) -> bool:
@@ -132,6 +253,81 @@ def _safe_float(val, default=0.0) -> float:
         return float(val)
     except (ValueError, TypeError, IndexError):
         return default
+
+def _ta_last(obj, prefix: str | None = None) -> float:
+    """Last finite value from a pandas_ta Series, or a prefix-matched DataFrame column.
+
+    pandas_ta returns Series for rsi/atr/sma but DataFrames for macd/adx:
+      ta.macd -> MACD_12_26_9 | MACDh_12_26_9 | MACDs_12_26_9
+      ta.adx  -> ADX_14 | ADXR_14_2 | DMP_14 | DMN_14
+    The trailing underscore in `prefix` is significant: "ADX_" matches ADX_14 but
+    correctly rejects ADXR_14_2, and "MACD_" rejects MACDh_/MACDs_.
+    """
+    try:
+        if obj is None:
+            return 0.0
+        if isinstance(obj, pd.DataFrame):
+            if obj.empty:
+                return 0.0
+            if prefix:
+                cols = [c for c in obj.columns if str(c).startswith(prefix)]
+                if not cols:
+                    return 0.0
+                series = obj[cols[0]]
+            else:
+                series = obj.iloc[:, 0]
+        else:
+            series = obj
+        series = series.dropna()
+        if series.empty:
+            return 0.0
+        val = float(series.iloc[-1])
+        return val if np.isfinite(val) else 0.0
+    except Exception:
+        return 0.0
+
+
+def evaluate_freshness(latest_ts, today=None) -> dict:
+    """Weekend/holiday-aware staleness check.
+
+    Returns {"fresh": bool, "sessions_behind": int, "age_days": int, "as_of": date|None}.
+
+    `sessions_behind` counts Mon-Fri days *after* the last candle up to and
+    including today, so:
+        Friday data scanned on Friday   -> 0  (fresh)
+        Friday data scanned on Saturday -> 0  (fresh — no session has passed)
+        Friday data scanned on Monday   -> 1  (fresh)
+        Friday data scanned on Wednesday-> 3  (fresh at MAX_DATA_AGE_DAYS=3)
+    NOTE: this models weekends only. NSE trading holidays still count as
+    sessions, which makes the check conservative (never falsely "fresh").
+    """
+    # 🔴 FIX: DatetimeIndex.max() yields pd.NaT (never None) on an empty index,
+    #         and NaT.date() returns NaT, so the old `latest_ts is None` guard
+    #         was dead code and `NaT < date` raised a swallowed TypeError.
+    if latest_ts is None or pd.isna(latest_ts):
+        return {"fresh": False, "sessions_behind": 10 ** 6, "age_days": 10 ** 6, "as_of": None}
+
+    last_date = pd.Timestamp(latest_ts).date()
+    today = today or pd.Timestamp.now().floor("D").date()
+
+    age_days = (today - last_date).days
+    if age_days <= 0:
+        return {"fresh": True, "sessions_behind": 0, "age_days": max(age_days, 0), "as_of": last_date}
+
+    sessions_behind = int(
+        np.busday_count(
+            (last_date + timedelta(days=1)).isoformat(),
+            (today + timedelta(days=1)).isoformat(),
+        )
+    )
+    return {
+        "fresh": sessions_behind <= MAX_DATA_AGE_DAYS,
+        "sessions_behind": sessions_behind,
+        "age_days": age_days,
+        "as_of": last_date,
+    }
+
+
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -487,19 +683,25 @@ def fetch_stock_data(symbol: str, cache: dict, nifty_hist: pd.DataFrame, sector_
 
 
         # 2. LOCAL PARQUET: OHLCV హిస్టారికల్ డేటా కోసం
-        parquet_path = rf"D:\Api data\ML_HISTO_DATA\Upstox_History\{symbol}_5m.parquet"
+        parquet_path = os.path.join(HISTORY_DIR, f"{symbol}_5m.parquet")
         if not os.path.exists(parquet_path):
-            parquet_path = rf"D:\Api data\ML_HISTO_DATA\Upstox_History\{symbol}_1m.parquet"
+            parquet_path = os.path.join(HISTORY_DIR, f"{symbol}_1m.parquet")
 
         if not os.path.exists(parquet_path):
+            _tally("missing_file")
+            _log(f"  [SKIP:missing_file] {symbol} — no _5m/_1m parquet in {HISTORY_DIR}")
             return None
 
         try:
             df = pd.read_parquet(parquet_path)
-        except Exception:
+        except Exception as exc:
+            _tally("unreadable_parquet")
+            _log(f"  [SKIP:unreadable_parquet] {symbol} — {exc}")
             return None
 
         if df is None or df.empty:
+            _tally("empty_parquet")
+            _log(f"  [SKIP:empty_parquet] {symbol} — 0 rows")
             return None
 
         if "Datetime" in df.columns:
@@ -511,20 +713,30 @@ def fetch_stock_data(symbol: str, cache: dict, nifty_hist: pd.DataFrame, sector_
                 try:
                     df.index = pd.to_datetime(df.index, errors="coerce")
                 except Exception:
+                    _tally("bad_datetime_index")
+                    _log(f"  [SKIP:bad_datetime_index] {symbol}")
                     return None
             df = df.copy()
 
-        print(f"  PARQUET PATH FOR {symbol}: {parquet_path}")
         df = df.sort_index()
         latest_ts = df.index.max()
-        print(f"  LATEST DATA FOR {symbol}: {latest_ts}")
-        if latest_ts is None or latest_ts.date() < pd.Timestamp.now().floor("D").date():
-            print(f"  STALE DATA WARNING: {symbol} last updated on {latest_ts.date() if latest_ts is not None else 'UNKNOWN'}")
+
+        # ── FRESHNESS GATE (weekend/holiday-aware) ──────────────────────────
+        freshness = evaluate_freshness(latest_ts)
+        if not freshness["fresh"]:
+            _tally("stale_data")
+            _log(
+                f"  [SKIP:stale_data] {symbol} — last candle {freshness['as_of']} "
+                f"({freshness['sessions_behind']} sessions / {freshness['age_days']} days behind, "
+                f"limit={MAX_DATA_AGE_DAYS})"
+            )
             return None
 
         required_cols = ["Open", "High", "Low", "Close", "Volume"]
         missing_cols = [col for col in required_cols if col not in df.columns]
         if missing_cols:
+            _tally("missing_columns")
+            _log(f"  [SKIP:missing_columns] {symbol} — absent: {missing_cols}")
             return None
 
         # 5-Min డేటాని డైలీ (1D) గా మారుస్తున్నాం
@@ -543,13 +755,28 @@ def fetch_stock_data(symbol: str, cache: dict, nifty_hist: pd.DataFrame, sector_
         )
 
         if hist is None or hist.empty or len(hist) < 20:
+            _tally("short_history")
+            _log(f"  [SKIP:short_history] {symbol} — only {0 if hist is None else len(hist)} daily bars (need 20)")
             return None
 
         last_price = _safe_float(hist["Close"].iloc[-1])
 
         # 3. ఇండికేటర్స్ మరియు స్కోర్స్ లెక్కింపు
         atr_series = ta.atr(hist["High"], hist["Low"], hist["Close"], length=14)
-        atr_val = float(atr_series.iloc[-1]) if atr_series is not None and not atr_series.empty else 0.0
+        atr_val = _ta_last(atr_series)
+
+        # 🔴 FIX: RSI / MACD / ADX were read by score_stock_advanced() but never
+        #         computed, so 25 of the 189 available points were dead forever.
+        #         pandas_ta returns a Series for rsi and DataFrames for macd/adx.
+        rsi_val = _ta_last(ta.rsi(hist["Close"], length=14))
+
+        macd_df = ta.macd(hist["Close"], fast=12, slow=26, signal=9)
+        macd_val = _ta_last(macd_df, "MACD_")     # MACD line
+        macd_sig = _ta_last(macd_df, "MACDs_")    # signal line
+        macd_hist = _ta_last(macd_df, "MACDh_")   # histogram
+
+        # "ADX_" deliberately excludes the ADXR_14_2 column pandas_ta also emits.
+        adx_val = _ta_last(ta.adx(hist["High"], hist["Low"], hist["Close"], length=14), "ADX_")
 
         smc = smc_entry_signal(hist, atr_val)
         mtf_data = weekly_trend_check(hist)
@@ -563,6 +790,17 @@ def fetch_stock_data(symbol: str, cache: dict, nifty_hist: pd.DataFrame, sector_
             "roe": round(roe_val, 2),
             "sector": sector_name,
             "history_data": hist.tail(10),
+            # ── freshness provenance (surfaced to the dashboard) ─────────────
+            "data_as_of": str(freshness["as_of"]),
+            "data_age_days": int(freshness["age_days"]),
+            "sessions_behind": int(freshness["sessions_behind"]),
+            # ── newly computed technical indicators ─────────────────────────
+            "RSI": round(rsi_val, 2),
+            "MACD": round(macd_val, 4),
+            "MACD_Signal": round(macd_sig, 4),
+            "MACD_Hist": round(macd_hist, 4),
+            "ADX": round(adx_val, 2),
+            "ATR": round(atr_val, 4),
             "order_flow": order_flow_score(hist),
             "structure": structure_score(hist),
             "vcp": vcp_score(hist),
@@ -578,7 +816,8 @@ def fetch_stock_data(symbol: str, cache: dict, nifty_hist: pd.DataFrame, sector_
         return result
 
     except Exception as e:
-        print(f"⚠️ Error fetching data for {symbol}: {e}")
+        _tally("exception")
+        _log(f"  [SKIP:exception] {symbol} — {type(e).__name__}: {e}")
         return None
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -590,8 +829,18 @@ def score_stock_advanced(row: dict) -> dict:
     reasons = []
 
     def safe_val(key):
+        # 🔴 FIX: the old test `str(val).replace('.','',1).isdigit()` returned
+        #         False for negatives ("-3.5" -> "-35"), scientific notation and
+        #         numpy reprs, silently coercing them to 0.0. MACD is routinely
+        #         negative, so the MACD branch below could never have worked.
         val = row.get(key)
-        return float(val) if val is not None and str(val).replace('.', '', 1).isdigit() else 0.0
+        if val is None:
+            return 0.0
+        try:
+            out = float(val)
+        except (TypeError, ValueError):
+            return 0.0
+        return out if np.isfinite(out) else 0.0
 
     pe = safe_val("peRatio")
     if pe > 0:
@@ -644,7 +893,7 @@ def score_stock_advanced(row: dict) -> dict:
     if row.get("in_fib_zone") and fib_val is not None: reasons.append(f"Discount Zone (50%={float(fib_val):.1f})")
     if row.get("displaced"): reasons.append("Displacement Vol Confirmed")
 
-    final_score = round(score / 1.64, 1)
+    final_score = round(score / SCORE_NORMALIZER, 1)
     row["score"] = float(min(final_score, 100.0))
     row["reasons"] = " | ".join(reasons) if reasons else "No strong signals"
 
@@ -678,7 +927,7 @@ def print_entry_report(df: pd.DataFrame, top_n: int = 20) -> None:
         smc_df = pd.DataFrame()
 
     if smc_df.empty:
-        print("  ── No SMC setups detected in current scan ──\n")
+        print("  -- No SMC setups detected in current scan --\n")
         return
 
     print("=" * 100)
@@ -708,10 +957,10 @@ def print_entry_report(df: pd.DataFrame, top_n: int = 20) -> None:
         print(f"  {str(sym):<12} {str(sig):<18} {str(dirn).upper():<8} {entry_str:>9} {sl_str:>9} {tp_str:>9} {rr_str:>5}  {int(conf) if pd.notna(conf) else 0:>2}  {' | '.join(notes)}")
 
     print("=" * 100 + "\n  ENTRY EXECUTION GUIDE:")
-    print("  • Entry  = FVG 50% fill OR Order Block mid (whichever offers better confluence)")
-    print("  • SL     = Below sweep candle low − 0.5×ATR  (invalidates the setup)")
-    print("  • TP     = Nearest swing high / liquidity pool above entry (min 2:1 R:R)")
-    print("  • Filter = Only trade HIGH_CONFLUENCE signals with MSS + Displacement confirmed\n")
+    print("  - Entry  = FVG 50% fill OR Order Block mid (whichever offers better confluence)")
+    print("  - SL     = Below sweep candle low - 0.5xATR  (invalidates the setup)")
+    print("  - TP     = Nearest swing high / liquidity pool above entry (min 2:1 R:R)")
+    print("  - Filter = Only trade HIGH_CONFLUENCE signals with MSS + Displacement confirmed\n")
 
 # ════════════════════════════════════════════════════════════════════════════════
 # MAIN
@@ -728,6 +977,75 @@ def get_nifty200_symbols():
     except Exception as e:
         print(f"  !! Failed to fetch NIFTY 200 list: {e}")
         return ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "ITC", "SBIN", "LTIM"]
+def preflight_corpus_check() -> dict:
+    """Corpus-level freshness probe run BEFORE the thread pool starts.
+
+    The old design evaluated staleness per-symbol inside 5 worker threads, so a
+    completely stale corpus still cost ~200 yfinance round-trips and ~80 MB of
+    parquet I/O before reporting failure. This samples the directory once and
+    surfaces the verdict in milliseconds.
+    """
+    info = {"dir_exists": False, "file_count": 0, "newest": None, "fresh": False,
+            "sessions_behind": None, "age_days": None}
+
+    if not os.path.isdir(HISTORY_DIR):
+        print(f"  !! DATA DIRECTORY NOT FOUND: {HISTORY_DIR}")
+        print("     Set UPSTOX_HISTORY_DIR or run Nifty200_data_fetcher.py first.\n")
+        return info
+
+    info["dir_exists"] = True
+    try:
+        files = [f for f in os.listdir(HISTORY_DIR) if f.endswith(("_5m.parquet", "_1m.parquet"))]
+    except Exception as exc:
+        print(f"  !! Cannot list {HISTORY_DIR}: {exc}\n")
+        return info
+
+    info["file_count"] = len(files)
+    if not files:
+        print(f"  !! DATA DIRECTORY IS EMPTY: {HISTORY_DIR}\n")
+        return info
+
+    newest = None
+    for name in files[:25]:  # a sample is enough — the fetcher updates in lockstep
+        try:
+            sample = pd.read_parquet(os.path.join(HISTORY_DIR, name), columns=["Datetime"])
+            if sample.empty:
+                continue
+            ts = pd.to_datetime(sample["Datetime"], errors="coerce").max()
+            if pd.notna(ts) and (newest is None or ts > newest):
+                newest = ts
+        except Exception:
+            continue
+
+    verdict = evaluate_freshness(newest)
+    info.update({
+        "newest": newest,
+        "fresh": verdict["fresh"],
+        "sessions_behind": verdict["sessions_behind"],
+        "age_days": verdict["age_days"],
+    })
+
+    print(f"  Data directory : {HISTORY_DIR}")
+    print(f"  Parquet files  : {len(files)}")
+    print(f"  Newest candle  : {newest}")
+    if verdict["as_of"] is not None:
+        print(f"  Corpus age     : {verdict['sessions_behind']} session(s) / "
+              f"{verdict['age_days']} calendar day(s)  [limit={MAX_DATA_AGE_DAYS}]")
+
+    if not verdict["fresh"]:
+        print("\n" + "!" * 100)
+        print("  !! PRE-FLIGHT WARNING: the parquet corpus is STALE.")
+        print("     Every symbol will be skipped with reason 'stale_data'.")
+        print("     Run the ingestion engine first:")
+        print("       python Nse_Project\\Swing_stocks\\Nifty200_data_fetcher.py")
+        print("!" * 100)
+    else:
+        print("  Freshness      : OK\n")
+
+    return info
+
+
+
 
 def main():
     symbols = list(dict.fromkeys(get_nifty200_symbols()))
@@ -737,18 +1055,27 @@ def main():
     ltp_max = 2000.0
 
     print("\n" + "=" * 100)
-    print("  ★  NIFTY 200 — SMC PRECISION ENTRY ENGINE  v5.1")
+    print("  *  NIFTY 200 - SMC PRECISION ENTRY ENGINE  v5.2")
     print("     Modules: Liquidity Sweep | FVG | MSS | Order Block | Fib Zone | Displacement")
     print("     Legacy : OFI | HH/HL Structure | VCP | RS vs NIFTY | 52wHi Proximity")
+    print("     Tech   : RSI(14) | MACD(12,26,9) | ADX(14) | ATR(14)")
     print("=" * 100)
 
-    print(f"  Scanning {len(symbols)} stocks | {MAX_WORKERS} parallel workers | cache=12h\n")
+    # 🔴 Banner previously claimed "cache=12h" while CACHE_EXPIRY_HOURS was 6 and
+    #    caching was disabled outright by cache.clear() above.
+    print(f"  Scanning {len(symbols)} stocks | {MAX_WORKERS} parallel workers")
+    print(f"  Freshness limit: {MAX_DATA_AGE_DAYS} session(s) | LTP filter: < Rs.{ltp_max:,.0f} "
+          f"| Score scale: /{SCORE_NORMALIZER:.2f}\n")
+
+    # ── PRE-FLIGHT: fail fast on a stale/absent corpus ──────────────────────
+    preflight = preflight_corpus_check()
+    print()
 
     print("  Fetching NIFTY 50 for relative strength...")
     try:
         nifty_hist = _flatten_columns(yf.Ticker("^NSEI").history(period="1y"))
         if nifty_hist.empty:
-            print("  !! NIFTY 50 unavailable — RS scores will be 0")
+            print("  !! NIFTY 50 unavailable - RS scores will be 0")
             nifty_hist = pd.DataFrame()
         else:
             print(f"  NIFTY 50 loaded: {len(nifty_hist)} bars\n")
@@ -779,57 +1106,163 @@ def main():
 
             result = future.result()
             if result is None:
-                print(f"  [{i:3d}/{len(symbols)}] {sym:15s} ✗ SKIPPED")
+                # Reason already logged + tallied inside fetch_stock_data().
                 continue
 
             result = score_stock_advanced(result)
             clean_result = {k: v for k, v in result.items() if not isinstance(v, (pd.DataFrame, pd.Series))}
             clean_result["symbol"] = sym
 
+            # ── LTP FILTER ──────────────────────────────────────────────────
+            # 🔴 FIX: previously a silent `continue` with no log and no tally,
+            #         which is exactly why the failure was misattributed.
             ltp = float(clean_result.get("lastPrice", 0) or 0)
-            if ltp >= ltp_max: continue
+            if ltp <= 0:
+                _tally("ltp_filtered")
+                _log(f"  [SKIP:ltp_filtered] {sym} — invalid LTP ({ltp})")
+                continue
+            if ltp >= ltp_max:
+                _tally("ltp_filtered")
+                _log(f"  [SKIP:ltp_filtered] {sym} — LTP Rs.{ltp:,.2f} >= limit Rs.{ltp_max:,.0f}")
+                continue
 
             final_data.append(clean_result)
             cache[sym] = {"ts": datetime.now().isoformat(), "data": clean_result}
+            _tally("scored")
 
             smc_tag = clean_result.get("smc_signal", "NO_SETUP") or "NO_SETUP"
             smc_dir = (clean_result.get("smc_direction") or "")[:4].upper()
             score = clean_result.get('score', 0)
             last_price = clean_result.get('lastPrice', 0)
 
-            print(
+            _log(
                 f"  [{i:3d}/{len(symbols)}] {sym:15s} | Score:{score:6.1f}/100 | Rs.{last_price:8.2f} | "
                 f"OFI:{clean_result.get('order_flow', 0):5.1f} Str:{clean_result.get('structure', 0):5.1f} "
                 f"VCP:{clean_result.get('vcp', 0):5.1f} RS:{clean_result.get('rs_vs_index', 0):5.1f} "
-                f"Prx:{clean_result.get('proximity', 0):5.1f} | SMC:{smc_tag[:14]:<14} {smc_dir}"
+                f"Prx:{clean_result.get('proximity', 0):5.1f} | "
+                f"RSI:{clean_result.get('RSI', 0):5.1f} ADX:{clean_result.get('ADX', 0):5.1f} | "
+                f"SMC:{smc_tag[:14]:<14} {smc_dir}"
             )
 
     print("\n  Saving cache to disk...")
     save_cache(cache)
-    if not final_data:
-        print(f"\n!! No stocks matched the LTP filter (< {ltp_max:.0f}).")
-        return
 
+    # ════════════════════════════════════════════════════════════════════════
+    # RUN SUMMARY — honest, per-reason accounting
+    # ════════════════════════════════════════════════════════════════════════
+    tally = _tally_snapshot()
+    scanned = len(symbols)
+    scored = tally.get("scored", 0)
+    skipped = scanned - scored
+
+    print("\n" + "=" * 100)
+    print("  SCAN SUMMARY")
+    print("=" * 100)
+    print(f"  Symbols scanned : {scanned}")
+    print(f"  Passed all gates: {scored}")
+    print(f"  Skipped         : {skipped}")
+
+    if skipped:
+        print("\n  Skip breakdown (reason -> count):")
+        for reason, label in SKIP_REASONS.items():
+            count = tally.get(reason, 0)
+            if count:
+                print(f"    {reason:<20} {count:4d}   ({label})")
+
+    # 🔴 The dominant failure mode gets an explicit, actionable call-out so it can
+    #    never again be misreported as an LTP-filter problem.
+    if scored == 0:
+        stale_n = tally.get("stale_data", 0)
+        missing_n = tally.get("missing_file", 0)
+        ltp_n = tally.get("ltp_filtered", 0)
+
+        print("\n" + "!" * 100)
+        print("  !! ZERO STOCKS PASSED — ROOT CAUSE:")
+        if stale_n and stale_n >= max(missing_n, ltp_n):
+            print(f"     STALE DATA is dominant ({stale_n}/{scanned} symbols).")
+            print(f"     The parquet corpus in '{HISTORY_DIR}' is more than")
+            print(f"     MAX_DATA_AGE_DAYS={MAX_DATA_AGE_DAYS} trading sessions behind.")
+            print("     ACTION: run the ingestion engine first, then re-scan:")
+            print("       python Nse_Project\\Swing_stocks\\Nifty200_data_fetcher.py")
+        elif missing_n and missing_n >= max(stale_n, ltp_n):
+            print(f"     MISSING PARQUET FILES is dominant ({missing_n}/{scanned} symbols).")
+            print(f"     Check that '{HISTORY_DIR}' exists and is populated.")
+        elif ltp_n:
+            print(f"     The LTP filter genuinely rejected every scored symbol ({ltp_n}).")
+            print(f"     All candidates priced >= Rs.{ltp_max:,.0f}. Consider raising ltp_max.")
+        else:
+            print("     No single dominant reason — see the skip breakdown above.")
+        print("!" * 100)
+
+    print("=" * 100 + "\n")
+
+    # ════════════════════════════════════════════════════════════════════════
+    # ALWAYS WRITE OUTPUTS  (never leave a stale CSV for the dashboard)
+    # ════════════════════════════════════════════════════════════════════════
+    # 🔴 FIX: the old code did `if not final_data: return` BEFORE the CSV write,
+    #         so a failed scan silently left the previous run's file on disk and
+    #         the dashboard presented days-old signals as if they were current.
     df = pd.DataFrame(final_data)
 
-    default_columns = {'symbol': 'UNKNOWN', 'lastPrice': 0.0, 'score': 0.0, 'peRatio': 0.0, 'eps': 0.0, 'RSI': 0.0, 'order_flow': 0.0, 'structure': 0.0, 'vcp': 0.0, 'rs_vs_index': 0.0, 'proximity': 0.0, 'mtf_score': 0.0, 'smc_signal': 'NO_SETUP'}
+    default_columns = {
+        'symbol': 'UNKNOWN', 'lastPrice': 0.0, 'score': 0.0, 'peRatio': 0.0, 'eps': 0.0,
+        'roe': 0.0, 'RSI': 0.0, 'MACD': 0.0, 'MACD_Signal': 0.0, 'ADX': 0.0, 'ATR': 0.0,
+        'order_flow': 0.0, 'structure': 0.0, 'vcp': 0.0, 'rs_vs_index': 0.0,
+        'proximity': 0.0, 'breakout_setup': 0.0, 'volume_trend': 0.0,
+        'mtf_score': 0.0, 'mtf_status': 'Neutral', 'smc_signal': 'NO_SETUP',
+        'smc_direction': None, 'confluence': 0, 'entry_price': None, 'stop_loss': None,
+        'take_profit': None, 'rr_ratio': None, 'reasons': '',
+        'data_as_of': None, 'data_age_days': 0, 'sessions_behind': 0,
+    }
     for col, default_val in default_columns.items():
         if col not in df.columns: df[col] = default_val
 
-    df = df.sort_values("score", ascending=False)
-    output_file = os.path.join(BASE_DIR, "nifty200_smc_precision_screen.csv")
+    if not df.empty:
+        df = df.sort_values("score", ascending=False)
+
+    output_file = OUTPUT_CSV
     try:
         df.to_csv(output_file, index=False)
     except PermissionError:
         backup_file = os.path.join(BASE_DIR, "nifty200_smc_backup_screen.csv")
-        print(f"\n  ⚠️ Warning: '{os.path.basename(output_file)}' is open. Saving to {os.path.basename(backup_file)} instead.")
+        print(f"\n  [WARN] Warning: '{os.path.basename(output_file)}' is open. Saving to {os.path.basename(backup_file)} instead.")
         df.to_csv(backup_file, index=False)
+        output_file = backup_file
+
+    # Combo buckets — written even when empty so the dashboard clears correctly.
+    categories = filter_combo_setups(df) if not df.empty else {
+        "PERFECT_COMBO": [], "STRONG_SEPA": [], "SMC_ACTIVE": []
+    }
+    save_combo_context(categories)
+
+    # Machine-readable run status for the dashboard / monitoring.
+    data_as_of = None
+    if not df.empty and df["data_as_of"].notna().any():
+        data_as_of = str(df["data_as_of"].dropna().max())
+
+    save_run_status({
+        "run_at": datetime.now().isoformat(timespec="seconds"),
+        "history_dir": HISTORY_DIR,
+        "max_data_age_days": MAX_DATA_AGE_DAYS,
+        "ltp_max": ltp_max,
+        "symbols_scanned": scanned,
+        "stocks_passed": scored,
+        "stocks_skipped": skipped,
+        "skip_breakdown": {k: v for k, v in tally.items() if k != "scored"},
+        "data_as_of": data_as_of,
+        "output_csv": output_file,
+        "status": "OK" if scored else "NO_RESULTS",
+    })
+
+    if df.empty:
+        print(f"  Wrote EMPTY result set (headers only) -> {os.path.basename(output_file)}")
+        print(f"  Wrote combo context                  -> {os.path.basename(COMBO_CONTEXT_FILE)}")
+        print(f"  Wrote run status                     -> {os.path.basename(STATUS_FILE)}")
+        print("  Dashboard will now correctly show 0 stocks instead of stale rows.\n")
+        return 1
 
     try: print_entry_report(df, top_n=20)
     except NameError: pass 
-
-    categories = filter_combo_setups(df)
-    save_combo_context(categories)
 
     print("\n  COMBO FILTER SUMMARY:")
     print(f"    PERFECT COMBO : {len(categories.get('PERFECT_COMBO', []))} stocks")
@@ -837,7 +1270,8 @@ def main():
     print(f"    SMC ACTIVE   : {len(categories.get('SMC_ACTIVE', []))} stocks")
 
     print("=" * 100)
-    print(f"  Saved: {output_file}  ({len(df)} stocks)\n")
+    print(f"  Saved: {output_file}  ({len(df)} stocks)")
+    print(f"  Data as of: {data_as_of}\n")
     print(f"  Score Distribution:")
     print(f"    Elite    80-100 : {len(df[df['score'] >= 80]):3d} stocks")
     print(f"    Strong   65-79  : {len(df[(df['score'] >= 65) & (df['score'] < 80)]):3d} stocks")
@@ -851,9 +1285,12 @@ def main():
         print(f"    {str(sig):<22}: {cnt:3d} stocks")
 
     print("\n  BEST COMBO (Minervini SEPA + SMC):")
-    print("    RS ≥ 10  +  VCP ≥ 10  +  Proximity ≥ 10  +  SMC HIGH_CONFLUENCE")
-    print("    Entry trigger: breakout candle on volume > 1.5× average, inside FVG/OB zone")
+    print("    RS >= 10  +  VCP >= 10  +  Proximity >= 10  +  SMC HIGH_CONFLUENCE")
+    print("    Entry trigger: breakout candle on volume > 1.5x average, inside FVG/OB zone")
     print("=" * 100 + "\n")
+    return 0
 
 if __name__ == "__main__":
-    main()
+    # 🔴 Non-zero exit when the scan produced no usable rows, so the launcher /
+    #    any scheduler can distinguish a real scan from a silent no-op.
+    sys.exit(main() or 0)

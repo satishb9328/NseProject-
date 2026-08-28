@@ -101,7 +101,13 @@ class UpstoxClient:
             if spot_item is None:
                 logger.error("Spot response missing expected key: %s", INDEX_INSTRUMENT_KEY)
                 return None
-            return _safe_float(spot_item.get("ltp"))
+            # Upstox /market/quotes/ltp returns the live index price under
+            # ``last_price`` (not ``ltp``). Fall back to ``ltp``/``close`` for safety.
+            spot = _safe_float(spot_item.get("last_price", spot_item.get("ltp", spot_item.get("close"))))
+            if spot <= 0:
+                logger.error("Spot response contained an invalid price: %s", spot_item)
+                return None
+            return spot
         except requests.RequestException as exc:
             logger.error("Failed to fetch spot price: %s", exc)
             return None
@@ -225,7 +231,7 @@ def main() -> int:
     while True:
         try:
             spot_price = client.fetch_spot_price()
-            if spot_price is None:
+            if not spot_price or spot_price <= 0:
                 logger.warning("Skipping fetch because spot price could not be retrieved.")
             else:
                 raw_chain = client.fetch_option_chain(expiry_date=expiry_date)
@@ -253,7 +259,7 @@ def main() -> int:
 
                         signal = signal_engine.evaluate_entry(profile, prev_spot, closes, volumes)
                         if signal is not None:
-                            print(f"{COLOR_RED}🔥 SIGNAL ALERT: {signal.direction} @ {signal.entry_price} | SL={signal.initial_sl} | TGT={signal.target} | SCORE={signal.score}{COLOR_RESET}")
+                            print(f"{COLOR_RED}SIGNAL ALERT: {signal.direction} @ {signal.entry_price} | SL={signal.initial_sl} | TGT={signal.target} | SCORE={signal.score}{COLOR_RESET}")
                             logger.info("Signal generated: %s", signal)
                         else:
                             logger.debug("No signal generated this tick.")

@@ -3,22 +3,89 @@ from django.http import JsonResponse
 from django.shortcuts import render
 from pathlib import Path
 import json
+import logging
 import math
 import os
 import pandas as pd
 import requests
-import time
+import time as std_time  # aliased to avoid clashing with `datetime.time` below
+from datetime import date, datetime, time, timedelta, timezone
 from Nse_Project.Swing_ML.views import get_swing_ml_context
+from Nse_Project.GAMMA.gamma_blast_engine import get_gamma_bot
+# Shared (expiry_date, strike_price) keying. The feed, this dashboard and the Gamma
+# engine MUST resolve an instrument's expiry identically, otherwise one of them merges
+# two chains into a single row while the others do not.
+from Nse_Project.expiry_utils import (
+    belongs_to_expiry,
+    expiry_group_key,
+    normalize_expiry,
+    resolve_row_expiry,
+)
 
-LIVE_OPTIONS_FILE = Path(__file__).resolve().parent.parent / "live_options_data.json"
+try:
+    import redis
+except ImportError:  # Keeps the dashboard importable until redis-py is installed.
+    redis = None
+
+logger = logging.getLogger(__name__)
+
+PREOPEN_TRAP_THRESHOLD = 50
+# Used only until call_wall/put_wall are wired into RedisGammaBot.last_profile.
+MOCK_CALL_WALL = 24400
+MOCK_PUT_WALL = 24100
+
+# ---------------------------------------------------------------------------
+# Live options IPC — Redis first, cold JSON only as a fallback
+# ---------------------------------------------------------------------------
+# upstox_live_feed.py SETs the entire live_state under this key on every throttled
+# publish and notifies ``gamma:live_options_updated``. Reading Redis here replaces the
+# old per-poll open() on live_options_data.json, which was the direct cause of
+# "[WinError 5] Access is denied: ...json.tmp -> ...json" in the feed: a plain Windows
+# open() does not grant FILE_SHARE_DELETE, so this view's ~3.5 ms read handle made the
+# feed's os.replace() fail with ERROR_ACCESS_DENIED. Redis has no such semantics, so
+# the failure mode is structurally impossible now, not merely less likely.
+#
+# Deliberately a RAW redis client and not django.core.cache: settings.CACHES is
+# LocMemCache (per-process, invisible to the feed), and even under django-redis the
+# cache backend key-prefixes (":1:") and pickles its values, so it could never read the
+# plain string key the feed writes. The env var names match GAMMA/gamma_blast_engine.py
+# so one setting moves the feed, the engine and the dashboard together.
+LIVE_OPTIONS_REDIS_URL = os.getenv("GAMMA_REDIS_URL", "redis://127.0.0.1:6379/0")
+LIVE_OPTIONS_REDIS_KEY = os.getenv("GAMMA_REDIS_DATA_KEY", "live_options_data")
+# Fail fast: a dead Redis must never hold a 1 Hz dashboard poll open.
+LIVE_OPTIONS_REDIS_TIMEOUT = float(os.getenv("LIVE_OPTIONS_REDIS_TIMEOUT", "0.5"))
+# Circuit breaker. After a failed Redis attempt, skip Redis entirely for this long and
+# serve the cold backup directly. Without it every single 1 Hz poll would pay the full
+# connect timeout above for as long as Redis stayed down (measured 514 ms per poll),
+# which would make the dashboard crawl and pile up Django worker threads.
+LIVE_OPTIONS_REDIS_COOLDOWN = float(os.getenv("LIVE_OPTIONS_REDIS_COOLDOWN", "5.0"))
+# Cold backup written by the feed's dump_live_state() every 5 s. Anchored on
+# settings.BASE_DIR because that is where the feed's JSON_PATH points; the previous
+# constant here resolved to Nse_Project/live_options_data.json — a stale 114-byte
+# orphan with an empty option chain.
+LIVE_OPTIONS_COLD_BACKUP = Path(settings.BASE_DIR) / "live_options_data.json"
+
+_live_options_redis = None
+_redis_outage_logged = False
+_redis_retry_after = 0.0
+
 OPTION_INSTRUMENT_METADATA: dict[str, dict] = {}
 MASTER_INSTRUMENTS_URL = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.csv.gz"
 
 LOT_SIZE = 65  # NIFTY option lot size (used to convert OI/COI shares -> lots)
 
+# Hard ceiling on the NSE round-trips behind get_active_strike_bounds(). These run inside
+# a request that the dashboard polls at ~1 Hz, and requests without a timeout block the
+# worker thread indefinitely - a slow/hanging nseindia.com would pile up Django threads
+# until the server stopped answering at all.
+NSE_REQUEST_TIMEOUT = float(os.getenv("NSE_REQUEST_TIMEOUT", "5.0"))
+
 # Dynamic strike boundaries derived from the most-active NIFTY contracts.
 _ACTIVE_STRIKE_BOUNDS: tuple | None = None
 _ACTIVE_STRIKE_BOUNDS_FETCHED_AT: float | None = None
+# Timestamp of the last ATTEMPT (success or failure). Without this a persistently failing
+# NSE endpoint was re-tried on every single poll, because only successes were ever cached.
+_ACTIVE_STRIKE_BOUNDS_ATTEMPTED_AT: float | None = None
 _ACTIVE_STRIKE_BOUNDS_TTL_SECONDS = 300  # refresh at most once every 5 minutes
 
 
@@ -47,23 +114,45 @@ def _cache_active_strike_bounds(result) -> tuple | None:
     bounds = _extract_active_strike_bounds(result)
     if bounds is not None:
         _ACTIVE_STRIKE_BOUNDS = bounds
-        _ACTIVE_STRIKE_BOUNDS_FETCHED_AT = time.monotonic()
+        _ACTIVE_STRIKE_BOUNDS_FETCHED_AT = std_time.monotonic()
     return _ACTIVE_STRIKE_BOUNDS
 
 
 def get_active_strike_bounds(force_refresh: bool = False) -> tuple | None:
-    """Return cached (lowest, highest) active strike bounds, refreshing when stale."""
+    """Return cached (lowest, highest) active strike bounds, refreshing when stale.
+
+    Both successes AND failures are rate-limited to one NSE attempt per TTL window. The
+    caller is a ~1 Hz dashboard poll, so retrying a broken/slow NSE endpoint on every call
+    would add a network round-trip to every poll; build_option_chain_rows() already falls
+    back to a safe NIFTY strike band when the bounds are unavailable.
+    """
+    global _ACTIVE_STRIKE_BOUNDS_ATTEMPTED_AT
+
     if (
         not force_refresh
         and _ACTIVE_STRIKE_BOUNDS is not None
         and _ACTIVE_STRIKE_BOUNDS_FETCHED_AT is not None
-        and (time.monotonic() - _ACTIVE_STRIKE_BOUNDS_FETCHED_AT) < _ACTIVE_STRIKE_BOUNDS_TTL_SECONDS
+        and (std_time.monotonic() - _ACTIVE_STRIKE_BOUNDS_FETCHED_AT) < _ACTIVE_STRIKE_BOUNDS_TTL_SECONDS
     ):
         return _ACTIVE_STRIKE_BOUNDS
 
+    # Negative cache: hold off after a failed attempt too.
+    if (
+        not force_refresh
+        and _ACTIVE_STRIKE_BOUNDS_ATTEMPTED_AT is not None
+        and (std_time.monotonic() - _ACTIVE_STRIKE_BOUNDS_ATTEMPTED_AT) < _ACTIVE_STRIKE_BOUNDS_TTL_SECONDS
+    ):
+        return _ACTIVE_STRIKE_BOUNDS
+
+    _ACTIVE_STRIKE_BOUNDS_ATTEMPTED_AT = std_time.monotonic()
     result = most_active_index_contracts()
     if result is not None:
         _cache_active_strike_bounds(result)
+    else:
+        logger.warning(
+            "Could not refresh the active strike bounds from NSE; keeping %s and retrying in "
+            "at most %ds.", _ACTIVE_STRIKE_BOUNDS, _ACTIVE_STRIKE_BOUNDS_TTL_SECONDS,
+        )
 
     return _ACTIVE_STRIKE_BOUNDS
 
@@ -80,14 +169,14 @@ def most_active_index_contracts():
     
     try:
         ref_url = 'https://www.nseindia.com/market-data/most-active-contracts'
-        ref = session.get(ref_url, headers=headers)
+        ref = session.get(ref_url, headers=headers, timeout=NSE_REQUEST_TIMEOUT)
         cookies = ref.cookies.get_dict()
 
         calls_url = 'https://www.nseindia.com/api/snapshot-derivatives-equity?index=calls-index-vol'
         puts_url = 'https://www.nseindia.com/api/snapshot-derivatives-equity?index=puts-index-vol'
 
-        res_calls = session.get(calls_url, headers=headers, cookies=cookies)
-        res_puts = session.get(puts_url, headers=headers, cookies=cookies)
+        res_calls = session.get(calls_url, headers=headers, cookies=cookies, timeout=NSE_REQUEST_TIMEOUT)
+        res_puts = session.get(puts_url, headers=headers, cookies=cookies, timeout=NSE_REQUEST_TIMEOUT)
 
         calls_list = res_calls.json().get('OPTIDX', {}).get('data', [])
         puts_list = res_puts.json().get('OPTIDX', {}).get('data', [])
@@ -206,21 +295,284 @@ def dashboard_view(request):
     return render(request, "dashboard.html", context)
 
 
+# --- Real Tick-By-Tick (TBT) Pre-Open data loader ---------------------------
+
+# Directory containing the daily pre-open TBT CSV/TXT files.
+PREOPEN_TBT_DIR = os.getenv(
+    "PREOPEN_TBT_DIR",
+    r"C:\Users\ADMIN\Desktop\Fari Preopen for tbt data",
+)
+PREOPEN_TBT_FILE_EXTENSIONS = (".csv", ".txt")
+PREOPEN_TBT_ENCODINGS = ("utf-8-sig", "utf-8", "latin1")
+PREOPEN_TBT_START = time(9, 0, 0)   # pre-open window start
+PREOPEN_TBT_END = time(9, 10, 0)    # pre-open window end (IEP settlement)
+
+_DATETIME_COLUMN_HINTS = ("datetime", "date and time", "timestamp", "date", "time")
+_PRICE_COLUMN_HINTS = (
+    "preopen_nifty 50", "preopen_nifty50", "nifty 50", "nifty50",
+    "iep", "ltp", "last price", "last_price", "price", "close",
+)
+
+
+def _ist_today() -> date:
+    """Return the current date in the India (IST) timezone."""
+    return datetime.now(timezone(timedelta(hours=5, minutes=30))).date()
+
+
+def _find_preopen_column(columns, hints) -> str | None:
+    """Match a DataFrame column against a list of normalized hints."""
+    normalized = {col: str(col).strip().lower().replace("_", " ") for col in columns}
+    for hint in hints:
+        for col, clean in normalized.items():
+            if clean == hint:
+                return col
+    for hint in hints:
+        for col, clean in normalized.items():
+            if hint in clean:
+                return col
+    return None
+
+
+def _read_preopen_file(file_path: str) -> pd.DataFrame | None:
+    """Read a TBT file trying several common encodings; returns None if unreadable."""
+    for encoding in PREOPEN_TBT_ENCODINGS:
+        try:
+            return pd.read_csv(file_path, encoding=encoding, sep=None, engine="python")
+        except Exception:
+            continue
+    return None
+
+
+def fetch_real_preopen_trap_data(target_date: date | None = None) -> dict | None:
+    """Compute Max/Min/Final IEP from today's real pre-open TBT ticks.
+
+    Scans ``PREOPEN_TBT_DIR`` for today's tick file(s), keeps only ticks within the
+    09:00:00 - 09:10:00 pre-open window, and returns
+    ``{'Max_IEP', 'Min_IEP', 'Final_IEP'}``. Returns ``None`` when today's file is
+    missing, empty, or unreadable so the dashboard can show a graceful fallback.
+    """
+    target_date = target_date or _ist_today()
+
+    if not os.path.isdir(PREOPEN_TBT_DIR):
+        return None
+    try:
+        file_names = sorted(os.listdir(PREOPEN_TBT_DIR))
+    except OSError:
+        return None
+
+    collected = []
+    for file_name in file_names:
+        file_path = os.path.join(PREOPEN_TBT_DIR, file_name)
+        if not os.path.isfile(file_path):
+            continue
+        if os.path.splitext(file_name)[1].lower() not in PREOPEN_TBT_FILE_EXTENSIONS:
+            continue
+
+        df = _read_preopen_file(file_path)
+        if df is None or df.empty:
+            continue
+
+        datetime_col = _find_preopen_column(df.columns, _DATETIME_COLUMN_HINTS)
+        price_col = _find_preopen_column(df.columns, _PRICE_COLUMN_HINTS)
+        if datetime_col is None or price_col is None:
+            continue
+
+        ticks = pd.DataFrame({
+            "ts": pd.to_datetime(df[datetime_col], errors="coerce"),
+            "price": pd.to_numeric(df[price_col], errors="coerce"),
+        }).dropna()
+
+        window = ticks[
+            (ticks["ts"].dt.date == target_date)
+            & (ticks["ts"].dt.time >= PREOPEN_TBT_START)
+            & (ticks["ts"].dt.time <= PREOPEN_TBT_END)
+        ]
+        if not window.empty:
+            collected.append(window)
+
+    if not collected:
+        return None
+
+    all_ticks = pd.concat(collected, ignore_index=True).sort_values("ts")
+    if all_ticks.empty:
+        return None
+
+    return {
+        "Max_IEP": round(float(all_ticks["price"].max()), 2),
+        "Min_IEP": round(float(all_ticks["price"].min()), 2),
+        "Final_IEP": round(float(all_ticks["price"].iloc[-1]), 2),
+    }
+
+
+def get_gamma_walls() -> tuple[float, float]:
+    """Read call/put wall strikes from the live Gamma bot, falling back to mock values."""
+    bot = get_gamma_bot()
+    last_profile = bot.last_profile or {}
+    call_wall = last_profile.get('call_wall') or MOCK_CALL_WALL
+    put_wall = last_profile.get('put_wall') or MOCK_PUT_WALL
+    return call_wall, put_wall
+
+
 def live_signals_view(request):
-    return render(request, "live_signals.html")
+    call_wall, put_wall = get_gamma_walls()
+    trap_data = fetch_real_preopen_trap_data()
+
+    # No real TBT data for today yet -> graceful waiting state, no dummy signals.
+    if trap_data is None:
+        context = {
+            'preopen_max': None,
+            'preopen_min': None,
+            'preopen_final': None,
+            'call_wall': call_wall,
+            'put_wall': put_wall,
+            'trap_signal': 'WAITING FOR TBT DATA',
+        }
+        return render(request, "live_signals.html", context)
+
+    max_iep = trap_data['Max_IEP']
+    min_iep = trap_data['Min_IEP']
+    final_iep = trap_data['Final_IEP']
+
+    bull_trap = (max_iep - final_iep) > PREOPEN_TRAP_THRESHOLD
+    bear_trap = (final_iep - min_iep) > PREOPEN_TRAP_THRESHOLD
+    high_prob_buy_pe = bull_trap and final_iep > call_wall
+    high_prob_buy_ce = bear_trap and final_iep < put_wall
+
+    if high_prob_buy_pe:
+        trap_signal = "HIGH PROBABILITY BUY PE"
+    elif high_prob_buy_ce:
+        trap_signal = "HIGH PROBABILITY BUY CE"
+    else:
+        trap_signal = "NEUTRAL - NO TRAP DETECTED"
+
+    context = {
+        'preopen_max': max_iep,
+        'preopen_min': min_iep,
+        'preopen_final': final_iep,
+        'call_wall': call_wall,
+        'put_wall': put_wall,
+        'trap_signal': trap_signal,
+    }
+    return render(request, "live_signals.html", context)
+
+
+def get_live_options_redis():
+    """Return the process-wide Redis client for the live feed, or None if unusable.
+
+    Lazily created and then reused: building a client per request would add a TCP
+    connect to every 1 Hz dashboard poll. redis-py pools connections internally and is
+    thread-safe, so one module-level client is correct for Django's threaded server.
+    """
+    global _live_options_redis
+
+    if redis is None:
+        return None
+    if _live_options_redis is None:
+        try:
+            _live_options_redis = redis.Redis.from_url(
+                LIVE_OPTIONS_REDIS_URL,
+                decode_responses=True,
+                socket_connect_timeout=LIVE_OPTIONS_REDIS_TIMEOUT,
+                socket_timeout=LIVE_OPTIONS_REDIS_TIMEOUT,
+            )
+        except Exception as exc:  # bad URL, unsupported scheme, ...
+            logger.warning("Could not build the live-options Redis client: %s", exc)
+            return None
+    return _live_options_redis
+
+
+def _read_live_options_from_redis() -> dict | None:
+    """Return the live snapshot published by the feed, or None if Redis cannot serve it.
+
+    None means "fall back to disk" and is returned for every failure mode: redis-py
+    missing, server down, key absent (feed not started yet) or an unparseable payload.
+    An empty-but-valid snapshot is NOT None — that is a real answer from a live feed.
+    """
+    global _redis_outage_logged, _redis_retry_after
+
+    client = get_live_options_redis()
+    if client is None:
+        return None
+
+    # Circuit breaker: a recent failure means don't even try — go straight to disk.
+    if std_time.monotonic() < _redis_retry_after:
+        return None
+
+    try:
+        raw = client.get(LIVE_OPTIONS_REDIS_KEY)
+    except Exception as exc:  # RedisError, socket timeout, DNS failure, ...
+        _redis_retry_after = std_time.monotonic() + LIVE_OPTIONS_REDIS_COOLDOWN
+        # Log the first outage only: this runs on every dashboard poll and would
+        # otherwise flood the console at 1 Hz for as long as Redis stays down.
+        if not _redis_outage_logged:
+            logger.warning(
+                "Redis unavailable at %s (%s); serving the cold JSON backup instead.",
+                LIVE_OPTIONS_REDIS_URL, exc,
+            )
+            _redis_outage_logged = True
+        return None
+
+    _redis_retry_after = 0.0
+    if _redis_outage_logged:
+        logger.info("Redis is back; serving live option data from %s again.", LIVE_OPTIONS_REDIS_KEY)
+        _redis_outage_logged = False
+
+    if not raw:
+        # Key missing/empty: the feed has not published yet this session.
+        return None
+
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError) as exc:
+        logger.warning("Redis key %s held unparseable JSON (%s).", LIVE_OPTIONS_REDIS_KEY, exc)
+        return None
+
+    if not isinstance(payload, dict):
+        logger.warning("Redis key %s did not hold a JSON object.", LIVE_OPTIONS_REDIS_KEY)
+        return None
+
+    payload["data_source"] = "redis"
+    return payload
+
+
+def _read_live_options_from_disk() -> dict:
+    """Cold fallback: the 5-second snapshot the feed's dump_live_state() leaves on disk.
+
+    Only reached while Redis is down. The feed now touches this file once every 5 s
+    instead of ~32 times a second, so even this path is ~160x less likely to collide
+    with the feed's os.replace() than the old per-tick behaviour was.
+    """
+    try:
+        if not LIVE_OPTIONS_COLD_BACKUP.exists():
+            logger.warning("No cold backup at %s; returning an empty snapshot.", LIVE_OPTIONS_COLD_BACKUP)
+            return {}
+        with LIVE_OPTIONS_COLD_BACKUP.open("r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except (OSError, ValueError) as exc:
+        # ValueError covers json.JSONDecodeError, which is expected here: the file can
+        # be caught mid-rewrite while the feed is dumping it.
+        logger.warning("Cold backup %s unreadable (%s).", LIVE_OPTIONS_COLD_BACKUP, exc)
+        return {}
+
+    if not isinstance(payload, dict):
+        return {}
+
+    payload["data_source"] = "cold_json"
+    return payload
 
 
 def read_live_options_data() -> dict:
-    json_path = os.path.join(settings.BASE_DIR, 'live_options_data.json')
-    try:
-        print(f"API fetched, file exists: {os.path.exists(json_path)}")
-        if not os.path.exists(json_path):
-            return {}
-        with open(json_path, "r", encoding="utf-8") as fh:
-            return json.load(fh)
-    except Exception as exc:
-        print(f"API fetch error reading JSON: {exc}")
-        return {}
+    """Return the latest live option-chain snapshot.
+
+    Redis is the live IPC channel (the feed publishes there on every tick, throttled);
+    the on-disk JSON is only a cold backup for when Redis is unavailable. The returned
+    dict carries a ``data_source`` key ("redis" / "cold_json") so the dashboard and the
+    API response can show which path served the data.
+    """
+    payload = _read_live_options_from_redis()
+    if payload is not None:
+        return payload
+    return _read_live_options_from_disk()
 
 
 def get_nested(raw, path):
@@ -332,13 +684,34 @@ def _json_safe_value(value):
         return 0
 
 
-def build_option_chain_rows(instrument_data: dict, target_symbol: str = "NIFTY", strike_bounds=None) -> list:
+def build_option_chain_rows(
+    instrument_data: dict,
+    target_symbol: str = "NIFTY",
+    strike_bounds=None,
+    expiry_date=None,
+) -> list:
+    """Fold the feed's flat ``instrument_data`` map into option-chain rows.
+
+    Rows are keyed by the COMPOSITE ``(expiry_date, strike_price)`` and never by the bare
+    strike. With a strike-only key, an ``instrument_data`` map that carried two expiries
+    (a second feed instance publishing to the same Redis key, a snapshot restored across a
+    rollover, a half-finished subscription swap) merged them: the CE leg of expiry A and
+    the PE leg of expiry B landed in the SAME row, so ``call_coi``/``put_coi`` were taken
+    from two unrelated chains and the resulting totals were arbitrary.
+
+    ``expiry_date`` is the snapshot's active expiry (``live_options_data.expiry_date``).
+    When supplied, any instrument that PROVABLY belongs to another expiry is dropped and
+    logged; entries whose expiry cannot be determined are kept and folded into the active
+    bucket, so an unknown symbol format can never blank the dashboard.
+    """
     if not isinstance(instrument_data, dict):
         return []
 
-    rows = {}
+    rows: dict[tuple, dict] = {}
     excluded_symbols = ("BANKNIFTY", "FINNIFTY", "SENSEX", "MIDCPNIFTY")
     target_prefix = target_symbol.upper().replace(" ", "")
+    active_expiry = normalize_expiry(expiry_date)
+    foreign_expiries: dict[str, int] = {}
 
     # Dynamic strike window from most-active contracts; fall back to a safe NIFTY band.
     if strike_bounds and len(strike_bounds) == 2:
@@ -364,23 +737,36 @@ def build_option_chain_rows(instrument_data: dict, target_symbol: str = "NIFTY",
         if strike is None or not (lowest_strike <= strike <= highest_strike):
             continue
 
+        # Lock 3: Expiry isolation. Only instruments that provably belong to another
+        # expiry are rejected, so this can never empty a chain whose entries simply do
+        # not carry an expiry marker yet.
+        if active_expiry and not belongs_to_expiry(item, active_expiry):
+            foreign = resolve_row_expiry(item) or "unknown"
+            foreign_expiries[foreign] = foreign_expiries.get(foreign, 0) + 1
+            continue
+
         side = (item.get('option_type') or '').upper()
         raw = item.get('raw_sample', {}) if isinstance(item.get('raw_sample', {}), dict) else {}
         if side not in {"CE", "PE"}:
             continue
 
         strike_key = str(int(strike) if float(strike).is_integer() else strike)
-        row = rows.setdefault(strike_key, {
+        # THE fix: (expiry_date, strike_price), not strike_price alone.
+        row_key = (expiry_group_key(item, active_expiry), strike)
+        row = rows.setdefault(row_key, {
             'strike': strike_key,
+
             'call_oi_pct': '-',
             'call_oi': '-',
             'call_volume': '-',
+            'call_velocity': '-',
             'call_ltp': '-',
             'call_coi': '-',
             'call_coi_pct': '-',
             'put_coi_pct': '-',
             'put_coi': '-',
             'put_ltp': '-',
+            'put_velocity': '-',
             'put_volume': '-',
             'put_oi': '-',
             'put_oi_pct': '-',
@@ -402,14 +788,24 @@ def build_option_chain_rows(instrument_data: dict, target_symbol: str = "NIFTY",
         coi = _to_number(item.get('coi'))
         coi_pct = _to_number(item.get('coi_pct'))
         if coi is None and isinstance(oi, (int, float)):
-            prev_oi = _to_number(item.get('previous_oi'))
+            # `poi` is the previous-day OI written by the live feed; `previous_oi` is
+            # kept as a legacy alias for older payloads.
+            prev_oi = _to_number(item.get('poi'))
+            if prev_oi is None:
+                prev_oi = _to_number(item.get('previous_oi'))
             if isinstance(prev_oi, (int, float)):
                 coi = oi - prev_oi
                 coi_pct = round((coi / prev_oi) * 100, 2) if prev_oi != 0 else 0
 
+        # Volume Velocity (shares/sec) from the feed's rolling window tracker.
+        velocity = _to_number(item.get('volume_velocity'))
+        if velocity is None:
+            velocity = _to_number(item.get(f'{"call" if side == "CE" else "put"}_velocity'))
+
         row[f'{target}_ltp'] = ltp if ltp is not None else '-'
         row[f'{target}_oi'] = oi if oi is not None else '-'
         row[f'{target}_volume'] = volume if volume is not None else '-'
+        row[f'{target}_velocity'] = velocity if velocity is not None else 0
         row[f'{target}_coi'] = coi if coi is not None else 0
         row[f'{target}_coi_pct'] = coi_pct if coi_pct is not None else 0
 
@@ -431,12 +827,21 @@ def build_option_chain_rows(instrument_data: dict, target_symbol: str = "NIFTY",
     def has_activity(value):
         return isinstance(value, (int, float)) and value != 0
 
+    if foreign_expiries:
+        # This is the smoking gun for a second feed instance or a stale rollover: log it
+        # loudly instead of silently folding the foreign chain into the active rows.
+        logger.warning(
+            "Dropped %d option-chain rows from non-active expiries %s (active expiry %s).",
+            sum(foreign_expiries.values()), sorted(foreign_expiries), active_expiry,
+        )
+
+    # Sorted by the composite key so the output is deterministic even when more than one
+    # expiry survives (possible only when the snapshot carries no active expiry at all).
     filtered = [
-        row for row in rows.values()
+        row for _, row in sorted(rows.items(), key=lambda item: (item[0][0], item[0][1]))
         if has_activity(row.get('call_oi')) or has_activity(row.get('call_volume')) or
            has_activity(row.get('put_oi')) or has_activity(row.get('put_volume'))
     ]
-    filtered.sort(key=lambda row: float(row['strike']) if row['strike'] != '-' else float('inf'))
 
     # Convert OI / COI share quantities into lots (NIFTY lot size = 65).
     for row in filtered:
@@ -453,17 +858,90 @@ def _json_safe_row(row: dict) -> dict:
 
 
 def live_option_chain_api(request):
+    """Serve the live option chain, and NEVER answer a 1 Hz poll with an HTML 500.
+
+    dashboard.html does ``if (!response.ok) throw`` and then renders
+    "Unable to load live option data." - so an unhandled exception here costs the whole
+    chain AND leaves no diagnostic anywhere. Any failure is therefore logged with a full
+    traceback and returned as a normal JSON body carrying an ``error`` field, with every
+    key the frontend expects still present.
+    """
+    try:
+        return JsonResponse(_build_live_option_chain_payload())
+    except Exception as exc:
+        logger.error(
+            "live_option_chain_api failed; serving an empty chain with the error attached.",
+            exc_info=True,
+        )
+        return JsonResponse({
+            "data_source": "error",
+            "updated_at": 0,
+            "expiry_date": 0,
+            "spot_price": 0,
+            "spot_source": 0,
+            "spot_updated_at": 0,
+            "poi_source": 0,
+            "poi_updated_at": 0,
+            "poi_instruments": 0,
+            "feed_connected": False,
+            "feed_status": "api_error",
+            "stale": True,
+            "seconds_since_last_tick": 0,
+            "strike_bounds": None,
+            "option_chain": [],
+            # Surfaced deliberately: the browser console/network tab then names the fault
+            # instead of showing an opaque 500, and the traceback is in the Django log.
+            "error": f"{type(exc).__name__}: {exc}",
+        })
+
+
+def _build_live_option_chain_payload() -> dict:
     data = read_live_options_data()
     strike_bounds = get_active_strike_bounds()
+    # The snapshot's own expiry is passed in so rows are keyed by
+    # (expiry_date, strike_price) and any instrument belonging to a DIFFERENT expiry is
+    # dropped instead of being merged into an active-expiry row.
+    active_expiry = data.get("expiry_date")
     chain = build_option_chain_rows(
-        data.get("instrument_data", {}), target_symbol="NIFTY", strike_bounds=strike_bounds
+        data.get("instrument_data", {}),
+        target_symbol="NIFTY",
+        strike_bounds=strike_bounds,
+        expiry_date=active_expiry,
     )
     chain = [_json_safe_row(row) for row in chain]
-    return JsonResponse({
+
+    # Live index spot. This is what the dashboard polls for the SPOT readout, so it
+    # MUST be part of this response — previously it was written to
+    # live_options_data.json by the feed but never forwarded here, which left the UI
+    # depending on the much slower /gamma/status/ round-trip and looking frozen.
+    spot_price = None
+    for key in ("spot_price", "underlying_spot", "underlying_ltp", "index_ltp", "nifty_ltp"):
+        candidate = _to_number(data.get(key))
+        if isinstance(candidate, (int, float)) and candidate > 0:
+            spot_price = candidate
+            break
+
+    return {
+        # Which IPC path served this response: "redis" (live) or "cold_json" (fallback).
+        "data_source": _json_safe_value(data.get("data_source")),
         "updated_at": _json_safe_value(data.get("updated_at")),
         "expiry_date": _json_safe_value(data.get("expiry_date")),
-        "baseline_date": _json_safe_value(data.get("baseline_date")),
-        "baseline_source": _json_safe_value(data.get("baseline_source")),
+        "spot_price": _json_safe_value(spot_price),
+        "spot_source": _json_safe_value(data.get("spot_source")),
+        "spot_updated_at": _json_safe_value(data.get("spot_updated_at")),
+        # Previous-OI provenance (replaces the retired historical-baseline fields).
+        "poi_source": _json_safe_value(data.get("poi_source")),
+        "poi_updated_at": _json_safe_value(data.get("poi_updated_at")),
+        "poi_instruments": _json_safe_value(data.get("poi_instruments")),
+        # Feed liveness, published by the producer. `stale` is True when the websocket is
+        # down or has not delivered a tick recently, which is exactly when `updated_at`
+        # must NOT be read as "this data is current".
+        "feed_connected": bool(data.get("feed_connected")),
+        "feed_status": _json_safe_value(data.get("feed_status")),
+        "stale": bool(data.get("stale", False)),
+        "seconds_since_last_tick": _json_safe_value(data.get("seconds_since_last_tick")),
         "strike_bounds": list(strike_bounds) if strike_bounds else None,
         "option_chain": chain,
-    })
+        "error": None,
+    }
+

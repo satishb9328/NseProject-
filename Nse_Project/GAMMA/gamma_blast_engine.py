@@ -1,8 +1,12 @@
 """Redis-driven Gamma Blast strategy worker.
 
-The WebSocket producer stores its latest JSON payload in ``live_options_data`` and
-publishes a notification or the payload itself to ``gamma:live_options_updated``.
-No market-data REST calls or local files are used by this module.
+Final Version Includes:
+1. Linear interpolation for precise Gamma Flip levels.
+2. Granular volume Surge (measuring volume near the flip, not the whole chain).
+3. True ATR Calculation (accounting for Highs, Lows, and gaps).
+4. Dynamic Risk-Free Rate via environment variables.
+5. 2-Minute Timeframe Grouping: Groups live Redis ticks into 2m OHLC candles 
+   so ATR and Stop Loss are sized correctly for intraday volatility.
 """
 
 from __future__ import annotations
@@ -14,13 +18,22 @@ import threading
 import time
 from collections import deque
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Deque, Dict, Iterable, List, Optional
 
 try:
     import redis
-except ImportError:  # Keeps Django imports available until redis-py is installed.
+except ImportError:
     redis = None
+
+# Shared (expiry_date, strike_price) keying, used by the live feed and the dashboard too
+# so producer and consumers can never disagree about which chain a strike belongs to.
+from Nse_Project.expiry_utils import (
+    belongs_to_expiry,
+    expiry_group_key,
+    normalize_expiry,
+    resolve_row_expiry,
+)
 
 
 CONFIG = {
@@ -33,11 +46,19 @@ CONFIG = {
     "capital": 100000,
     "max_positions": 1,
     "history_size": 120,
+    "gamma_flip_band": 500,
+    "risk_free_rate": float(os.getenv("RISK_FREE_RATE", "0.065")), 
+    "candle_minutes": 2,  # Timeframe for OHLC grouping
 }
 
 REDIS_URL = os.getenv("GAMMA_REDIS_URL", "redis://127.0.0.1:6379/0")
 REDIS_DATA_KEY = os.getenv("GAMMA_REDIS_DATA_KEY", "live_options_data")
 REDIS_CHANNEL = os.getenv("GAMMA_REDIS_CHANNEL", "gamma:live_options_updated")
+
+DAYS_PER_YEAR = 365.0
+SECONDS_PER_YEAR = DAYS_PER_YEAR * 24.0 * 60.0 * 60.0
+VOL_POINTS_PER_UNIT = 100.0
+MIN_DTE_YEARS = 1.0 / (DAYS_PER_YEAR * 24.0)
 
 
 class GammaBotError(RuntimeError):
@@ -63,14 +84,37 @@ def bs_greeks(spot: float, strike: float, dte: float, rate: float, volatility: f
         d2 = d1 - volatility * sqrt_dte
         normal_pdf = math.exp(-0.5 * d1**2) / math.sqrt(2 * math.pi)
         gamma = normal_pdf / (spot * volatility * sqrt_dte)
+        
         charm_core = normal_pdf * (2 * rate * dte - d2 * volatility * sqrt_dte) / (2 * dte * volatility * sqrt_dte)
+        charm_core /= DAYS_PER_YEAR
         call_charm = -charm_core
         put_charm = charm_core
-        vanna = -normal_pdf * d2 / volatility
+        
+        vanna = (-normal_pdf * d2 / volatility) / VOL_POINTS_PER_UNIT
         values = (gamma, call_charm, put_charm, vanna)
         return values if all(math.isfinite(value) for value in values) else (0.0, 0.0, 0.0, 0.0)
     except (ArithmeticError, ValueError):
         return 0.0, 0.0, 0.0, 0.0
+
+
+def gamma_regime_signal(net_gex: float, pcr: float) -> str:
+    if net_gex < 0 and pcr < 0.7:
+        return "🔴 Negative Gamma: Market Weak / BUY PE"
+    if net_gex > 0 and pcr >= 0.7:
+        return "🟢 Positive Gamma: Stable Market / Buy Dips"
+    return "🟡 Range-bound: Choppy / Transition Zone"
+
+DAY_GEX_NEUTRAL_FRACTION = float(os.getenv("GAMMA_DAY_NEUTRAL_FRACTION", "0.15"))
+
+def day_gamma_regime_signal(net_gex: float, gross_gex: float) -> str:
+    if not math.isfinite(net_gex) or not math.isfinite(gross_gex) or gross_gex <= 0:
+        return "🟡 Range-bound: Choppy / Transition Zone"
+    ratio = net_gex / gross_gex
+    if ratio <= -DAY_GEX_NEUTRAL_FRACTION:
+        return "🔴 Negative Gamma: Market Weak / BUY PE"
+    if ratio >= DAY_GEX_NEUTRAL_FRACTION:
+        return "🟢 Positive Gamma: Stable Market / Buy Dips"
+    return "🟡 Range-bound: Choppy / Transition Zone"
 
 
 @dataclass
@@ -86,8 +130,13 @@ class OptionStrike:
     put_vol: float = 0.0
     call_coi: float = 0.0
     put_coi: float = 0.0
+    has_day_coi: bool = False
     net_gex: float = 0.0
     day_net_gex: float = 0.0
+    call_gex: float = 0.0
+    put_gex: float = 0.0
+    day_call_gex: float = 0.0
+    day_put_gex: float = 0.0
     call_charm: float = 0.0
     put_charm: float = 0.0
     call_vanna: float = 0.0
@@ -109,6 +158,12 @@ class GammaMetrics:
     put_wall: Optional[float] = None
     net_charm: float = 0.0
     net_vanna: float = 0.0
+    signal: str = ""
+    gross_gex: float = 0.0
+    net_gex_ratio: float = 0.0
+    strike_count: int = 0
+    call_flow: float = 0.0
+    put_flow: float = 0.0
 
 
 @dataclass
@@ -143,11 +198,9 @@ class EntrySignal:
 
 
 class GammaProcessor:
-    """Transforms an already-received live option-chain snapshot into gamma metrics."""
-
     def __init__(self, symbol: str) -> None:
         self.symbol = symbol
-        self.risk_free_rate = 0.065
+        self.risk_free_rate = CONFIG["risk_free_rate"]
 
     def process_payload(self, payload: Dict[str, Any]) -> Optional[GammaProfile]:
         spot = _number(payload.get("spot_price"))
@@ -167,18 +220,25 @@ class GammaProcessor:
             try:
                 call_gamma, strike.call_charm, _, strike.call_vanna = bs_greeks(spot, strike.strike, dte, self.risk_free_rate, strike.call_iv / 100)
                 put_gamma, _, strike.put_charm, strike.put_vanna = bs_greeks(spot, strike.strike, dte, self.risk_free_rate, strike.put_iv / 100)
-                strike.net_gex = (strike.call_oi * call_gamma - strike.put_oi * put_gamma) * CONFIG["lot_size"] * spot
-                strike.day_net_gex = (strike.call_coi * call_gamma - strike.put_coi * put_gamma) * CONFIG["lot_size"] * spot
-                strike.net_charm = (strike.call_oi * strike.call_charm - strike.put_oi * strike.put_charm) * CONFIG["lot_size"] * spot
-                strike.day_net_charm = (strike.call_coi * strike.call_charm - strike.put_coi * strike.put_charm) * CONFIG["lot_size"] * spot
-                strike.net_vanna = (strike.call_oi * strike.call_vanna - strike.put_oi * strike.put_vanna) * CONFIG["lot_size"] * spot
-                strike.day_net_vanna = (strike.call_coi * strike.call_vanna - strike.put_coi * strike.put_vanna) * CONFIG["lot_size"] * spot
+                
+                gex_scale = spot
+                strike.call_gex = -strike.call_oi * call_gamma * gex_scale
+                strike.put_gex = strike.put_oi * put_gamma * gex_scale
+                strike.net_gex = strike.call_gex + strike.put_gex
+                strike.net_charm = strike.call_oi * strike.call_charm - strike.put_oi * strike.put_charm
+                strike.net_vanna = strike.call_oi * strike.call_vanna - strike.put_oi * strike.put_vanna
+                
+                if strike.has_day_coi:
+                    strike.day_call_gex = -strike.call_coi * call_gamma * gex_scale
+                    strike.day_put_gex = strike.put_coi * put_gamma * gex_scale
+                    strike.day_net_charm = strike.call_coi * strike.call_charm - strike.put_coi * strike.put_charm
+                    strike.day_net_vanna = strike.call_coi * strike.call_vanna - strike.put_coi * strike.put_vanna
+                else:
+                    strike.day_call_gex = strike.day_put_gex = 0.0
+                    strike.day_net_charm = strike.day_net_vanna = 0.0
+                strike.day_net_gex = strike.day_call_gex + strike.day_put_gex
             except (ArithmeticError, TypeError, ValueError):
-                strike.call_charm = strike.put_charm = 0.0
-                strike.call_vanna = strike.put_vanna = 0.0
-                strike.net_gex = strike.day_net_gex = 0.0
-                strike.net_charm = strike.day_net_charm = 0.0
-                strike.net_vanna = strike.day_net_vanna = 0.0
+                pass
 
         profile = GammaProfile(spot=spot, expiry=expiry, dte=dte, strikes=strikes)
         self._build_metrics(profile)
@@ -188,21 +248,26 @@ class GammaProcessor:
         try:
             expiry_close = datetime.strptime(expiry, "%Y-%m-%d").replace(hour=15, minute=30)
         except ValueError:
-            return 1e-6
-        return max((expiry_close - datetime.now()).total_seconds() / (365 * 24 * 60 * 60), 1e-6)
+            return MIN_DTE_YEARS
+        remaining = (expiry_close - datetime.now()).total_seconds() / SECONDS_PER_YEAR
+        return max(remaining, MIN_DTE_YEARS)
 
     @staticmethod
     def _to_strike(row: Dict[str, Any]) -> Optional[OptionStrike]:
         strike = _number(row.get("strike_price", row.get("strike")))
         if strike <= 0:
             return None
+        call_coi_raw = row.get("call_coi")
+        put_coi_raw = row.get("put_coi")
+        has_day_coi = call_coi_raw is not None and put_coi_raw is not None
         return OptionStrike(
             strike=strike,
             call_oi=_number(row.get("call_oi")), call_iv=_number(row.get("call_iv")),
             call_ltp=_number(row.get("call_ltp")), call_vol=_number(row.get("call_volume")),
             put_oi=_number(row.get("put_oi")), put_iv=_number(row.get("put_iv")),
             put_ltp=_number(row.get("put_ltp")), put_vol=_number(row.get("put_volume")),
-            call_coi=_number(row.get("call_coi")), put_coi=_number(row.get("put_coi")),
+            call_coi=_number(call_coi_raw), put_coi=_number(put_coi_raw),
+            has_day_coi=has_day_coi,
         )
 
     @staticmethod
@@ -218,7 +283,24 @@ class GammaProcessor:
     @staticmethod
     def _build_metrics(profile: GammaProfile) -> None:
         profile.weekly_gamma = GammaProcessor._metrics_for(profile.strikes, "call_oi", "put_oi", "net_gex", "net_charm", "net_vanna", profile.spot)
-        profile.day_gamma = GammaProcessor._metrics_for(profile.strikes, "call_coi", "put_coi", "day_net_gex", "day_net_charm", "day_net_vanna", profile.spot)
+        day_strikes = [strike for strike in profile.strikes if strike.has_day_coi]
+        profile.day_gamma = GammaProcessor._metrics_for(
+            day_strikes, "call_coi", "put_coi", "day_net_gex", "day_net_charm", "day_net_vanna",
+            profile.spot, absolute_pcr=True,
+        )
+        profile.day_gamma.gross_gex = sum(
+            abs(strike.day_call_gex) + abs(strike.day_put_gex) for strike in day_strikes
+        )
+        profile.day_gamma.net_gex_ratio = (
+            round(profile.day_gamma.net_gex / profile.day_gamma.gross_gex, 4)
+            if profile.day_gamma.gross_gex > 0 else 0.0
+        )
+        profile.weekly_gamma.gamma_flip_level = GammaProcessor._find_gamma_flip(profile.strikes, "call_gex", "put_gex", profile.spot)
+        profile.day_gamma.gamma_flip_level = GammaProcessor._find_gamma_flip(day_strikes, "day_call_gex", "day_put_gex", profile.spot)
+        
+        profile.weekly_gamma.signal = gamma_regime_signal(profile.weekly_gamma.net_gex, profile.weekly_gamma.pcr)
+        profile.day_gamma.signal = day_gamma_regime_signal(profile.day_gamma.net_gex, profile.day_gamma.gross_gex)
+        
         profile.net_gex = profile.weekly_gamma.net_gex
         profile.pcr = profile.weekly_gamma.pcr
         profile.gamma_flip_level = profile.weekly_gamma.gamma_flip_level
@@ -228,31 +310,59 @@ class GammaProcessor:
         profile.skew = atm.put_iv - atm.call_iv
 
     @staticmethod
-    def _metrics_for(strikes: List[OptionStrike], call_field: str, put_field: str, gex_field: str, charm_field: str, vanna_field: str, spot: float) -> GammaMetrics:
+    def _metrics_for(strikes: List[OptionStrike], call_field: str, put_field: str, gex_field: str, charm_field: str, vanna_field: str, spot: float, absolute_pcr: bool = False) -> GammaMetrics:
         call_total = sum(getattr(strike, call_field) for strike in strikes)
         put_total = sum(getattr(strike, put_field) for strike in strikes)
-        metrics = GammaMetrics(
-            pcr=round(put_total / call_total, 3) if call_total else 0.0,
+        pcr_call = abs(call_total) if absolute_pcr else call_total
+        pcr_put = abs(put_total) if absolute_pcr else put_total
+        call_wall_strike = max(strikes, key=lambda strike: getattr(strike, call_field)).strike if strikes else None
+        put_wall_strike = max(strikes, key=lambda strike: getattr(strike, put_field)).strike if strikes else None
+        return GammaMetrics(
+            pcr=round(pcr_put / pcr_call, 3) if pcr_call else 0.0,
             net_gex=sum(getattr(strike, gex_field) for strike in strikes),
             gamma_flip_level=spot,
+            call_wall_strike=call_wall_strike,
+            put_wall_strike=put_wall_strike,
+            call_wall=call_wall_strike,
+            put_wall=put_wall_strike,
             net_charm=sum(getattr(strike, charm_field) for strike in strikes),
             net_vanna=sum(getattr(strike, vanna_field) for strike in strikes),
+            strike_count=len(strikes),
+            call_flow=call_total,
+            put_flow=put_total,
         )
-        gex_by_strike = [(getattr(strike, gex_field), strike.strike) for strike in strikes]
-        positive_gex = [(gex, strike) for gex, strike in gex_by_strike if gex > 0]
-        negative_gex = [(gex, strike) for gex, strike in gex_by_strike if gex < 0]
-        metrics.call_wall_strike = max(positive_gex)[1] if positive_gex else None
-        metrics.put_wall_strike = min(negative_gex)[1] if negative_gex else None
-        metrics.call_wall = metrics.call_wall_strike
-        metrics.put_wall = metrics.put_wall_strike
-        cumulative_gex = 0.0
-        for strike in sorted(strikes, key=lambda item: item.strike):
-            previous_gex = cumulative_gex
-            cumulative_gex += getattr(strike, gex_field)
-            if (previous_gex < 0 <= cumulative_gex) or (previous_gex >= 0 > cumulative_gex):
-                metrics.gamma_flip_level = strike.strike
-                break
-        return metrics
+
+    @staticmethod
+    def _find_gamma_flip(strikes: List[OptionStrike], call_gex_attr: str, put_gex_attr: str, spot: float) -> float:
+        """Locates the gamma-flip node and interpolates the exact decimal price."""
+        band = float(CONFIG.get("gamma_flip_band", 500))
+        pool = sorted(
+            (strike for strike in strikes if abs(strike.strike - spot) <= band),
+            key=lambda strike: strike.strike,
+        )
+        if not pool:
+            pool = sorted(strikes, key=lambda strike: strike.strike)
+        if not pool:
+            return spot
+
+        cumulative = 0.0
+        prev_cumulative = 0.0
+        prev_strike = spot
+        
+        for strike in pool:
+            strike_gex = getattr(strike, call_gex_attr) + getattr(strike, put_gex_attr)
+            cumulative += strike_gex
+            
+            if prev_cumulative != 0.0 and ((prev_cumulative < 0 <= cumulative) or (prev_cumulative > 0 >= cumulative)):
+                gex_diff = cumulative - prev_cumulative
+                if gex_diff != 0:
+                    ratio = abs(prev_cumulative) / abs(gex_diff)
+                    return prev_strike + (strike.strike - prev_strike) * ratio
+            
+            prev_cumulative = cumulative
+            prev_strike = strike.strike
+            
+        return spot
 
 
 class SignalEngine:
@@ -264,7 +374,6 @@ class SignalEngine:
         self._previous_day_pcr: Optional[float] = None
 
     def evaluate_gamma_alerts(self, profile: GammaProfile) -> List[str]:
-        """Return edge-triggered macro and intraday alerts for one expiry."""
         weekly = profile.weekly_gamma
         day = profile.day_gamma
         if profile.expiry != self._previous_gamma_expiry:
@@ -305,11 +414,19 @@ class SignalEngine:
         return previous is not None and previous <= 0 < current
 
     @staticmethod
-    def _compute_atr(closes: Iterable[float]) -> float:
-        values = list(closes)
-        if len(values) < 15:
+    def _compute_true_atr(highs: Iterable[float], lows: Iterable[float], closes: Iterable[float]) -> float:
+        h, l, c = list(highs), list(lows), list(closes)
+        if len(c) < 15:
             return 0.0
-        return sum(abs(values[index] - values[index - 1]) for index in range(-14, 0)) / 14
+        
+        true_ranges = []
+        for i in range(-14, 0):
+            tr1 = h[i] - l[i]
+            tr2 = abs(h[i] - c[i-1])
+            tr3 = abs(l[i] - c[i-1])
+            true_ranges.append(max(tr1, tr2, tr3))
+            
+        return sum(true_ranges) / 14
 
     @staticmethod
     def _volume_surge(volumes: Iterable[float]) -> float:
@@ -319,20 +436,31 @@ class SignalEngine:
         baseline = sum(values[-10:-1]) / 9
         return values[-1] / max(baseline, 1.0)
 
-    def evaluate_entry(self, profile: GammaProfile, previous_spot: float, closes: Iterable[float], volumes: Iterable[float]) -> Optional[EntrySignal]:
-        atr = self._compute_atr(closes)
+    def evaluate_entry(
+        self, 
+        profile: GammaProfile, 
+        previous_spot: float, 
+        highs: Iterable[float], 
+        lows: Iterable[float], 
+        closes: Iterable[float], 
+        flip_volumes: Iterable[float]
+    ) -> Optional[EntrySignal]:
+        
+        atr = self._compute_true_atr(highs, lows, closes)
         if atr <= 0:
             return None
+            
         crossed_up = previous_spot < profile.gamma_flip_level <= profile.spot
         crossed_down = previous_spot > profile.gamma_flip_level >= profile.spot
         if not (crossed_up or crossed_down):
             return None
 
-        volume_surge = self._volume_surge(volumes)
+        volume_surge = self._volume_surge(flip_volumes)
         flip_distance = abs(profile.spot - profile.gamma_flip_level) / profile.spot * 100
         score = min(30, int(max(0, volume_surge - 1.5) * 20)) if volume_surge >= CONFIG["volume_surge_mult"] else 0
         score += min(20, int(flip_distance * 4)) + min(20, int(abs(profile.skew) * 2))
         score += 15 if profile.pcr < 0.6 or profile.pcr > 1.4 else 8 if profile.pcr < 0.8 or profile.pcr > 1.2 else 0
+        
         if score < 50:
             return None
 
@@ -341,20 +469,29 @@ class SignalEngine:
         target = profile.spot + atr * CONFIG["atr_target_mult"] if direction == "CE" else profile.spot - atr * CONFIG["atr_target_mult"]
         risk_amount = CONFIG["capital"] * CONFIG["risk_per_trade"]
         size = max(1, int(risk_amount / (abs(profile.spot - sl) * CONFIG["lot_size"])))
-        signal = EntrySignal(datetime.now().isoformat(timespec="seconds"), CONFIG["symbol"], profile.spot, direction, "FLIP_REVERSAL", profile.spot, round(sl, 1), round(target, 1), round(CONFIG["atr_target_mult"] / CONFIG["atr_sl_mult"], 2), score, size)
+        
+        signal = EntrySignal(
+            datetime.now().isoformat(timespec="seconds"), 
+            CONFIG["symbol"], profile.spot, direction, "FLIP_REVERSAL", 
+            profile.spot, round(sl, 1), round(target, 1), 
+            round(CONFIG["atr_target_mult"] / CONFIG["atr_sl_mult"], 2), 
+            score, size
+        )
         self.active_trade = {"entry": profile.spot, "direction": direction, "sl": signal.initial_sl, "target": signal.target}
         return signal
 
     def manage_trade(self, spot: float, atr: float) -> Optional[str]:
-        if not self.active_trade:
+        if not self.active_trade or atr <= 0:
             return None
         trade = self.active_trade
         if trade["direction"] == "CE" and spot >= trade["entry"] + atr:
             trade["sl"] = max(trade["sl"], round(spot - atr * 0.8, 1))
         elif trade["direction"] == "PE" and spot <= trade["entry"] - atr:
             trade["sl"] = min(trade["sl"], round(spot + atr * 0.8, 1))
+            
         hit_stop = spot <= trade["sl"] if trade["direction"] == "CE" else spot >= trade["sl"]
         hit_target = spot >= trade["target"] if trade["direction"] == "CE" else spot <= trade["target"]
+        
         if hit_stop or hit_target:
             reason = "SL_HIT" if hit_stop else "TARGET_HIT"
             self.active_trade = None
@@ -362,16 +499,66 @@ class SignalEngine:
         return None
 
 
+_SYMBOL_SOURCE_FIELDS = ("tradingsymbol", "trading_symbol", "symbol", "underlying", "underlying_name")
+
+
+def _is_foreign_underlying(item: Dict[str, Any], target: str) -> bool:
+    """True only when an entry's symbol PROVABLY belongs to a different underlying.
+
+    The engine sums GEX/charm/vanna across every row it is given and derives the gamma
+    flip, PCR and the walls from those sums, so a single leaked MIDCPNIFTY/BANKNIFTY or
+    stock-option strike silently distorts the whole profile - it lands at a strike level
+    (15225, 52000, 3000) that has nothing to do with NIFTY.
+
+    A genuine NIFTY option symbol is the underlying followed IMMEDIATELY by the expiry
+    code, which always starts with a digit. Sibling indices either fail the prefix
+    (BANKNIFTY..., MIDCPNIFTY..., RELIANCE...) or put a LETTER right after it
+    (NIFTYNXT50..., NIFTYFPI...). An entry with no symbol at all is NOT foreign: the feed
+    is the only writer and it publishes one underlying, so "unknown" must never drop data.
+    """
+    for field in _SYMBOL_SOURCE_FIELDS:
+        raw = item.get(field)
+        if not isinstance(raw, str):
+            continue
+        text = raw.strip().upper().replace(" ", "")
+        if not text:
+            continue
+        if not text.startswith(target):
+            return True
+        rest = text[len(target):]
+        if rest and not rest[0].isdigit():
+            return True
+        return False
+    return False
+
+
 def normalize_live_payload(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Normalize direct snapshots and Live Dashboard ``instrument_data`` maps."""
+    """Normalize a live snapshot into ``{spot_price, expiry_date, data:[rows]}``.
+
+    Rows are keyed by the COMPOSITE ``(expiry_date, strike_price)``. Keying them by the
+    bare strike let a payload that carried two expiries collapse into one chain: the CE
+    leg of expiry A and the PE leg of expiry B were written into the SAME row, and every
+    aggregate built from it (COI flow, day GEX, PCR, gamma flip) then mixed two unrelated
+    chains while ``process_payload`` priced the whole lot at a single DTE.
+
+    Instruments that provably belong to an expiry other than ``payload["expiry_date"]``
+    are dropped, because that DTE is what the greeks are computed with. Instruments whose
+    expiry cannot be determined are kept and folded into the active bucket.
+    """
     if isinstance(payload.get("data"), list):
         normalized = dict(payload)
         normalized["spot_price"] = _find_spot_price(payload) or _estimate_spot_from_rows(normalized["data"])
         return normalized
+
     instrument_data = payload.get("instrument_data")
     if not isinstance(instrument_data, dict):
         return None
-    rows: Dict[float, Dict[str, Any]] = {}
+
+    active_expiry = normalize_expiry(payload.get("expiry_date"))
+    target_symbol = str(CONFIG.get("symbol") or "NIFTY").strip().upper().replace(" ", "")
+    rows: Dict[tuple, Dict[str, Any]] = {}
+    foreign_expiries: Dict[str, int] = {}
+    foreign_underlyings = 0
     for item in instrument_data.values():
         if not isinstance(item, dict):
             continue
@@ -379,23 +566,46 @@ def normalize_live_payload(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         side = str(item.get("option_type", "")).upper()
         if strike <= 0 or side not in {"CE", "PE"}:
             continue
-        row = rows.setdefault(strike, {"strike_price": strike})
+        # Underlying isolation: an equity or a sibling index that leaked into the payload
+        # would otherwise be summed into the NIFTY gamma profile at its own strike level.
+        if _is_foreign_underlying(item, target_symbol):
+            foreign_underlyings += 1
+            continue
+        if active_expiry and not belongs_to_expiry(item, active_expiry):
+            foreign = resolve_row_expiry(item) or "unknown"
+            foreign_expiries[foreign] = foreign_expiries.get(foreign, 0) + 1
+            continue
+
+        row_expiry = expiry_group_key(item, active_expiry)
+        row = rows.setdefault(
+            (row_expiry, strike),
+            {"strike_price": strike, "expiry": row_expiry or None},
+        )
         prefix = "call" if side == "CE" else "put"
         row[f"{prefix}_oi"] = _number(item.get("oi"))
-        row[f"{prefix}_coi"] = _number(item.get("coi"))
+        raw_coi = item.get("coi")
+        row[f"{prefix}_coi"] = None if raw_coi is None else _number(raw_coi)
         row[f"{prefix}_iv"] = _number(item.get("iv"))
         row[f"{prefix}_ltp"] = _number(item.get("ltp"))
         row[f"{prefix}_volume"] = _number(item.get("volume"))
-    option_rows = list(rows.values())
+
+    # Sorted by (expiry, strike) so the strike series handed to _find_gamma_flip and the
+    # spot estimator is always monotonic per expiry rather than dict-insertion ordered.
+    option_rows = [row for _, row in sorted(rows.items(), key=lambda item: (item[0][0], item[0][1]))]
     return {
         "spot_price": _find_spot_price(payload) or _estimate_spot_from_rows(option_rows),
         "expiry_date": payload.get("expiry_date"),
         "data": option_rows,
+        # Non-zero here means the producer published more than one expiry under a single
+        # Redis key - the exact condition that used to corrupt the aggregates silently.
+        "foreign_expiry_rows": sum(foreign_expiries.values()),
+        "foreign_expiries": sorted(foreign_expiries),
+        # Non-zero means an equity/sibling-index instrument reached the engine.
+        "foreign_underlying_rows": foreign_underlyings,
     }
 
 
 def _find_spot_price(payload: Any) -> float:
-    """Find an explicitly supplied index spot without mistaking option LTP for it."""
     spot_keys = {"spot_price", "underlying_spot", "underlying_ltp", "index_ltp", "nifty_ltp"}
     if isinstance(payload, dict):
         for key, value in payload.items():
@@ -416,7 +626,6 @@ def _find_spot_price(payload: Any) -> float:
 
 
 def _estimate_spot_from_rows(rows: Iterable[Dict[str, Any]]) -> float:
-    """Infer index spot from put-call parity, then use the median active strike."""
     parity_estimates = []
     active_strikes = []
     for row in rows:
@@ -429,9 +638,15 @@ def _estimate_spot_from_rows(rows: Iterable[Dict[str, Any]]) -> float:
             parity_estimates.append(strike + call_ltp - put_ltp)
         if call_ltp > 0 or put_ltp > 0 or _number(row.get("call_oi")) > 0 or _number(row.get("put_oi")) > 0:
             active_strikes.append(strike)
-    estimates = sorted(parity_estimates or active_strikes)
-    if not estimates:
+
+    if not active_strikes:
         return 0.0
+
+    active_strikes.sort()
+    atm = active_strikes[len(active_strikes) // 2]
+    band = float(CONFIG.get("gamma_flip_band", 500))
+    valid_parity = [estimate for estimate in parity_estimates if abs(estimate - atm) <= band]
+    estimates = sorted(valid_parity or parity_estimates or [atm])
     middle = len(estimates) // 2
     return estimates[middle] if len(estimates) % 2 else (estimates[middle - 1] + estimates[middle]) / 2
 
@@ -449,8 +664,21 @@ class RedisGammaBot:
         self._redis_client: Any = None
         self.processor = GammaProcessor(CONFIG["symbol"])
         self.signal_engine = SignalEngine()
+        
+        # Deques for 2-minute OHLC candles
         self.closes: Deque[float] = deque(maxlen=CONFIG["history_size"])
-        self.volumes: Deque[float] = deque(maxlen=CONFIG["history_size"])
+        self.highs: Deque[float] = deque(maxlen=CONFIG["history_size"])
+        self.lows: Deque[float] = deque(maxlen=CONFIG["history_size"])
+        self.flip_volumes: Deque[float] = deque(maxlen=CONFIG["history_size"])
+        
+        # 2-Minute Candle State Tracking
+        self.candle_minutes = CONFIG["candle_minutes"]
+        self.current_candle_start: Optional[datetime] = None
+        self.current_candle_high: float = 0.0
+        self.current_candle_low: float = float('inf')
+        self.current_candle_close: float = 0.0
+        self.current_candle_flip_vol: float = 0.0
+        
         self.previous_spot = 0.0
         self.last_signal: Optional[Dict[str, Any]] = {
             "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -506,7 +734,6 @@ class RedisGammaBot:
         }
 
     def _prime_from_redis(self) -> None:
-        """Process any already-published snapshot so /gamma/status/ has data immediately."""
         if self._redis_client is None:
             return
         try:
@@ -527,6 +754,34 @@ class RedisGammaBot:
         except Exception as exc:
             self.last_error = str(exc)
 
+    def _update_2m_candle(self, spot: float, flip_vol: float) -> None:
+        """Groups live ticks into 2-minute OHLC candles to calculate accurate ATR."""
+        now = datetime.now()
+        # Truncate to the nearest 2-minute boundary (e.g., 10:00, 10:02, 10:04)
+        current_bucket = now.replace(second=0, microsecond=0)
+        current_bucket = current_bucket - timedelta(minutes=current_bucket.minute % self.candle_minutes)
+
+        # If the 2-minute window has passed, save the completed candle and start a new one
+        if self.current_candle_start is not None and current_bucket > self.current_candle_start:
+            self.highs.append(self.current_candle_high)
+            self.lows.append(self.current_candle_low)
+            self.closes.append(self.current_candle_close)
+            self.flip_volumes.append(self.current_candle_flip_vol)
+            
+            # Reset for the new candle
+            self.current_candle_high = spot
+            self.current_candle_low = spot
+            self.current_candle_close = spot
+            self.current_candle_flip_vol = flip_vol
+        else:
+            # Update the current forming candle
+            self.current_candle_high = max(self.current_candle_high, spot)
+            self.current_candle_low = min(self.current_candle_low, spot)
+            self.current_candle_close = spot
+            self.current_candle_flip_vol += flip_vol  # Accumulate volume within the 2m window
+            
+        self.current_candle_start = current_bucket
+
     def _process_message(self, message_data: Any) -> None:
         try:
             raw_payload = json.loads(message_data) if isinstance(message_data, str) and message_data.strip().startswith("{") else self._redis_client.get(self.data_key)
@@ -541,20 +796,39 @@ class RedisGammaBot:
             if not profile:
                 raise ValueError("Redis payload is missing valid spot, expiry, or strike data")
 
-            total_volume = sum(strike.call_vol + strike.put_vol for strike in profile.strikes)
-            self.closes.append(profile.spot)
-            self.volumes.append(total_volume)
+            # Calculate volume strictly near the Gamma Flip level (±100 pts)
+            flip_band_vol = 100.0
+            granular_flip_vol = sum(
+                strike.call_vol + strike.put_vol 
+                for strike in profile.strikes 
+                if abs(strike.strike - profile.gamma_flip_level) <= flip_band_vol
+            )
+            
+            # Group ticks into 2-minute OHLC candles for ATR
+            self._update_2m_candle(profile.spot, granular_flip_vol)
+
             for message in self.signal_engine.evaluate_gamma_alerts(profile):
                 self.gamma_alerts.append({
                     "timestamp": datetime.now().isoformat(timespec="seconds"),
                     "message": message,
                 })
-            if self.previous_spot > 0:
-                signal = self.signal_engine.evaluate_entry(profile, self.previous_spot, self.closes, self.volumes)
+                
+            # Only evaluate entries if we have enough 2-min candles for a valid ATR (14 candles = 28 mins)
+            if self.previous_spot > 0 and len(self.closes) >= 15:
+                signal = self.signal_engine.evaluate_entry(
+                    profile, 
+                    self.previous_spot, 
+                    self.highs, 
+                    self.lows, 
+                    self.closes, 
+                    self.flip_volumes 
+                )
                 if signal:
                     self.last_signal = asdict(signal)
-            atr = self.signal_engine._compute_atr(self.closes)
+                    
+            atr = self.signal_engine._compute_true_atr(self.highs, self.lows, self.closes) if len(self.closes) >= 15 else 0.0
             self.signal_engine.manage_trade(profile.spot, atr)
+            
             self.previous_spot = profile.spot
             self.last_profile = {
                 "spot": profile.spot,
@@ -575,48 +849,44 @@ class RedisGammaBot:
 _default_bot: Optional[RedisGammaBot] = None
 _default_bot_lock = threading.Lock()
 
-
 def get_gamma_bot() -> RedisGammaBot:
-    """Return the process-wide singleton Gamma bot shared by views and apps."""
     global _default_bot
     with _default_bot_lock:
         if _default_bot is None:
             _default_bot = RedisGammaBot()
         return _default_bot
 
-
 def main() -> None:
-    """CLI entry point: keep the Redis pub/sub engine running continuously."""
-    print("🚀 Starting Gamma Blast Engine...")
+    print("[START] Starting Gamma Blast Engine...")
 
     bot = RedisGammaBot()
     try:
         bot.start()
     except GammaBotError as e:
-        print(f"❌ Error: {e}")
+        print(f"[ERROR] Error: {e}")
         return
 
-    print(f"✅ Connected to Redis at {bot.redis_url}")
-    print(f"📡 Listening on channel '{bot.channel}' (data key: {bot.data_key})")
-    print("🔄 Waiting for live option-chain updates. Press Ctrl+C to exit.")
+    print(f"[OK] Connected to Redis at {bot.redis_url}")
+    print(f"[INFO] Listening on channel '{bot.channel}' (data key: {bot.data_key})")
+    print(f"[INFO] Timeframe set to {CONFIG['candle_minutes']} minutes.")
+    print("[INFO] Waiting for live option-chain updates. Press Ctrl+C to exit.")
 
     try:
         while True:
             if not bot.is_running:
-                print("⚠️ Listener thread stopped unexpectedly — restarting...")
+                print("[WARN] Listener thread stopped unexpectedly - restarting...")
                 try:
                     bot.start()
                 except GammaBotError as e:
-                    print(f"❌ Error: {e}")
+                    print(f"[ERROR] Error: {e}")
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n🛑 KeyboardInterrupt received — shutting down gracefully...")
+        print("\n[STOP] KeyboardInterrupt received - shutting down gracefully...")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"[ERROR] Error: {e}")
     finally:
         bot.stop()
-        print("👋 Gamma Blast Engine stopped.")
-
+        print("[STOP] Gamma Blast Engine stopped.")
 
 if __name__ == "__main__":
     main()
