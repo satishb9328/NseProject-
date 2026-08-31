@@ -438,8 +438,12 @@
         return value;
       }
 
-      const GEX_NEUTRAL_THRESHOLD = 5000000000; // 5 Billion
+      const GEX_NEUTRAL_THRESHOLD = 75000000; // ~7.5 Cr of per-contract net GEX
 
+      // The Gamma engine reports exposures per CONTRACT (it divides out the lot factor
+      // the feed bakes into OI/COI), so this gate is 65x smaller than the old 5-billion
+      // share-scaled one. It is only a fallback: when the engine publishes its own
+      // regime `signal` that verdict wins.
       function netGexTier(value) {
         const num = typeof value === 'number' ? value : Number(value);
         if (!Number.isFinite(num)) {
@@ -454,6 +458,14 @@
         return { colorClass: 'text-yellow-500', summary: '🟡 Rangebound: Choppy / Transition Zone' };
       }
 
+      function signalTier(signal) {
+        const text = typeof signal === 'string' ? signal : '';
+        if (text.startsWith('🔴')) return { colorClass: 'text-red-500', summary: text };
+        if (text.startsWith('🟢')) return { colorClass: 'text-green-500', summary: text };
+        if (text.startsWith('🟡')) return { colorClass: 'text-yellow-500', summary: text };
+        return null;
+      }
+
       function renderGammaProfile(profile) {
         if (!profile || typeof profile !== 'object') return;
 
@@ -461,12 +473,17 @@
         const pcr = profile.pcr ?? profile.PCR ?? '--';
         const gammaFlip = profile.gamma_flip_level ?? profile.gamma_flip ?? profile.gammaFlip ?? profile.gamma_flip_value ?? '--';
         const netGex = profile.net_gex ?? profile.netGEX ?? profile.net_gex_value ?? '--';
-        const gexTier = netGexTier(netGex);
+        const weekly = profile.weekly_gamma || {};
+        const gexTier = signalTier(weekly.signal) || netGexTier(netGex);
 
         const spotText = formatGammaValue(spot);
         const pcrText = formatGammaValue(pcr);
         const flipText = formatGammaValue(gammaFlip);
-        const gexText = formatGammaValue(netGex);
+        // Prefer the engine's compact string ("121.09 Cr") over a raw 10-14 digit number.
+        const gexDisplay = profile.net_gex_display ?? weekly.net_gex_display;
+        const gexText = (typeof gexDisplay === 'string' && gexDisplay && gexDisplay !== '--')
+          ? gexDisplay
+          : formatGammaValue(netGex);
 
         // Track the numeric spot so the ATM strike row can be highlighted, but only
         // when the direct index tick is unavailable — the Gamma profile's spot is

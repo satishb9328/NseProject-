@@ -7,6 +7,11 @@ Final Version Includes:
 4. Dynamic Risk-Free Rate via environment variables.
 5. 2-Minute Timeframe Grouping: Groups live Redis ticks into 2m OHLC candles 
    so ATR and Stop Loss are sized correctly for intraday volatility.
+6. Contract-scaled exposures: the feed publishes OI/COI in shares (contracts * lot
+   size), so the lot factor is divided back out before the Gamma/Charm/Vanna formulas
+   run - NET GEX/CHARM/VANNA are no longer 65x too large.
+7. Compact ``*_display`` strings ("-1.07 Cr") published next to every raw exposure so
+   the dashboard never has to print a 14-digit number.
 """
 
 from __future__ import annotations
@@ -49,6 +54,16 @@ CONFIG = {
     "gamma_flip_band": 500,
     "risk_free_rate": float(os.getenv("RISK_FREE_RATE", "0.065")), 
     "candle_minutes": 2,  # Timeframe for OHLC grouping
+    # --- Exposure scale of the INBOUND Redis payload --------------------------------
+    # upstox_live_feed._scale_oi_to_internal() publishes every OI/COI figure as
+    # ``upstox_oi * LOT_SIZE`` (65 for NIFTY), i.e. in SHARES, not contracts. Consumed
+    # as-is, every GEX/charm/vanna sum below came out exactly LOT_SIZE (65x) too large
+    # (the 1,07,21,30,50,043-style numbers on the dashboard). "shares" divides that lot
+    # factor back out so all exposures are per CONTRACT; set
+    # GAMMA_OI_INPUT_SCALE=contracts if a producer ever publishes raw lot counts.
+    "oi_input_scale": os.getenv("GAMMA_OI_INPUT_SCALE", "shares").strip().lower(),
+    # Compact units for the *_display strings: "indian" -> K/L/Cr, "international" -> K/M/B/T.
+    "exposure_units": os.getenv("GAMMA_EXPOSURE_UNITS", "indian").strip().lower(),
 }
 
 REDIS_URL = os.getenv("GAMMA_REDIS_URL", "redis://127.0.0.1:6379/0")
@@ -71,6 +86,62 @@ def _number(value: Any, default: float = 0.0) -> float:
         return number if math.isfinite(number) else default
     except (TypeError, ValueError):
         return default
+
+
+# Producer-side ``scale`` hints that already mean "one unit == one contract", so there is
+# no lot factor left to undo.
+CONTRACT_SCALE_HINTS = frozenset({"contract", "contracts", "lot", "lots"})
+
+# Compact suffix tables used by format_exposure(). Ordered high -> low.
+INDIAN_UNITS = ((1e7, "Cr"), (1e5, "L"), (1e3, "K"))
+INTERNATIONAL_UNITS = ((1e12, "T"), (1e9, "B"), (1e6, "M"), (1e3, "K"))
+
+
+def resolve_oi_divisor(payload: Optional[Dict[str, Any]] = None) -> float:
+    """Return the factor that converts published OI/COI back into CONTRACTS.
+
+    The live feed stores ``oi_shares = oi_contracts * LOT_SIZE`` (see
+    ``upstox_live_feed._scale_oi_to_internal``), so every exposure the engine built from
+    those figures was inflated by exactly the lot size. Dividing the OI/COI by this
+    factor *before* the greeks are applied removes that inflation once, at the single
+    point where the payload enters the engine, which keeps GEX, charm, vanna, the COI
+    flows and the walls all in the same (per-contract) unit.
+
+    The payload wins when it declares its own convention (``lot_size``/``scale``), so a
+    producer that switches to a different lot size - or to raw lot counts - is honoured
+    without touching the engine. ``1.0`` means "leave the numbers alone".
+    """
+    payload = payload if isinstance(payload, dict) else {}
+    declared_scale = str(payload.get("scale") or "").strip().lower()
+    if declared_scale in CONTRACT_SCALE_HINTS:
+        return 1.0
+    if str(CONFIG.get("oi_input_scale") or "").strip().lower() in CONTRACT_SCALE_HINTS:
+        return 1.0
+    lot_size = _number(payload.get("lot_size") or payload.get("lotSize"))
+    if lot_size <= 0:
+        lot_size = _number(CONFIG.get("lot_size"))
+    return lot_size if lot_size > 0 else 1.0
+
+
+def format_exposure(value: Any, units: Optional[str] = None, precision: int = 2) -> str:
+    """Render a raw exposure as a short, dashboard-friendly string.
+
+    ``-1072130050043`` becomes ``-107,213.01 Cr`` in Indian units (or ``-1.07 T`` in
+    international ones) instead of a 14-digit wall of numbers. Non-finite input is
+    reported as ``--`` so the UI never prints ``nan``.
+    """
+    number = _number(value, default=float("nan"))
+    if not math.isfinite(number):
+        return "--"
+    if number == 0:
+        return "0"
+    scale = str(units or CONFIG.get("exposure_units") or "indian").strip().lower()
+    table = INTERNATIONAL_UNITS if scale.startswith("int") else INDIAN_UNITS
+    magnitude = abs(number)
+    for threshold, suffix in table:
+        if magnitude >= threshold:
+            return f"{number / threshold:,.{precision}f} {suffix}"
+    return f"{number:,.0f}" if magnitude >= 1 else f"{number:,.{precision}f}"
 
 
 def bs_greeks(spot: float, strike: float, dte: float, rate: float, volatility: float) -> tuple[float, float, float, float]:
@@ -150,7 +221,7 @@ class OptionStrike:
 @dataclass
 class GammaMetrics:
     pcr: float = 0.0
-    gamma_flip_level: float = 0.0
+    gamma_flip_level: Optional[float] = None
     net_gex: float = 0.0
     call_wall_strike: Optional[float] = None
     put_wall_strike: Optional[float] = None
@@ -164,6 +235,18 @@ class GammaMetrics:
     strike_count: int = 0
     call_flow: float = 0.0
     put_flow: float = 0.0
+    # --- Presentation ---------------------------------------------------------------
+    # Pre-formatted, compact copies of the exposures above (e.g. "-1.07 Cr"). The raw
+    # floats stay untouched for maths/alerts; the dashboard renders these strings so a
+    # multi-crore exposure no longer shows up as a 14-digit number.
+    net_gex_display: str = ""
+    gross_gex_display: str = ""
+    net_charm_display: str = ""
+    net_vanna_display: str = ""
+    call_flow_display: str = ""
+    put_flow_display: str = ""
+    # Unit the raw numbers are expressed in, so a consumer can never guess wrong.
+    exposure_unit: str = "contracts"
 
 
 @dataclass
@@ -173,13 +256,18 @@ class GammaProfile:
     dte: float
     strikes: List[OptionStrike] = field(default_factory=list)
     net_gex: float = 0.0
-    gamma_flip_level: float = 0.0
+    gamma_flip_level: Optional[float] = None
     call_wall: float = 0.0
     put_wall: float = 0.0
     pcr: float = 0.0
     skew: float = 0.0
     weekly_gamma: GammaMetrics = field(default_factory=GammaMetrics)
     day_gamma: GammaMetrics = field(default_factory=GammaMetrics)
+    # Lot factor that was divided out of the inbound OI/COI (1.0 = payload was already
+    # per contract) plus the resulting unit, both recorded for traceability.
+    contract_divisor: float = 1.0
+    oi_unit: str = "contracts"
+    net_gex_display: str = ""
 
 
 @dataclass
@@ -209,7 +297,11 @@ class GammaProcessor:
         if spot <= 0 or not expiry or not isinstance(rows, list):
             return None
 
-        strikes = [self._to_strike(row) for row in rows if isinstance(row, dict)]
+        # The feed publishes OI/COI in SHARES (contracts * lot size). Undo that exactly
+        # once, here, so every downstream figure (GEX, charm, vanna, COI flows, walls) is
+        # per CONTRACT instead of 65x too large.
+        oi_divisor = resolve_oi_divisor(payload)
+        strikes = [self._to_strike(row, oi_divisor) for row in rows if isinstance(row, dict)]
         strikes = [strike for strike in strikes if strike is not None]
         if not strikes:
             return None
@@ -240,7 +332,14 @@ class GammaProcessor:
             except (ArithmeticError, TypeError, ValueError):
                 pass
 
-        profile = GammaProfile(spot=spot, expiry=expiry, dte=dte, strikes=strikes)
+        profile = GammaProfile(
+            spot=spot,
+            expiry=expiry,
+            dte=dte,
+            strikes=strikes,
+            contract_divisor=oi_divisor,
+            oi_unit="contracts",
+        )
         self._build_metrics(profile)
         return profile
 
@@ -253,20 +352,31 @@ class GammaProcessor:
         return max(remaining, MIN_DTE_YEARS)
 
     @staticmethod
-    def _to_strike(row: Dict[str, Any]) -> Optional[OptionStrike]:
+    def _to_strike(row: Dict[str, Any], oi_divisor: Optional[float] = None) -> Optional[OptionStrike]:
+        """Build one strike, converting the published OI/COI back into contracts.
+
+        ``oi_divisor`` is the lot factor to remove (see ``resolve_oi_divisor``); when it
+        is omitted the configured lot size is used, so a direct caller gets the same
+        per-contract scale as ``process_payload``. A ``coi`` of ``None`` still means
+        "unknown" and must survive the conversion untouched - only a real number is
+        rescaled.
+        """
         strike = _number(row.get("strike_price", row.get("strike")))
         if strike <= 0:
             return None
+        divisor = _number(oi_divisor) if oi_divisor is not None else resolve_oi_divisor()
+        if divisor <= 0:
+            divisor = 1.0
         call_coi_raw = row.get("call_coi")
         put_coi_raw = row.get("put_coi")
         has_day_coi = call_coi_raw is not None and put_coi_raw is not None
         return OptionStrike(
             strike=strike,
-            call_oi=_number(row.get("call_oi")), call_iv=_number(row.get("call_iv")),
+            call_oi=_number(row.get("call_oi")) / divisor, call_iv=_number(row.get("call_iv")),
             call_ltp=_number(row.get("call_ltp")), call_vol=_number(row.get("call_volume")),
-            put_oi=_number(row.get("put_oi")), put_iv=_number(row.get("put_iv")),
+            put_oi=_number(row.get("put_oi")) / divisor, put_iv=_number(row.get("put_iv")),
             put_ltp=_number(row.get("put_ltp")), put_vol=_number(row.get("put_volume")),
-            call_coi=_number(call_coi_raw), put_coi=_number(put_coi_raw),
+            call_coi=_number(call_coi_raw) / divisor, put_coi=_number(put_coi_raw) / divisor,
             has_day_coi=has_day_coi,
         )
 
@@ -309,6 +419,23 @@ class GammaProcessor:
         atm = min(profile.strikes, key=lambda strike: abs(strike.strike - profile.spot))
         profile.skew = atm.put_iv - atm.call_iv
 
+        # Refresh the compact strings LAST so gross_gex (set above, after _metrics_for)
+        # is included and every display value matches the final raw float.
+        GammaProcessor._apply_display_fields(profile.weekly_gamma)
+        GammaProcessor._apply_display_fields(profile.day_gamma)
+        profile.net_gex_display = format_exposure(profile.net_gex)
+
+    @staticmethod
+    def _apply_display_fields(metrics: GammaMetrics) -> GammaMetrics:
+        """Fill the compact ``*_display`` strings from the raw exposure floats."""
+        metrics.net_gex_display = format_exposure(metrics.net_gex)
+        metrics.gross_gex_display = format_exposure(metrics.gross_gex)
+        metrics.net_charm_display = format_exposure(metrics.net_charm)
+        metrics.net_vanna_display = format_exposure(metrics.net_vanna)
+        metrics.call_flow_display = format_exposure(metrics.call_flow)
+        metrics.put_flow_display = format_exposure(metrics.put_flow)
+        return metrics
+
     @staticmethod
     def _metrics_for(strikes: List[OptionStrike], call_field: str, put_field: str, gex_field: str, charm_field: str, vanna_field: str, spot: float, absolute_pcr: bool = False) -> GammaMetrics:
         call_total = sum(getattr(strike, call_field) for strike in strikes)
@@ -317,10 +444,10 @@ class GammaProcessor:
         pcr_put = abs(put_total) if absolute_pcr else put_total
         call_wall_strike = max(strikes, key=lambda strike: getattr(strike, call_field)).strike if strikes else None
         put_wall_strike = max(strikes, key=lambda strike: getattr(strike, put_field)).strike if strikes else None
-        return GammaMetrics(
+        metrics = GammaMetrics(
             pcr=round(pcr_put / pcr_call, 3) if pcr_call else 0.0,
             net_gex=sum(getattr(strike, gex_field) for strike in strikes),
-            gamma_flip_level=spot,
+            gamma_flip_level=None,
             call_wall_strike=call_wall_strike,
             put_wall_strike=put_wall_strike,
             call_wall=call_wall_strike,
@@ -331,39 +458,70 @@ class GammaProcessor:
             call_flow=call_total,
             put_flow=put_total,
         )
+        return GammaProcessor._apply_display_fields(metrics)
 
     @staticmethod
-    def _find_gamma_flip(strikes: List[OptionStrike], call_gex_attr: str, put_gex_attr: str, spot: float) -> float:
-        """Locates the gamma-flip node and interpolates the exact decimal price."""
+    def _find_gamma_flip(strikes: List[OptionStrike], call_gex_attr: str, put_gex_attr: str, spot: float) -> Optional[float]:
+        """Return the dominant zero-crossing of cumulative net GEX near spot.
+
+        The cumulative sum is seeded from the absolute bottom of the supplied chain
+        (not reset at the band edge) so every crossing tested is a chain-wide crossing.
+        Candidate crossings are restricted to ``gamma_flip_band`` around spot. When
+        signed data (day COI) produces multiple crossings, the one with the largest
+        cumulative swing wins; ties break toward spot. ``None`` means no flip exists.
+        """
         band = float(CONFIG.get("gamma_flip_band", 500))
-        pool = sorted(
-            (strike for strike in strikes if abs(strike.strike - spot) <= band),
-            key=lambda strike: strike.strike,
-        )
-        if not pool:
-            pool = sorted(strikes, key=lambda strike: strike.strike)
-        if not pool:
-            return spot
+        ordered = sorted(strikes, key=lambda strike: strike.strike)
+        if not ordered:
+            return None
+
+        lower_edge = spot - band
+        upper_edge = spot + band
 
         cumulative = 0.0
-        prev_cumulative = 0.0
-        prev_strike = spot
-        
-        for strike in pool:
+        prev_cumulative: Optional[float] = None
+        prev_strike: Optional[float] = None
+        best_level: Optional[float] = None
+        best_swing = -1.0
+
+        for strike in ordered:
             strike_gex = getattr(strike, call_gex_attr) + getattr(strike, put_gex_attr)
+
+            # Seed the running total from every strike below the band so the first
+            # in-band cumulative is chain-absolute rather than band-relative.
+            if strike.strike < lower_edge:
+                cumulative += strike_gex
+                continue
+            if strike.strike > upper_edge:
+                continue
+
+            if prev_strike is None:
+                cumulative += strike_gex
+                prev_cumulative = cumulative
+                prev_strike = strike.strike
+                continue
+
+            prev_cumulative = cumulative
             cumulative += strike_gex
-            
-            if prev_cumulative != 0.0 and ((prev_cumulative < 0 <= cumulative) or (prev_cumulative > 0 >= cumulative)):
+
+            prev_sign = (prev_cumulative > 0) - (prev_cumulative < 0)
+            curr_sign = (cumulative > 0) - (cumulative < 0)
+            if prev_sign != 0 and prev_sign != curr_sign:
                 gex_diff = cumulative - prev_cumulative
                 if gex_diff != 0:
                     ratio = abs(prev_cumulative) / abs(gex_diff)
-                    return prev_strike + (strike.strike - prev_strike) * ratio
-            
-            prev_cumulative = cumulative
-            prev_strike = strike.strike
-            
-        return spot
+                    level = prev_strike + (strike.strike - prev_strike) * ratio
+                    swing = abs(gex_diff)
+                    if swing > best_swing or (
+                        swing == best_swing
+                        and (best_level is None or abs(level - spot) < abs(best_level - spot))
+                    ):
+                        best_swing = swing
+                        best_level = level
 
+            prev_strike = strike.strike
+
+        return best_level
 
 class SignalEngine:
     def __init__(self) -> None:
@@ -450,13 +608,17 @@ class SignalEngine:
         if atr <= 0:
             return None
             
-        crossed_up = previous_spot < profile.gamma_flip_level <= profile.spot
-        crossed_down = previous_spot > profile.gamma_flip_level >= profile.spot
+        flip_level = profile.gamma_flip_level
+        if flip_level is None:
+            return None
+
+        crossed_up = previous_spot < flip_level <= profile.spot
+        crossed_down = previous_spot > flip_level >= profile.spot
         if not (crossed_up or crossed_down):
             return None
 
         volume_surge = self._volume_surge(flip_volumes)
-        flip_distance = abs(profile.spot - profile.gamma_flip_level) / profile.spot * 100
+        flip_distance = abs(profile.spot - flip_level) / profile.spot * 100
         score = min(30, int(max(0, volume_surge - 1.5) * 20)) if volume_surge >= CONFIG["volume_surge_mult"] else 0
         score += min(20, int(flip_distance * 4)) + min(20, int(abs(profile.skew) * 2))
         score += 15 if profile.pcr < 0.6 or profile.pcr > 1.4 else 8 if profile.pcr < 0.8 or profile.pcr > 1.2 else 0
@@ -596,6 +758,11 @@ def normalize_live_payload(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "spot_price": _find_spot_price(payload) or _estimate_spot_from_rows(option_rows),
         "expiry_date": payload.get("expiry_date"),
         "data": option_rows,
+        # OI/COI scale metadata, forwarded so process_payload can undo the producer's lot
+        # multiplication with the lot size THAT producer used instead of a local guess.
+        # Absent keys simply fall back to CONFIG["lot_size"] (see resolve_oi_divisor).
+        "lot_size": payload.get("lot_size") or payload.get("lotSize"),
+        "scale": payload.get("scale"),
         # Non-zero here means the producer published more than one expiry under a single
         # Redis key - the exact condition that used to corrupt the aggregates silently.
         "foreign_expiry_rows": sum(foreign_expiries.values()),
@@ -798,12 +965,13 @@ class RedisGammaBot:
 
             # Calculate volume strictly near the Gamma Flip level (±100 pts)
             flip_band_vol = 100.0
-            granular_flip_vol = sum(
-                strike.call_vol + strike.put_vol 
-                for strike in profile.strikes 
-                if abs(strike.strike - profile.gamma_flip_level) <= flip_band_vol
-            )
-            
+            granular_flip_vol = 0.0
+            if profile.gamma_flip_level is not None:
+                granular_flip_vol = sum(
+                    strike.call_vol + strike.put_vol
+                    for strike in profile.strikes
+                    if abs(strike.strike - profile.gamma_flip_level) <= flip_band_vol
+                )
             # Group ticks into 2-minute OHLC candles for ATR
             self._update_2m_candle(profile.spot, granular_flip_vol)
 
@@ -835,8 +1003,15 @@ class RedisGammaBot:
                 "expiry": profile.expiry,
                 "gamma_flip_level": profile.gamma_flip_level,
                 "net_gex": profile.net_gex,
+                # Compact, dashboard-ready copy of the same number ("-1.07 Cr").
+                "net_gex_display": profile.net_gex_display,
                 "pcr": profile.pcr,
                 "skew": profile.skew,
+                # Scale metadata: OI/COI arrived in shares and were divided by this lot
+                # factor, so every exposure below is per contract.
+                "lot_size": profile.contract_divisor,
+                "oi_unit": profile.oi_unit,
+                "exposure_units": CONFIG["exposure_units"],
                 "weekly_gamma": asdict(profile.weekly_gamma),
                 "day_gamma": asdict(profile.day_gamma),
             }
@@ -869,6 +1044,11 @@ def main() -> None:
     print(f"[OK] Connected to Redis at {bot.redis_url}")
     print(f"[INFO] Listening on channel '{bot.channel}' (data key: {bot.data_key})")
     print(f"[INFO] Timeframe set to {CONFIG['candle_minutes']} minutes.")
+    print(
+        f"[INFO] OI/COI input scale: {CONFIG['oi_input_scale']} "
+        f"(lot size {CONFIG['lot_size']}) -> exposures reported per contract in "
+        f"{CONFIG['exposure_units']} units."
+    )
     print("[INFO] Waiting for live option-chain updates. Press Ctrl+C to exit.")
 
     try:

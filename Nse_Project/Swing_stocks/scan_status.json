@@ -1,16 +1,16 @@
 {
-  "run_at": "2026-08-27T21:16:03",
+  "run_at": "2026-08-31T09:28:51",
   "history_dir": "D:\\Api data\\ML_HISTO_DATA\\Upstox_History",
   "max_data_age_days": 3,
   "ltp_max": 2000.0,
   "symbols_scanned": 200,
-  "stocks_passed": 135,
-  "stocks_skipped": 65,
+  "stocks_passed": 134,
+  "stocks_skipped": 66,
   "skip_breakdown": {
-    "ltp_filtered": 64,
+    "ltp_filtered": 65,
     "missing_file": 1
   },
-  "data_as_of": "2026-08-26",
+  "data_as_of": "2026-08-28",
   "output_csv": "C:\\Users\\ADMIN\\Desktop\\MyProject2\\Nse_Project\\Swing_stocks\\nifty200_smc_precision_screen.csv",
   "status": "OK"
 }

@@ -7,7 +7,8 @@ Standalone (no pytest). Run with:
 Covers:
   2.1  Day PCR uses magnitudes; the day regime signal is Net-GEX-driven, not PCR-gated.
   1.1  coi=None is preserved (not 0.0) and disqualifies the strike from Day Gamma only.
-  2.2  GEX no longer applies lot_size a second time (scale = shares * spot).
+  2.2  GEX no longer applies lot_size a second time (scale = contracts * spot; the
+       lot factor the feed baked into OI/COI is divided out once, in _to_strike).
   3.1  The Redis publish is throttled, with a force override.
 """
 import asyncio
@@ -148,13 +149,17 @@ def test_none_coi_not_coerced() -> None:
     check("day sees only the 2 known strikes", profile.day_gamma.strike_count, 2)
     check("excluded strike contributes no day GEX",
           next(s for s in profile.strikes if s.strike == 24500.0).day_net_gex, 0.0)
-    # Day flows must exclude the unknown strike's 123,456 call COI entirely.
-    check("day call_flow excludes unknown strike", profile.day_gamma.call_flow, 200_000.0)
-    check("day put_flow excludes unknown strike", profile.day_gamma.put_flow, -100_000.0)
+    # Day flows must exclude the unknown strike's 123,456 call COI entirely. They are
+    # reported in CONTRACTS: the feed publishes shares (contracts * lot size) and
+    # _to_strike() divides that lot factor back out, so the expected totals are the
+    # payload's COI / lot_size.
+    lot = float(g.CONFIG["lot_size"])
+    check("day call_flow excludes unknown strike", profile.day_gamma.call_flow, 200_000.0 / lot)
+    check("day put_flow excludes unknown strike", profile.day_gamma.put_flow, -100_000.0 / lot)
 
 
 def test_no_double_lot_scaling() -> None:
-    print("\n2.2) GEX scale is shares * spot (no second lot_size factor)")
+    print("\n2.2) GEX scale is contracts * spot (no second lot_size factor)")
     norm = g.normalize_live_payload(_payload())
     proc = g.GammaProcessor("NIFTY")
     profile = proc.process_payload(norm)
@@ -200,7 +205,7 @@ def test_all_coi_unknown_degrades_gracefully() -> None:
     check("day gross_gex is 0", d.gross_gex, 0)
     check("day ratio is 0", d.net_gex_ratio, 0.0)
     check("day pcr is 0 (no divide-by-zero)", d.pcr, 0.0)
-    check("gamma flip falls back to spot", d.gamma_flip_level, 24334.55)
+    check("gamma flip is None when no valid crossing exists", d.gamma_flip_level, None)
     check("no fake walls", (d.call_wall, d.put_wall), (None, None))
     check("signal is neutral, not bearish", d.signal, AMBER)
     # Weekly Gamma must be completely unaffected by the day exclusion.
