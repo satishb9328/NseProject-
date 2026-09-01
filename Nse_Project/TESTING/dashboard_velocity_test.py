@@ -87,6 +87,10 @@ def test_build_option_chain_rows() -> None:
     check("put_velocity passed through", row["put_velocity"], 10_000.0)
     check("call_coi converted to lots", row["call_coi"], 250)
     check("put_coi converted to lots", row["put_coi"], -160)
+    # COI% must remain the feed's "Change in OI %" (COI / previous OI * 100) and must
+    # NOT be overwritten by any call-vs-put COI ratio inside build_option_chain_rows().
+    check("call_coi_pct preserved as change-in-OI %", row["call_coi_pct"], 50.0)
+    check("put_coi_pct preserved as change-in-OI %", row["put_coi_pct"], -20.0)
     # Velocity is shares/sec and must NOT be divided by the lot size.
     check("velocity not scaled to lots", row["call_velocity"] == 80_000.0 / lot, False)
     check("every expected key present", sorted(row.keys()), sorted(EXPECTED_JS_KEYS))

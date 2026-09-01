@@ -16,25 +16,67 @@
   .sentiment-bar { transition: background-color .7s ease, color .7s ease, border-color .7s ease; }
   /* ---- Dynamic metric color coding (Bias / Momentum / Score) ---- */
   .sentiment-metric {
-    display: inline-flex;
-    align-items: baseline;
-    gap: .375rem;
-    padding: .2rem .6rem;
-    border-radius: .55rem;
-    border: 1px solid transparent;
     font-variant-numeric: tabular-nums;
-    transition: color .4s ease, background-color .4s ease, border-color .4s ease;
+    transition: color .4s ease;
   }
   .sentiment-metric .metric-label {
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 700;
     letter-spacing: .12em;
     text-transform: uppercase;
     opacity: .85;
   }
-  .metric-bull { color: #4ade80; background-color: rgba(34,197,94,.14); border-color: rgba(34,197,94,.38); }
-  .metric-bear { color: #f87171; background-color: rgba(239,68,68,.14); border-color: rgba(239,68,68,.38); }
-  .metric-neutral { color: #facc15; background-color: rgba(234,179,8,.12); border-color: rgba(234,179,8,.30); }
+  .metric-bull { color: #4ade80; }
+  .metric-bear { color: #f87171; }
+  .metric-neutral { color: #facc15; }
+
+  /* ---- Elastic sentiment bars with peak-hold (ghost) ---- */
+  .elastic-bar {
+    --bar-color: #4ade80;
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 10px;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, .16);
+    box-shadow: inset 0 0 0 1px rgba(148, 163, 184, .22);
+    overflow: hidden;
+  }
+  .elastic-marker {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 1px;
+    margin-left: -.5px;
+    background: rgba(226, 232, 240, .6);
+    z-index: 3;
+    pointer-events: none;
+  }
+  .elastic-bar .active-bar,
+  .elastic-bar .shadow-bar {
+    position: absolute;
+    top: 1px;
+    bottom: 1px;
+    left: 50%;
+    width: 0;
+    border-radius: 999px;
+    transition: left .3s ease, width .3s ease;
+    will-change: left, width;
+  }
+  .elastic-bar .active-bar {
+    z-index: 2;
+    background: var(--bar-color);
+    box-shadow: 0 0 6px var(--bar-color), 0 0 10px var(--bar-color);
+  }
+  .elastic-bar .shadow-bar {
+    z-index: 1;
+    background: var(--bar-color);
+    opacity: .28;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .elastic-bar .active-bar, .elastic-bar .shadow-bar { transition: none; }
+  }
 
   /* ---- Smart Market Insight strip ---- */
   .sentiment-insight {
@@ -53,6 +95,12 @@
   @keyframes vel-pulse-call { 0%, 100% { box-shadow: inset 0 0 6px rgba(74, 222, 128, .35); } 50% { box-shadow: inset 0 0 16px rgba(74, 222, 128, .85); } }
   @keyframes vel-pulse-put { 0%, 100% { box-shadow: inset 0 0 6px rgba(248, 113, 113, .35); } 50% { box-shadow: inset 0 0 16px rgba(248, 113, 113, .85); } }
   @media (prefers-reduced-motion: reduce) { .option-chain-table td.vel-hot-call, .option-chain-table td.vel-hot-put { animation: none; } }
+  /* ---- Gamma Flip scrolling warning (right-to-left ticker) ---- */
+  .gamma-flip-warning { display: none; overflow: hidden; white-space: nowrap; }
+  .gamma-flip-warning.is-visible { display: block; }
+  .gamma-flip-warning-track { display: inline-block; white-space: nowrap; will-change: transform; animation: gamma-flip-scroll 14s linear infinite; }
+  @keyframes gamma-flip-scroll { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
+  @media (prefers-reduced-motion: reduce) { .gamma-flip-warning-track { animation: none; } }
 </style>
 {% endblock %}
 
@@ -75,7 +123,7 @@
           <div class="mb-1 flex items-center justify-between"><h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-sky-300">NIFTY WEEKLY GAMMA</h2><span class="text-[10px] uppercase tracking-wider text-slate-500">Total OI</span></div>
           <div class="grid grid-cols-3 gap-2 text-xs">
             <div><span class="block uppercase tracking-wider text-slate-500">PCR</span><span id="weekly-pcr" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
-            <div><span class="block uppercase tracking-wider text-slate-500">GAMMA FLIP</span><span id="weekly-gamma-flip" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
+            <div><span class="block uppercase tracking-wider text-slate-500">GAMMA FLIP</span><span id="weekly-gamma-flip" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span><div id="weekly-gamma-flip-warning" class="gamma-flip-warning mt-1"><span class="gamma-flip-warning-track text-xs font-semibold text-orange-400">⚠️ NO FLIP DETECTED: Strong one-sided trend. Safety guard active.</span></div></div>
             <div><span class="block uppercase tracking-wider text-slate-500">NET GEX</span><span id="weekly-net-gex" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
             <div class="col-span-3 mt-1 grid grid-cols-2 gap-2 border-t border-sky-500/20 pt-2 text-[11px]"><span class="font-medium text-orange-300">CALL WALL (Res): <span id="weekly-call-wall" class="font-mono">--</span></span><span class="text-right font-medium text-emerald-300">PUT WALL (Sup): <span id="weekly-put-wall" class="font-mono">--</span></span></div>
             <div class="col-span-3 grid grid-cols-2 gap-2 text-[11px]"><span class="font-medium text-slate-400">NET CHARM: <span id="weekly-net-charm" class="font-mono text-slate-200">--</span></span><span class="text-right font-medium text-slate-400">NET VANNA: <span id="weekly-net-vanna" class="font-mono text-slate-200">--</span></span></div>
@@ -86,7 +134,7 @@
           <div class="mb-1 flex items-center justify-between"><h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-amber-300">NIFTY DAY GAMMA</h2><span class="text-[10px] uppercase tracking-wider text-slate-500">Today COI</span></div>
           <div class="grid grid-cols-3 gap-2 text-xs">
             <div><span class="block uppercase tracking-wider text-slate-500">PCR</span><span id="day-pcr" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
-            <div><span class="block uppercase tracking-wider text-slate-500">GAMMA FLIP</span><span id="day-gamma-flip" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
+            <div><span class="block uppercase tracking-wider text-slate-500">GAMMA FLIP</span><span id="day-gamma-flip" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span><div id="day-gamma-flip-warning" class="gamma-flip-warning mt-1"><span class="gamma-flip-warning-track text-xs font-semibold text-orange-400">⚠️ NO FLIP DETECTED: Strong one-sided trend. Safety guard active.</span></div></div>
             <div><span class="block uppercase tracking-wider text-slate-500">NET GEX</span><span id="day-net-gex" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
             <div class="col-span-3 mt-1 grid grid-cols-2 gap-2 border-t border-amber-500/20 pt-2 text-[11px]"><span class="font-medium text-orange-300">CALL WALL (Res): <span id="day-call-wall" class="font-mono">--</span></span><span class="text-right font-medium text-emerald-300">PUT WALL (Sup): <span id="day-put-wall" class="font-mono">--</span></span></div>
             <div class="col-span-3 grid grid-cols-2 gap-2 text-[11px]"><span class="font-medium text-slate-400">NET CHARM: <span id="day-net-charm" class="font-mono text-slate-200">--</span></span><span class="text-right font-medium text-slate-400">NET VANNA: <span id="day-net-vanna" class="font-mono text-slate-200">--</span></span></div>
@@ -96,52 +144,99 @@
       </div>
     </section>
 
-    <section id="preopen-trap-snapshot" class="mt-3 rounded-xl border border-fuchsia-500/30 bg-fuchsia-950/20 p-3">
-      <div class="mb-1 flex items-center justify-between">
-        <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-fuchsia-300">PRE-OPEN GAMMA TRAP</h2>
-        <span class="text-[10px] uppercase tracking-wider text-slate-500">09:00 - 09:07 IEP</span>
-      </div>
-      <div class="grid grid-cols-3 gap-2 text-xs">
-        <div><span class="block uppercase tracking-wider text-slate-500">MAX IEP</span><span class="mt-1 block font-mono text-lg font-semibold text-slate-50">{{ preopen_max }}</span></div>
-        <div><span class="block uppercase tracking-wider text-slate-500">MIN IEP</span><span class="mt-1 block font-mono text-lg font-semibold text-slate-50">{{ preopen_min }}</span></div>
-        <div><span class="block uppercase tracking-wider text-slate-500">FINAL IEP</span><span class="mt-1 block font-mono text-lg font-semibold text-slate-50">{{ preopen_final }}</span></div>
-        <div class="col-span-3 mt-1 grid grid-cols-2 gap-2 border-t border-fuchsia-500/20 pt-2 text-[11px]">
-          <span class="font-medium text-orange-300">CALL WALL: <span class="font-mono">{{ call_wall }}</span></span>
-          <span class="text-right font-medium text-emerald-300">PUT WALL: <span class="font-mono">{{ put_wall }}</span></span>
+    <div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+      <section id="preopen-trap-snapshot" class="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+        <div class="mb-2 flex items-center justify-between gap-3">
+          <h2 class="text-sm font-bold uppercase tracking-[.18em] text-slate-200">PRE-OPEN GAMMA TRAP</h2>
+          <span class="text-xs uppercase tracking-wider text-slate-500">09:00 - 09:07 IEP</span>
         </div>
-      </div>
-      <p class="mt-2 text-center text-sm font-bold uppercase tracking-[.2em] {% if 'HIGH PROBABILITY' in trap_signal %}text-neon-green{% else %}text-slate-500{% endif %}">{{ trap_signal }}</p>
-    </section>
-
-    <div class="flex w-full flex-col items-start gap-4 mt-4 lg:flex-row">
-      <div class="min-w-0 flex-grow overflow-x-auto">
-    <section id="option-chain" class="mt-0">
-      <div id="sentiment-bar" class="sentiment-bar mb-0 rounded-xl border border-yellow-700 bg-yellow-900/30 px-3 py-2">
-        <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <div class="flex flex-wrap items-center gap-2">
-            <span class="mr-1 text-sm font-bold tracking-wide text-slate-100">📊 LIVE SENTIMENT</span>
-            <span id="sentiment-bias-chip" class="sentiment-metric metric-neutral">
+        <div class="mb-2 flex items-center justify-between gap-3 text-sm">
+          <span class="font-medium text-slate-400">MAX IEP <span class="font-mono font-semibold text-red-400">{{ preopen_max }}</span></span>
+          <span class="font-medium text-slate-400">MIN IEP <span class="font-mono font-semibold text-green-400">{{ preopen_min }}</span></span>
+          <span class="font-medium text-slate-400">FINAL IEP <span class="font-mono font-semibold text-amber-400">{{ preopen_final }}</span></span>
+        </div>
+        <div class="mb-2 flex items-center justify-between gap-3 border-b border-slate-700/50 pb-2 text-sm">
+          <span class="font-medium text-orange-300">CALL WALL <span class="font-mono">{{ call_wall }}</span></span>
+          <span class="flex-1 text-center text-sm font-bold uppercase tracking-wider {% if 'HIGH PROBABILITY' in trap_signal %}text-neon-green{% else %}text-slate-500{% endif %}">{{ trap_signal }}</span>
+          <span class="font-medium text-emerald-300">PUT WALL <span class="font-mono">{{ put_wall }}</span></span>
+        </div>
+        <div class="flex flex-col gap-2">
+          <div id="sentiment-bias-chip" class="sentiment-metric metric-neutral flex w-full items-center justify-between gap-3">
+            <span class="flex items-baseline gap-2">
               <span class="metric-label">Bias</span>
               <span id="sentiment-bias" class="font-mono text-sm font-semibold">+0%</span>
             </span>
-            <span id="sentiment-momentum-chip" class="sentiment-metric metric-neutral">
+            <span id="sentiment-bias-bar" class="elastic-bar" role="img" aria-label="Bias meter">
+              <span class="elastic-marker"></span>
+              <span class="shadow-bar"></span>
+              <span class="active-bar"></span>
+            </span>
+          </div>
+          <div id="sentiment-momentum-chip" class="sentiment-metric metric-neutral flex w-full items-center justify-between gap-3">
+            <span class="flex items-baseline gap-2">
               <span class="metric-label">Momentum</span>
               <span id="sentiment-momentum" class="font-mono text-sm font-semibold">0%</span>
               <span id="sentiment-momentum-label" class="text-xs">(Quiet)</span>
             </span>
-            <span id="sentiment-score-chip" class="sentiment-metric metric-neutral">
-              <span class="metric-label">Score</span>
-              <span id="sentiment-score" class="font-mono text-sm font-semibold">50/100</span>
-              <span id="sentiment-score-label" class="text-xs">(Fair / Neutral Zone)</span>
+            <span id="sentiment-momentum-bar" class="elastic-bar" role="img" aria-label="Momentum meter">
+              <span class="elastic-marker"></span>
+              <span class="shadow-bar"></span>
+              <span class="active-bar"></span>
             </span>
           </div>
-          <div class="flex shrink-0 items-center gap-2">
-            <label class="flex items-center gap-2 text-[10px] uppercase tracking-wider text-yellow-200">Expiry<select id="expiry-filter" class="rounded-lg border border-yellow-700/70 bg-ink-950/80 px-2 py-1 text-xs normal-case tracking-normal text-slate-200"><option value="all">Loading expiries...</option></select></label>
-            <button id="scalper-playground-open" type="button" class="scalper-playground-trigger shrink-0 rounded-lg border border-cyan-400/50 bg-cyan-400/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-200 transition hover:bg-cyan-400/20" aria-haspopup="dialog" aria-controls="scalper-playground-modal">🎮 Scalper's Playground</button>
+          <div id="sentiment-score-chip" class="sentiment-metric metric-neutral flex w-full items-center justify-between gap-3">
+            <span class="flex items-baseline gap-2">
+              <span class="metric-label">Score</span>
+              <span id="sentiment-score" class="font-mono text-sm font-semibold">50/100</span>
+              <span id="sentiment-score-label" class="text-xs">(Neutral)</span>
+            </span>
+            <span id="sentiment-score-bar" class="elastic-bar" role="img" aria-label="Score meter">
+              <span class="elastic-marker"></span>
+              <span class="shadow-bar"></span>
+              <span class="active-bar"></span>
+            </span>
           </div>
         </div>
-        <div id="sentiment-insight" class="sentiment-insight insight-neutral mt-2 px-3 py-2 text-xs font-medium leading-relaxed">
+        <div id="sentiment-insight" class="sentiment-insight insight-neutral mt-2 px-2.5 py-1.5 text-xs font-medium leading-snug">
           <span class="font-bold uppercase tracking-wider opacity-80">💡 Smart Market Insight · </span><span id="sentiment-insight-text">Loading live sentiment…</span>
+        </div>
+      </section>
+
+      <section id="ai-trade-setups" class="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+        <div class="mb-1 flex items-center justify-between">
+          <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-slate-200">🤖 AI TRADE SETUPS (LIVE TEST)</h2>
+          <span class="text-[10px] uppercase tracking-wider text-slate-500">A/B Entry Models</span>
+        </div>
+        <div class="grid grid-cols-1 gap-2">
+          <div class="rounded-lg border border-orange-500/30 bg-orange-950/20 p-2">
+            <p class="mb-1 text-[10px] font-bold uppercase tracking-wider text-orange-300">⚡ Momentum Pullback (15% Dip)</p>
+            <div class="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
+              <span class="uppercase tracking-wider text-slate-500">Target Strike</span><span id="ai-mom-strike" class="text-right font-mono font-semibold text-slate-50">--</span>
+              <span class="uppercase tracking-wider text-slate-500">Entry Price</span><span id="ai-mom-entry" class="text-right font-mono font-semibold text-slate-50">--</span>
+              <span class="uppercase tracking-wider text-slate-500">SL</span><span id="ai-mom-sl" class="text-right font-mono font-semibold text-rose-300">--</span>
+              <span class="uppercase tracking-wider text-slate-500">Target</span><span id="ai-mom-target" class="text-right font-mono font-semibold text-emerald-300">--</span>
+            </div>
+          </div>
+          <div class="rounded-lg border border-sky-500/30 bg-sky-950/20 p-2">
+            <p class="mb-1 text-[10px] font-bold uppercase tracking-wider text-sky-300">🛡️ Supp/Res Trap (Delta)</p>
+            <div class="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
+              <span class="uppercase tracking-wider text-slate-500">Target Strike</span><span id="ai-sr-strike" class="text-right font-mono font-semibold text-slate-50">--</span>
+              <span class="uppercase tracking-wider text-slate-500">Entry Price</span><span id="ai-sr-entry" class="text-right font-mono font-semibold text-slate-50">--</span>
+              <span class="uppercase tracking-wider text-slate-500">SL</span><span id="ai-sr-sl" class="text-right font-mono font-semibold text-rose-300">--</span>
+              <span class="uppercase tracking-wider text-slate-500">Target</span><span id="ai-sr-target" class="text-right font-mono font-semibold text-emerald-300">--</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="flex w-full flex-col items-start gap-4 mt-4 lg:flex-row">
+      <div class="min-w-0 flex-grow overflow-x-auto">
+    <section id="option-chain" class="mt-0">
+      <div id="sentiment-bar" class="sentiment-bar mb-2 flex items-center justify-end gap-2 rounded-lg px-2 py-1">
+        <div class="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-800 bg-slate-900/60 p-1">
+          <label class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-400">Expiry<select id="expiry-filter" class="rounded-md border border-slate-700 bg-slate-900/80 px-1.5 py-0.5 text-xs normal-case tracking-normal text-slate-200"><option value="all">Loading expiries...</option></select></label>
+          <button id="scalper-playground-open" type="button" class="scalper-playground-trigger shrink-0 rounded-md border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 transition hover:bg-slate-700/60" aria-haspopup="dialog" aria-controls="scalper-playground-modal">🎮 Scalper's Playground</button>
         </div>
       </div>
 
@@ -210,7 +305,9 @@
   const expiryFilter = document.getElementById('expiry-filter');
   const signalStreams = { weekly: document.getElementById('weekly-signals-stream'), daily: document.getElementById('daily-signals-stream') };
   const seenSignals = new Set();
-  let allRows = [], loadedExpiry = null, currentSpot = null, previousSignature = '', expiryInitialized = false;
+  let allRows = [], loadedExpiry = null, currentSpot = null, previousSignature = '', expiryInitialized = false, currentSentiment = 'neutral';
+  // Session peak-hold extremes for the elastic sentiment bars (ghost trail).
+  let peakMaxBias = 0, peakMinBias = 0, peakMaxMom = 0, peakMinMom = 0, peakMaxScore = 50, peakMinScore = 50;
 
   const number = value => { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : 0; };
   const fmt = value => value === null || value === undefined || value === '-' ? '-' : typeof value === 'number' ? value.toLocaleString('en-IN') : value;
@@ -222,7 +319,7 @@
   const pct = value => value === null || value === undefined || value === '-' ? '-' : `${Number(value).toFixed(1)}%`;
   const signedPct = value => `${value >= 0 ? '+' : ''}${Math.round(value)}%`;
   const profileValue = (profile, ...keys) => keys.reduce((value, key) => value ?? profile?.[key], null) ?? '--';
-  const themes = { bullish: ['bg-green-900/30', 'text-green-400', 'border-green-700'], neutral: ['bg-yellow-900/30', 'text-yellow-400', 'border-yellow-700'], bearish: ['bg-red-900/30', 'text-red-400', 'border-red-700'] };
+  const themes = { bullish: ['bg-slate-900/40', 'text-slate-300', 'border-slate-800'], neutral: ['bg-slate-900/40', 'text-slate-300', 'border-slate-800'], bearish: ['bg-slate-900/40', 'text-slate-300', 'border-slate-800'] };
   // Fallback tier only - the engine normally ships its own `signal`. Exposures are now
   // per CONTRACT (lot_size / 65x smaller than the old share-scaled numbers), so the old
   // 5,000,000,000 gate would have called every real reading "range-bound".
@@ -284,6 +381,38 @@
     }
     return { tone: 'neutral', text: 'Metrics are mixed or neutral. Market is in a sideways chop zone.' };
   }
+  function renderElasticBar(bar, value, center, halfSpan, peakMax, peakMin) {
+    if (!bar) return;
+    const toPos = v => 50 + ((v - center) / halfSpan) * 50;
+    const clamp = v => Math.max(0, Math.min(100, v));
+    const pos = clamp(toPos(value));
+    const active = bar.querySelector('.active-bar');
+    const shadow = bar.querySelector('.shadow-bar');
+    // Active bar: spans from the 50% center marker to the current value.
+    if (active) {
+      active.style.left = Math.min(50, pos) + '%';
+      active.style.width = Math.abs(pos - 50) + '%';
+    }
+    // Shadow (peak-hold): transparent trail from the current value back to the
+    // historical extreme on the same side of the center.
+    const peak = value > center ? peakMax : value < center ? peakMin : value;
+    const peakPos = clamp(toPos(peak));
+    if (shadow) {
+      if (value > center) {
+        shadow.style.left = pos + '%';
+        shadow.style.width = Math.max(0, peakPos - pos) + '%';
+      } else if (value < center) {
+        shadow.style.left = peakPos + '%';
+        shadow.style.width = Math.max(0, pos - peakPos) + '%';
+      } else {
+        shadow.style.left = '50%';
+        shadow.style.width = '0%';
+      }
+    }
+    // Green on the right/positive side, red on the left/negative side.
+    bar.style.setProperty('--bar-color', value >= center ? '#4ade80' : '#f87171');
+  }
+
   function updateSentiment(rows) {
     let callOi = 0, putOi = 0, callCoi = 0, putCoi = 0;
     rows.forEach(row => { callOi += number(row.call_oi); putOi += number(row.put_oi); callCoi += number(row.call_coi); putCoi += number(row.put_coi); });
@@ -291,12 +420,21 @@
     const momentum = totalOi ? ((callCoi + putCoi) / totalOi) * 100 : 0;
     const score = Math.max(0, Math.min(100, Math.round(50 + bias * .5 + momentum)));
     const theme = score >= 65 ? 'bullish' : score <= 34 ? 'bearish' : 'neutral';
+    currentSentiment = theme; // expose live sentiment to the AI trade setups A/B test
     const explosive = Math.abs(momentum) > 10;
     const label = Math.abs(momentum) < 5 ? 'Quiet' : Math.abs(momentum) <= 10 ? 'Healthy Trend' : 'EXPLOSIVE!';
     const bar = document.getElementById('sentiment-bar');
     Object.values(themes).flat().forEach(cls => bar.classList.remove(cls)); themes[theme].forEach(cls => bar.classList.add(cls));
     document.getElementById('sentiment-bias').textContent = signedPct(bias);
     document.getElementById('sentiment-momentum').textContent = signedPct(momentum);
+
+    // Elastic bars: advance session peaks (peak-hold) then render active + ghost.
+    peakMaxBias = Math.max(peakMaxBias, bias); peakMinBias = Math.min(peakMinBias, bias);
+    peakMaxMom = Math.max(peakMaxMom, momentum); peakMinMom = Math.min(peakMinMom, momentum);
+    peakMaxScore = Math.max(peakMaxScore, score); peakMinScore = Math.min(peakMinScore, score);
+    renderElasticBar(document.getElementById('sentiment-bias-bar'), bias, 0, 100, peakMaxBias, peakMinBias);
+    renderElasticBar(document.getElementById('sentiment-momentum-bar'), momentum, 0, 100, peakMaxMom, peakMinMom);
+    renderElasticBar(document.getElementById('sentiment-score-bar'), score, 50, 50, peakMaxScore, peakMinScore);
 
     // Requirement 1: per-metric dynamic color coding.
     applyTone('sentiment-bias-chip', tonePct(bias), METRIC_TONES);
@@ -305,7 +443,7 @@
 
     const momentumEl = document.getElementById('sentiment-momentum-label'); momentumEl.textContent = `(${label})`; momentumEl.classList.toggle('font-bold', explosive); momentumEl.classList.toggle('text-orange-500', explosive);
     document.getElementById('sentiment-score').textContent = `${score}/100`;
-    document.getElementById('sentiment-score-label').textContent = `(${theme === 'bullish' ? 'Strong Bullish' : theme === 'bearish' ? 'Danger / Strong Bearish' : 'Fair / Neutral Zone'})`;
+    document.getElementById('sentiment-score-label').textContent = `(${theme === 'bullish' ? 'Bullish' : theme === 'bearish' ? 'Bearish' : 'Neutral'})`;
 
     // Requirement 2: Smart Market Insight.
     const insight = buildInsight(bias, momentum, score);
@@ -389,7 +527,12 @@
 
   function highlightAtm() { if (!Number.isFinite(currentSpot)) return; let closest = null, distance = Infinity; body.querySelectorAll('tr').forEach(row => { const strike = number(row.children[7]?.textContent); const diff = Math.abs(strike - currentSpot); if (Number.isFinite(strike) && diff < distance) { distance = diff; closest = row; } row.classList.remove('atm-row'); }); if (closest) closest.classList.add('atm-row'); }
   function exposureColor(element, value) { const amount = Number(value); element.classList.remove('text-green-400', 'text-red-400', 'text-slate-200'); element.classList.add(Number.isFinite(amount) && amount > 0 ? 'text-green-400' : Number.isFinite(amount) && amount < 0 ? 'text-red-400' : 'text-slate-200'); }
-  function renderProfile(profile) { if (!profile || typeof profile !== 'object') return; const spot = profileValue(profile, 'spot', 'Spot', 'spot_price'); const weekly = profile.weekly_gamma || profile; const day = profile.day_gamma || {}; if (!haveIndexSpot) { currentSpot = Number(spot); const el = document.getElementById('live-spot-price'); if (el) el.textContent = fmt(spot); } document.getElementById('live-spot').textContent = fmt(spot); document.getElementById('live-expiry').textContent = profile.expiry || '--'; [['weekly', weekly], ['day', day]].forEach(([prefix, metrics]) => { const netGex = profileValue(metrics, 'net_gex', 'netGEX', 'net_gex_value'); const pcr = profileValue(metrics, 'pcr', 'PCR'); const gexTier = metrics.signal ? signalTier(metrics.signal) : netGexTier(netGex, pcr); document.getElementById(`${prefix}-pcr`).textContent = fmt(profileValue(metrics, 'pcr', 'PCR')); document.getElementById(`${prefix}-gamma-flip`).textContent = fmt(profileValue(metrics, 'gamma_flip_level', 'gamma_flip', 'gammaFlip', 'gamma_flip_value')); document.getElementById(`${prefix}-call-wall`).textContent = fmt(metrics.call_wall ?? metrics.call_wall_strike); document.getElementById(`${prefix}-put-wall`).textContent = fmt(metrics.put_wall ?? metrics.put_wall_strike); const charmElement = document.getElementById(`${prefix}-net-charm`); const vannaElement = document.getElementById(`${prefix}-net-vanna`); charmElement.textContent = fmtExposure(metrics.net_charm_display, metrics.net_charm); vannaElement.textContent = fmtExposure(metrics.net_vanna_display, metrics.net_vanna); charmElement.title = exactTitle(metrics.net_charm); vannaElement.title = exactTitle(metrics.net_vanna); exposureColor(charmElement, metrics.net_charm); exposureColor(vannaElement, metrics.net_vanna); const gexElement = document.getElementById(`${prefix}-net-gex`); const summaryElement = document.getElementById(`${prefix}-net-gex-summary`); gexElement.textContent = fmtExposure(metrics.net_gex_display, netGex); gexElement.title = exactTitle(netGex); gexElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); gexElement.classList.add(gexTier.colorClass); summaryElement.textContent = gexTier.summary; summaryElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-400'); summaryElement.classList.add(gexTier.colorClass); }); renderRows(); }
+  // ---- PCR dynamic color coding (standard options thresholds) ----
+  // PCR >= 1.2 => Bullish (green), PCR <= 0.8 => Bearish (red), otherwise Neutral (amber).
+  function pcrColorClass(value) { const pcr = Number(value); if (!Number.isFinite(pcr)) return 'text-slate-50'; if (pcr >= 1.2) return 'text-green-400'; if (pcr <= 0.8) return 'text-red-400'; return 'text-yellow-400'; }
+  // ---- Gamma Flip missing-value guard (None/null renders as "--") ----
+  function isFlipMissing(value) { if (value === null || value === undefined) return true; const text = String(value).trim(); if (!text || text === '--' || /^(none|null)$/i.test(text)) return true; return !Number.isFinite(Number(value)); }
+  function renderProfile(profile) { if (!profile || typeof profile !== 'object') return; const spot = profileValue(profile, 'spot', 'Spot', 'spot_price'); const weekly = profile.weekly_gamma || profile; const day = profile.day_gamma || {}; if (!haveIndexSpot) { currentSpot = Number(spot); const el = document.getElementById('live-spot-price'); if (el) el.textContent = fmt(spot); } document.getElementById('live-spot').textContent = fmt(spot); document.getElementById('live-expiry').textContent = profile.expiry || '--'; [['weekly', weekly], ['day', day]].forEach(([prefix, metrics]) => { const netGex = profileValue(metrics, 'net_gex', 'netGEX', 'net_gex_value'); const pcr = profileValue(metrics, 'pcr', 'PCR'); const gexTier = metrics.signal ? signalTier(metrics.signal) : netGexTier(netGex, pcr); const pcrElement = document.getElementById(`${prefix}-pcr`); pcrElement.textContent = fmt(pcr); pcrElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); pcrElement.classList.add(pcrColorClass(pcr)); const gammaFlipRaw = profileValue(metrics, 'gamma_flip_level', 'gamma_flip', 'gammaFlip', 'gamma_flip_value'); document.getElementById(`${prefix}-gamma-flip`).textContent = fmt(gammaFlipRaw); const gammaFlipWarning = document.getElementById(`${prefix}-gamma-flip-warning`); if (gammaFlipWarning) gammaFlipWarning.classList.toggle('is-visible', isFlipMissing(gammaFlipRaw)); document.getElementById(`${prefix}-call-wall`).textContent = fmt(metrics.call_wall ?? metrics.call_wall_strike); document.getElementById(`${prefix}-put-wall`).textContent = fmt(metrics.put_wall ?? metrics.put_wall_strike); const charmElement = document.getElementById(`${prefix}-net-charm`); const vannaElement = document.getElementById(`${prefix}-net-vanna`); charmElement.textContent = fmtExposure(metrics.net_charm_display, metrics.net_charm); vannaElement.textContent = fmtExposure(metrics.net_vanna_display, metrics.net_vanna); charmElement.title = exactTitle(metrics.net_charm); vannaElement.title = exactTitle(metrics.net_vanna); exposureColor(charmElement, metrics.net_charm); exposureColor(vannaElement, metrics.net_vanna); const gexElement = document.getElementById(`${prefix}-net-gex`); const summaryElement = document.getElementById(`${prefix}-net-gex-summary`); gexElement.textContent = fmtExposure(metrics.net_gex_display, netGex); gexElement.title = exactTitle(netGex); gexElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); gexElement.classList.add(gexTier.colorClass); summaryElement.textContent = gexTier.summary; summaryElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-400'); summaryElement.classList.add(gexTier.colorClass); }); renderRows(); }
   function renderSignal(signal) { if (signal == null) return; const text = typeof signal === 'string' ? signal : signal.message || JSON.stringify(signal); if (seenSignals.has(text)) return; seenSignals.add(text); const stream = /weekly|macro/i.test(text) ? signalStreams.weekly : signalStreams.daily; if (!stream) return; if (stream.querySelector('p')) stream.replaceChildren(); const item = document.createElement('div'); item.className = 'rounded-lg border border-slate-700/80 bg-ink-800/80 p-2'; const timestamp = typeof signal === 'object' && signal.timestamp ? new Date(signal.timestamp).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }) : new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }); item.textContent = `${timestamp}  ${text}`; stream.prepend(item); while (stream.children.length > 8) stream.lastChild.remove(); }
 
   // ---- Live index SPOT ----
@@ -420,7 +563,61 @@
     highlightAtm();
   }
 
-  async function refreshOptions() { try { const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); loadedExpiry = data.expiry_date || null; updateSpotPrice(data); allRows = Array.isArray(data.option_chain) ? data.option_chain.sort((a, b) => number(a.strike) - number(b.strike)) : []; populateExpiry(); updateSentiment(allRows); renderRows(); updateScalperPlayground(); synced.textContent = `Synced ${new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })}`; } catch (error) { console.warn('Option-chain fetch failed:', error); } }
+  // ---- 🤖 AI TRADE SETUPS (LIVE TEST) — A/B entry models ----
+  // Reads live sentiment, spot, weekly walls and the ATM option's LTP, then
+  // renders two candidate entry calculations side-by-side for live comparison.
+  function aiParsePrice(element) {
+    const raw = element && element.textContent ? element.textContent : '';
+    const parsed = Number(String(raw).replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  function aiAtmRow() {
+    if (!Number.isFinite(currentSpot) || !allRows.length) return null;
+    return allRows.reduce((closest, row) => {
+      const closestDistance = Math.abs(number(closest.strike) - currentSpot);
+      const distance = Math.abs(number(row.strike) - currentSpot);
+      return distance < closestDistance ? row : closest;
+    }, allRows[0]);
+  }
+  function updateAITrades() {
+    const spot = Number.isFinite(currentSpot) ? currentSpot : 0;
+    const callWall = aiParsePrice(document.getElementById('weekly-call-wall'));
+    const putWall = aiParsePrice(document.getElementById('weekly-put-wall'));
+    const atm = aiAtmRow();
+    const atmStrike = atm ? number(atm.strike) : 0;
+    const bullish = currentSentiment === 'bullish';
+    const bearish = currentSentiment === 'bearish';
+    // LTP of the ATM strike: use the direction-appropriate premium (call for
+    // bullish/neutral, put for bearish) so entries line up with the trade side.
+    const ltp = atm ? (bearish ? number(atm.put_ltp) : number(atm.call_ltp)) : 0;
+    const px = value => `₹${value.toFixed(2)}`;
+    const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+
+    // Card A — Momentum pullback: buy a 15% dip off the ATM premium.
+    const aEntry = ltp > 0 ? ltp * 0.85 : 0;
+    const aSl = aEntry * 0.8;
+    const aTarget = aEntry * 1.4;
+
+    // Card B — Supp/Res trap: price fades toward the wall, premium drops by
+    // half the distance, so we stage the entry that much lower (never < 0).
+    const distance = bullish ? Math.max(0, spot - putWall) : bearish ? Math.max(0, callWall - spot) : 0;
+    const expectedDrop = distance * 0.5;
+    const bEntry = ltp > 0 ? Math.max(0, ltp - expectedDrop) : 0;
+    const bSl = bEntry * 0.8;
+    const bTarget = bEntry * 1.4;
+
+    const strikeText = atmStrike > 0 ? fmt(atmStrike) : '--';
+    const render = (prefix, entry, sl, target) => {
+      setText(`${prefix}-strike`, strikeText);
+      setText(`${prefix}-entry`, ltp > 0 ? px(entry) : '--');
+      setText(`${prefix}-sl`, ltp > 0 ? px(sl) : '--');
+      setText(`${prefix}-target`, ltp > 0 ? px(target) : '--');
+    };
+    render('ai-mom', aEntry, aSl, aTarget);
+    render('ai-sr', bEntry, bSl, bTarget);
+  }
+
+  async function refreshOptions() { try { const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); loadedExpiry = data.expiry_date || null; updateSpotPrice(data); allRows = Array.isArray(data.option_chain) ? data.option_chain.sort((a, b) => number(a.strike) - number(b.strike)) : []; populateExpiry(); updateSentiment(allRows); renderRows(); updateScalperPlayground(); updateAITrades(); synced.textContent = `Synced ${new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })}`; } catch (error) { console.warn('Option-chain fetch failed:', error); } }
   async function refreshGamma() { try { const response = await fetch('/gamma/status/', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); const status = data?.status || data; if (status?.last_profile) renderProfile(status.last_profile); if (Array.isArray(status?.gamma_alerts)) status.gamma_alerts.forEach(renderSignal); if (status?.last_signal != null) renderSignal(status.last_signal); } catch (error) { console.warn('Gamma status fetch failed:', error); } }
 
   function populateExpiry() {

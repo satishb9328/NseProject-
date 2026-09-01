@@ -793,9 +793,14 @@ def build_option_chain_rows(
             prev_oi = _to_number(item.get('poi'))
             if prev_oi is None:
                 prev_oi = _to_number(item.get('previous_oi'))
-            if isinstance(prev_oi, (int, float)):
+            # Match upstox_live_feed.py: a missing or zero previous OI yields no COI
+            # (None) instead of a fabricated "0% change" or a divide-by-zero.
+            if isinstance(prev_oi, (int, float)) and prev_oi != 0:
                 coi = oi - prev_oi
-                coi_pct = round((coi / prev_oi) * 100, 2) if prev_oi != 0 else 0
+                coi_pct = round((coi / prev_oi) * 100, 2)
+            else:
+                coi = None
+                coi_pct = None
 
         # Volume Velocity (shares/sec) from the feed's rolling window tracker.
         velocity = _to_number(item.get('volume_velocity'))
@@ -811,18 +816,11 @@ def build_option_chain_rows(
 
         call_oi = _to_number(row.get('call_oi'))
         put_oi = _to_number(row.get('put_oi'))
-        call_coi = _to_number(row.get('call_coi'))
-        put_coi = _to_number(row.get('put_coi'))
 
         if call_oi is not None and put_oi is not None:
             oi_total = call_oi + put_oi
             row['call_oi_pct'] = round((call_oi / oi_total) * 100, 1) if oi_total != 0 else 0
             row['put_oi_pct'] = round((put_oi / oi_total) * 100, 1) if oi_total != 0 else 0
-
-        if call_coi is not None and put_coi is not None:
-            coi_total = call_coi + put_coi
-            row['call_coi_pct'] = round((call_coi / coi_total) * 100, 1) if coi_total != 0 else 0
-            row['put_coi_pct'] = round((put_coi / coi_total) * 100, 1) if coi_total != 0 else 0
 
     def has_activity(value):
         return isinstance(value, (int, float)) and value != 0
