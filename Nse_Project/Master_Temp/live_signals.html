@@ -14,6 +14,37 @@
   .dominance-track { height: 3px; margin-top: 3px; overflow: hidden; border-radius: 999px; background: rgba(148, 163, 184, .18); }
   .dominance-fill { height: 100%; border-radius: inherit; transition: width .35s ease; }
   .sentiment-bar { transition: background-color .7s ease, color .7s ease, border-color .7s ease; }
+  /* ---- Dynamic metric color coding (Bias / Momentum / Score) ---- */
+  .sentiment-metric {
+    display: inline-flex;
+    align-items: baseline;
+    gap: .375rem;
+    padding: .2rem .6rem;
+    border-radius: .55rem;
+    border: 1px solid transparent;
+    font-variant-numeric: tabular-nums;
+    transition: color .4s ease, background-color .4s ease, border-color .4s ease;
+  }
+  .sentiment-metric .metric-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    opacity: .85;
+  }
+  .metric-bull { color: #4ade80; background-color: rgba(34,197,94,.14); border-color: rgba(34,197,94,.38); }
+  .metric-bear { color: #f87171; background-color: rgba(239,68,68,.14); border-color: rgba(239,68,68,.38); }
+  .metric-neutral { color: #facc15; background-color: rgba(234,179,8,.12); border-color: rgba(234,179,8,.30); }
+
+  /* ---- Smart Market Insight strip ---- */
+  .sentiment-insight {
+    border-radius: .55rem;
+    border-left: 3px solid transparent;
+    transition: color .4s ease, background-color .4s ease, border-color .4s ease;
+  }
+  .insight-bull { color: #bbf7d0; background-color: rgba(34,197,94,.10); border-left-color: #22c55e; }
+  .insight-bear { color: #fecaca; background-color: rgba(239,68,68,.10); border-left-color: #ef4444; }
+  .insight-neutral { color: #e2e8f0; background-color: rgba(148,163,184,.10); border-left-color: #eab308; }
   .gamma-alert-feed { scrollbar-width: thin; scrollbar-color: rgba(56, 189, 248, .45) rgba(7, 11, 20, .8); }
   /* ---- Volume Velocity (shares/sec) ---- */
   .option-chain-table td.vel-cell { font-variant-numeric: tabular-nums; color: #94a3b8; }
@@ -85,12 +116,33 @@
     <div class="flex w-full flex-col items-start gap-4 mt-4 lg:flex-row">
       <div class="min-w-0 flex-grow overflow-x-auto">
     <section id="option-chain" class="mt-0">
-      <div id="sentiment-bar" class="sentiment-bar mb-0 flex items-center justify-between gap-3 rounded-xl border border-yellow-700 bg-yellow-900/30 px-3 py-2 text-sm font-semibold text-yellow-400">
-        <div class="flex flex-wrap items-center gap-1">
-          <span class="font-bold">📊 LIVE SENTIMENT</span><span class="opacity-60"> | </span><span>BIAS: <span id="sentiment-bias">+0%</span></span><span class="opacity-60"> | </span><span>MOMENTUM: <span id="sentiment-momentum">0%</span> <span id="sentiment-momentum-label">(Quiet)</span></span><span class="opacity-60"> | </span><span>SCORE: <span id="sentiment-score">50/100</span> <span id="sentiment-score-label">(Fair / Neutral Zone)</span></span>
+      <div id="sentiment-bar" class="sentiment-bar mb-0 rounded-xl border border-yellow-700 bg-yellow-900/30 px-3 py-2">
+        <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="mr-1 text-sm font-bold tracking-wide text-slate-100">📊 LIVE SENTIMENT</span>
+            <span id="sentiment-bias-chip" class="sentiment-metric metric-neutral">
+              <span class="metric-label">Bias</span>
+              <span id="sentiment-bias" class="font-mono text-sm font-semibold">+0%</span>
+            </span>
+            <span id="sentiment-momentum-chip" class="sentiment-metric metric-neutral">
+              <span class="metric-label">Momentum</span>
+              <span id="sentiment-momentum" class="font-mono text-sm font-semibold">0%</span>
+              <span id="sentiment-momentum-label" class="text-xs">(Quiet)</span>
+            </span>
+            <span id="sentiment-score-chip" class="sentiment-metric metric-neutral">
+              <span class="metric-label">Score</span>
+              <span id="sentiment-score" class="font-mono text-sm font-semibold">50/100</span>
+              <span id="sentiment-score-label" class="text-xs">(Fair / Neutral Zone)</span>
+            </span>
+          </div>
+          <div class="flex shrink-0 items-center gap-2">
+            <label class="flex items-center gap-2 text-[10px] uppercase tracking-wider text-yellow-200">Expiry<select id="expiry-filter" class="rounded-lg border border-yellow-700/70 bg-ink-950/80 px-2 py-1 text-xs normal-case tracking-normal text-slate-200"><option value="all">Loading expiries...</option></select></label>
+            <button id="scalper-playground-open" type="button" class="scalper-playground-trigger shrink-0 rounded-lg border border-cyan-400/50 bg-cyan-400/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-200 transition hover:bg-cyan-400/20" aria-haspopup="dialog" aria-controls="scalper-playground-modal">🎮 Scalper's Playground</button>
+          </div>
         </div>
-        <label class="flex shrink-0 items-center gap-2 text-[10px] uppercase tracking-wider text-yellow-200">Expiry<select id="expiry-filter" class="rounded-lg border border-yellow-700/70 bg-ink-950/80 px-2 py-1 text-xs normal-case tracking-normal text-slate-200"><option value="all">Loading expiries...</option></select></label>
-        <button id="scalper-playground-open" type="button" class="scalper-playground-trigger shrink-0 rounded-lg border border-cyan-400/50 bg-cyan-400/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-200 transition hover:bg-cyan-400/20" aria-haspopup="dialog" aria-controls="scalper-playground-modal">🎮 Scalper's Playground</button>
+        <div id="sentiment-insight" class="sentiment-insight insight-neutral mt-2 px-3 py-2 text-xs font-medium leading-relaxed">
+          <span class="font-bold uppercase tracking-wider opacity-80">💡 Smart Market Insight · </span><span id="sentiment-insight-text">Loading live sentiment…</span>
+        </div>
       </div>
 
       <div class="rounded-2xl glass">
@@ -196,6 +248,42 @@
     return { colorClass: 'text-slate-400', summary: text || '--' };
   }
 
+  // ---- Dynamic color coding + Smart Market Insight ----
+  const METRIC_TONES = { bull: 'metric-bull', bear: 'metric-bear', neutral: 'metric-neutral' };
+  const INSIGHT_TONES = { bull: 'insight-bull', bear: 'insight-bear', neutral: 'insight-neutral' };
+
+  function tonePct(value) {
+    if (15 < value) return 'bull';
+    if (value < -15) return 'bear';
+    return 'neutral';
+  }
+  function toneScore(value) {
+    if (60 < value) return 'bull';
+    if (value < 40) return 'bear';
+    return 'neutral';
+  }
+  function applyTone(id, tone, toneMap) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    Object.values(toneMap).forEach(function(cls) { el.classList.remove(cls); });
+    el.classList.add(toneMap[tone]);
+  }
+  function buildInsight(bias, momentum, score) {
+    const b = tonePct(bias), m = tonePct(momentum), s = toneScore(score);
+    if (b === 'bear' && m === 'bull' && s === 'bull') {
+      return { tone: 'bull', text: `Bias is negative (${signedPct(bias)}), but Momentum (${signedPct(momentum)}) and Score (${score}) are strong positive. This indicates a massive pullback or short covering against the trend.` };
+    }
+    if (b === 'bull' && m === 'bear' && s === 'bear') {
+      return { tone: 'bear', text: `Bias is positive (${signedPct(bias)}), but Momentum (${signedPct(momentum)}) and Score (${score}) are dropping heavily. This indicates long unwinding or a sharp bearish trap.` };
+    }
+    if (b === 'bull' && m === 'bull' && s === 'bull') {
+      return { tone: 'bull', text: 'All metrics are strongly aligned. Pure Bullish trend confirmed.' };
+    }
+    if (b === 'bear' && m === 'bear' && s === 'bear') {
+      return { tone: 'bear', text: 'All metrics are strongly aligned. Pure Bearish trend confirmed.' };
+    }
+    return { tone: 'neutral', text: 'Metrics are mixed or neutral. Market is in a sideways chop zone.' };
+  }
   function updateSentiment(rows) {
     let callOi = 0, putOi = 0, callCoi = 0, putCoi = 0;
     rows.forEach(row => { callOi += number(row.call_oi); putOi += number(row.put_oi); callCoi += number(row.call_coi); putCoi += number(row.put_coi); });
@@ -209,9 +297,22 @@
     Object.values(themes).flat().forEach(cls => bar.classList.remove(cls)); themes[theme].forEach(cls => bar.classList.add(cls));
     document.getElementById('sentiment-bias').textContent = signedPct(bias);
     document.getElementById('sentiment-momentum').textContent = signedPct(momentum);
+
+    // Requirement 1: per-metric dynamic color coding.
+    applyTone('sentiment-bias-chip', tonePct(bias), METRIC_TONES);
+    applyTone('sentiment-momentum-chip', tonePct(momentum), METRIC_TONES);
+    applyTone('sentiment-score-chip', toneScore(score), METRIC_TONES);
+
     const momentumEl = document.getElementById('sentiment-momentum-label'); momentumEl.textContent = `(${label})`; momentumEl.classList.toggle('font-bold', explosive); momentumEl.classList.toggle('text-orange-500', explosive);
     document.getElementById('sentiment-score').textContent = `${score}/100`;
     document.getElementById('sentiment-score-label').textContent = `(${theme === 'bullish' ? 'Strong Bullish' : theme === 'bearish' ? 'Danger / Strong Bearish' : 'Fair / Neutral Zone'})`;
+
+    // Requirement 2: Smart Market Insight.
+    const insight = buildInsight(bias, momentum, score);
+    const insightBox = document.getElementById('sentiment-insight');
+    Object.values(INSIGHT_TONES).forEach(function(cls) { insightBox.classList.remove(cls); });
+    insightBox.classList.add(INSIGHT_TONES[insight.tone]);
+    document.getElementById('sentiment-insight-text').textContent = insight.text;
   }
 
   function cell(text, classes) { const td = document.createElement('td'); td.className = classes; td.textContent = text; return td; }

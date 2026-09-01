@@ -300,7 +300,7 @@ def dashboard_view(request):
 # Directory containing the daily pre-open TBT CSV/TXT files.
 PREOPEN_TBT_DIR = os.getenv(
     "PREOPEN_TBT_DIR",
-    r"C:\Users\ADMIN\Desktop\Fari Preopen for tbt data",
+    r"C:\Users\ADMIN\Desktop\Fair Preopen",
 )
 PREOPEN_TBT_FILE_EXTENSIONS = (".csv", ".txt")
 PREOPEN_TBT_ENCODINGS = ("utf-8-sig", "utf-8", "latin1")
