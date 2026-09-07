@@ -15,7 +15,7 @@ from pathlib import Path
 import pandas as pd
 import yfinance as yf
 
-SOURCE_DIR = Path(r"C:\Users\ADMIN\Desktop\Fari Preopen")
+SOURCE_DIR = Path(r"C:\Users\ADMIN\Desktop\Fair Preopen")
 FILE_EXTENSIONS = (".csv", ".txt")
 ENCODINGS_TO_TRY = ("utf-8-sig", "utf-8", "latin1")
 TRAP_THRESHOLD = 50

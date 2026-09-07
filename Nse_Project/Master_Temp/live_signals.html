@@ -36,7 +36,7 @@
     position: relative;
     flex: 1 1 auto;
     min-width: 0;
-    height: 10px;
+    height: 16px;
     border-radius: 999px;
     background: rgba(148, 163, 184, .16);
     box-shadow: inset 0 0 0 1px rgba(148, 163, 184, .22);
@@ -151,14 +151,14 @@
           <span class="text-xs uppercase tracking-wider text-slate-500">09:00 - 09:07 IEP</span>
         </div>
         <div class="mb-2 flex items-center justify-between gap-3 text-sm">
-          <span class="font-medium text-slate-400">MAX IEP <span class="font-mono font-semibold text-red-400">{{ preopen_max }}</span></span>
-          <span class="font-medium text-slate-400">MIN IEP <span class="font-mono font-semibold text-green-400">{{ preopen_min }}</span></span>
-          <span class="font-medium text-slate-400">FINAL IEP <span class="font-mono font-semibold text-amber-400">{{ preopen_final }}</span></span>
+          <span class="font-medium text-slate-400">MAX IEP <span id="preopen-max" class="font-mono font-semibold text-red-400">{{ preopen_max }}</span></span>
+          <span class="font-medium text-slate-400">MIN IEP <span id="preopen-min" class="font-mono font-semibold text-green-400">{{ preopen_min }}</span></span>
+          <span class="font-medium text-slate-400">FINAL IEP <span id="preopen-final" class="font-mono font-semibold text-amber-400">{{ preopen_final }}</span></span>
         </div>
         <div class="mb-2 flex items-center justify-between gap-3 border-b border-slate-700/50 pb-2 text-sm">
-          <span class="font-medium text-orange-300">CALL WALL <span class="font-mono">{{ call_wall }}</span></span>
-          <span class="flex-1 text-center text-sm font-bold uppercase tracking-wider {% if 'HIGH PROBABILITY' in trap_signal %}text-neon-green{% else %}text-slate-500{% endif %}">{{ trap_signal }}</span>
-          <span class="font-medium text-emerald-300">PUT WALL <span class="font-mono">{{ put_wall }}</span></span>
+          <span class="font-medium text-orange-300">PRE CALL <span id="preopen-call-wall" class="font-mono">{{ call_wall }}</span></span>
+          <span id="preopen-trap-signal" class="flex-1 text-center text-sm font-bold uppercase tracking-wider {% if 'HIGH PROBABILITY' in trap_signal %}text-neon-green{% else %}text-slate-500{% endif %}">{{ trap_signal }}</span>
+          <span class="font-medium text-emerald-300">PRE PUT <span id="preopen-put-wall" class="font-mono">{{ put_wall }}</span></span>
         </div>
         <div class="flex flex-col gap-2">
           <div id="sentiment-bias-chip" class="sentiment-metric metric-neutral flex w-full items-center justify-between gap-3">
@@ -202,24 +202,24 @@
         </div>
       </section>
 
-      <section id="ai-trade-setups" class="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
-        <div class="mb-1 flex items-center justify-between">
-          <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-slate-200">🤖 AI TRADE SETUPS (LIVE TEST)</h2>
-          <span class="text-[10px] uppercase tracking-wider text-slate-500">A/B Entry Models</span>
+      <section id="ai-trade-setups" class="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+        <div class="mb-2 flex items-center justify-between">
+          <h2 class="text-sm font-bold uppercase tracking-[.18em] text-slate-200">🤖 AI TRADE SETUPS (LIVE TEST)</h2>
+          <span class="text-xs uppercase tracking-wider text-slate-500">A/B Entry Models</span>
         </div>
-        <div class="grid grid-cols-1 gap-2">
-          <div class="rounded-lg border border-orange-500/30 bg-orange-950/20 p-2">
-            <p class="mb-1 text-[10px] font-bold uppercase tracking-wider text-orange-300">⚡ Momentum Pullback (15% Dip)</p>
-            <div class="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
+        <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div class="rounded-lg border border-orange-500/30 bg-orange-950/20 p-3">
+            <p class="mb-2 text-sm font-bold uppercase tracking-wider text-orange-300">⚡ Momentum Pullback (15% Dip)</p>
+            <div class="grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm">
               <span class="uppercase tracking-wider text-slate-500">Target Strike</span><span id="ai-mom-strike" class="text-right font-mono font-semibold text-slate-50">--</span>
               <span class="uppercase tracking-wider text-slate-500">Entry Price</span><span id="ai-mom-entry" class="text-right font-mono font-semibold text-slate-50">--</span>
               <span class="uppercase tracking-wider text-slate-500">SL</span><span id="ai-mom-sl" class="text-right font-mono font-semibold text-rose-300">--</span>
               <span class="uppercase tracking-wider text-slate-500">Target</span><span id="ai-mom-target" class="text-right font-mono font-semibold text-emerald-300">--</span>
             </div>
           </div>
-          <div class="rounded-lg border border-sky-500/30 bg-sky-950/20 p-2">
-            <p class="mb-1 text-[10px] font-bold uppercase tracking-wider text-sky-300">🛡️ Supp/Res Trap (Delta)</p>
-            <div class="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
+          <div class="rounded-lg border border-sky-500/30 bg-sky-950/20 p-3">
+            <p class="mb-2 text-sm font-bold uppercase tracking-wider text-sky-300">🛡️ Supp/Res Trap (Delta)</p>
+            <div class="grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm">
               <span class="uppercase tracking-wider text-slate-500">Target Strike</span><span id="ai-sr-strike" class="text-right font-mono font-semibold text-slate-50">--</span>
               <span class="uppercase tracking-wider text-slate-500">Entry Price</span><span id="ai-sr-entry" class="text-right font-mono font-semibold text-slate-50">--</span>
               <span class="uppercase tracking-wider text-slate-500">SL</span><span id="ai-sr-sl" class="text-right font-mono font-semibold text-rose-300">--</span>
@@ -311,6 +311,7 @@
 
   const number = value => { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : 0; };
   const fmt = value => value === null || value === undefined || value === '-' ? '-' : typeof value === 'number' ? value.toLocaleString('en-IN') : value;
+  const fmtFlip = value => { if (value === null || value === undefined || value === '') return '--'; const n = Number(value); return Number.isFinite(n) ? n.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) : '--'; };
   // The engine ships pre-formatted compact exposures ("-1.07 Cr", "83.08 K") next to
   // every raw float; prefer them so NET GEX/CHARM/VANNA never render as a 14-digit wall
   // of digits. Older payloads without *_display fall back to plain en-IN grouping.
@@ -425,13 +426,16 @@
     const label = Math.abs(momentum) < 5 ? 'Quiet' : Math.abs(momentum) <= 10 ? 'Healthy Trend' : 'EXPLOSIVE!';
     const bar = document.getElementById('sentiment-bar');
     Object.values(themes).flat().forEach(cls => bar.classList.remove(cls)); themes[theme].forEach(cls => bar.classList.add(cls));
-    document.getElementById('sentiment-bias').textContent = signedPct(bias);
-    document.getElementById('sentiment-momentum').textContent = signedPct(momentum);
-
-    // Elastic bars: advance session peaks (peak-hold) then render active + ghost.
+    // Elastic bars: advance session peaks (peak-hold), expose the same-side peak
+    // next to the live value, then render the active + ghost bars.
     peakMaxBias = Math.max(peakMaxBias, bias); peakMinBias = Math.min(peakMinBias, bias);
     peakMaxMom = Math.max(peakMaxMom, momentum); peakMinMom = Math.min(peakMinMom, momentum);
     peakMaxScore = Math.max(peakMaxScore, score); peakMinScore = Math.min(peakMinScore, score);
+    const peakBias = bias >= 0 ? peakMaxBias : peakMinBias;
+    const peakMom = momentum >= 0 ? peakMaxMom : peakMinMom;
+    const peakScore = score >= 50 ? peakMaxScore : peakMinScore;
+    document.getElementById('sentiment-bias').textContent = `${signedPct(bias)} (Peak: ${signedPct(peakBias)})`;
+    document.getElementById('sentiment-momentum').textContent = `${signedPct(momentum)} (Peak: ${signedPct(peakMom)})`;
     renderElasticBar(document.getElementById('sentiment-bias-bar'), bias, 0, 100, peakMaxBias, peakMinBias);
     renderElasticBar(document.getElementById('sentiment-momentum-bar'), momentum, 0, 100, peakMaxMom, peakMinMom);
     renderElasticBar(document.getElementById('sentiment-score-bar'), score, 50, 50, peakMaxScore, peakMinScore);
@@ -442,7 +446,7 @@
     applyTone('sentiment-score-chip', toneScore(score), METRIC_TONES);
 
     const momentumEl = document.getElementById('sentiment-momentum-label'); momentumEl.textContent = `(${label})`; momentumEl.classList.toggle('font-bold', explosive); momentumEl.classList.toggle('text-orange-500', explosive);
-    document.getElementById('sentiment-score').textContent = `${score}/100`;
+    document.getElementById('sentiment-score').textContent = `${score}/100 (Peak: ${peakScore}/100)`;
     document.getElementById('sentiment-score-label').textContent = `(${theme === 'bullish' ? 'Bullish' : theme === 'bearish' ? 'Bearish' : 'Neutral'})`;
 
     // Requirement 2: Smart Market Insight.
@@ -532,7 +536,7 @@
   function pcrColorClass(value) { const pcr = Number(value); if (!Number.isFinite(pcr)) return 'text-slate-50'; if (pcr >= 1.2) return 'text-green-400'; if (pcr <= 0.8) return 'text-red-400'; return 'text-yellow-400'; }
   // ---- Gamma Flip missing-value guard (None/null renders as "--") ----
   function isFlipMissing(value) { if (value === null || value === undefined) return true; const text = String(value).trim(); if (!text || text === '--' || /^(none|null)$/i.test(text)) return true; return !Number.isFinite(Number(value)); }
-  function renderProfile(profile) { if (!profile || typeof profile !== 'object') return; const spot = profileValue(profile, 'spot', 'Spot', 'spot_price'); const weekly = profile.weekly_gamma || profile; const day = profile.day_gamma || {}; if (!haveIndexSpot) { currentSpot = Number(spot); const el = document.getElementById('live-spot-price'); if (el) el.textContent = fmt(spot); } document.getElementById('live-spot').textContent = fmt(spot); document.getElementById('live-expiry').textContent = profile.expiry || '--'; [['weekly', weekly], ['day', day]].forEach(([prefix, metrics]) => { const netGex = profileValue(metrics, 'net_gex', 'netGEX', 'net_gex_value'); const pcr = profileValue(metrics, 'pcr', 'PCR'); const gexTier = metrics.signal ? signalTier(metrics.signal) : netGexTier(netGex, pcr); const pcrElement = document.getElementById(`${prefix}-pcr`); pcrElement.textContent = fmt(pcr); pcrElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); pcrElement.classList.add(pcrColorClass(pcr)); const gammaFlipRaw = profileValue(metrics, 'gamma_flip_level', 'gamma_flip', 'gammaFlip', 'gamma_flip_value'); document.getElementById(`${prefix}-gamma-flip`).textContent = fmt(gammaFlipRaw); const gammaFlipWarning = document.getElementById(`${prefix}-gamma-flip-warning`); if (gammaFlipWarning) gammaFlipWarning.classList.toggle('is-visible', isFlipMissing(gammaFlipRaw)); document.getElementById(`${prefix}-call-wall`).textContent = fmt(metrics.call_wall ?? metrics.call_wall_strike); document.getElementById(`${prefix}-put-wall`).textContent = fmt(metrics.put_wall ?? metrics.put_wall_strike); const charmElement = document.getElementById(`${prefix}-net-charm`); const vannaElement = document.getElementById(`${prefix}-net-vanna`); charmElement.textContent = fmtExposure(metrics.net_charm_display, metrics.net_charm); vannaElement.textContent = fmtExposure(metrics.net_vanna_display, metrics.net_vanna); charmElement.title = exactTitle(metrics.net_charm); vannaElement.title = exactTitle(metrics.net_vanna); exposureColor(charmElement, metrics.net_charm); exposureColor(vannaElement, metrics.net_vanna); const gexElement = document.getElementById(`${prefix}-net-gex`); const summaryElement = document.getElementById(`${prefix}-net-gex-summary`); gexElement.textContent = fmtExposure(metrics.net_gex_display, netGex); gexElement.title = exactTitle(netGex); gexElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); gexElement.classList.add(gexTier.colorClass); summaryElement.textContent = gexTier.summary; summaryElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-400'); summaryElement.classList.add(gexTier.colorClass); }); renderRows(); }
+  function renderProfile(profile) { if (!profile || typeof profile !== 'object') return; const spot = profileValue(profile, 'spot', 'Spot', 'spot_price'); const weekly = profile.weekly_gamma || profile; const day = profile.day_gamma || {}; if (!haveIndexSpot) { currentSpot = Number(spot); const el = document.getElementById('live-spot-price'); if (el) el.textContent = fmt(spot); } document.getElementById('live-spot').textContent = fmt(spot); document.getElementById('live-expiry').textContent = profile.expiry || '--'; [['weekly', weekly], ['day', day]].forEach(([prefix, metrics]) => { const netGex = profileValue(metrics, 'net_gex', 'netGEX', 'net_gex_value'); const pcr = profileValue(metrics, 'pcr', 'PCR'); const gexTier = metrics.signal ? signalTier(metrics.signal) : netGexTier(netGex, pcr); const pcrElement = document.getElementById(`${prefix}-pcr`); pcrElement.textContent = fmt(pcr); pcrElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); pcrElement.classList.add(pcrColorClass(pcr)); const gammaFlipRaw = profileValue(metrics, 'gamma_flip_level', 'gamma_flip', 'gammaFlip', 'gamma_flip_value'); document.getElementById(`${prefix}-gamma-flip`).textContent = fmtFlip(gammaFlipRaw); const gammaFlipWarning = document.getElementById(`${prefix}-gamma-flip-warning`); if (gammaFlipWarning) gammaFlipWarning.classList.toggle('is-visible', isFlipMissing(gammaFlipRaw)); document.getElementById(`${prefix}-call-wall`).textContent = fmt(metrics.call_wall ?? metrics.call_wall_strike); document.getElementById(`${prefix}-put-wall`).textContent = fmt(metrics.put_wall ?? metrics.put_wall_strike); const charmElement = document.getElementById(`${prefix}-net-charm`); const vannaElement = document.getElementById(`${prefix}-net-vanna`); charmElement.textContent = fmtExposure(metrics.net_charm_display, metrics.net_charm); vannaElement.textContent = fmtExposure(metrics.net_vanna_display, metrics.net_vanna); charmElement.title = exactTitle(metrics.net_charm); vannaElement.title = exactTitle(metrics.net_vanna); exposureColor(charmElement, metrics.net_charm); exposureColor(vannaElement, metrics.net_vanna); const gexElement = document.getElementById(`${prefix}-net-gex`); const summaryElement = document.getElementById(`${prefix}-net-gex-summary`); gexElement.textContent = fmtExposure(metrics.net_gex_display, netGex); gexElement.title = exactTitle(netGex); gexElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); gexElement.classList.add(gexTier.colorClass); summaryElement.textContent = gexTier.summary; summaryElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-400'); summaryElement.classList.add(gexTier.colorClass); }); renderRows(); }
   function renderSignal(signal) { if (signal == null) return; const text = typeof signal === 'string' ? signal : signal.message || JSON.stringify(signal); if (seenSignals.has(text)) return; seenSignals.add(text); const stream = /weekly|macro/i.test(text) ? signalStreams.weekly : signalStreams.daily; if (!stream) return; if (stream.querySelector('p')) stream.replaceChildren(); const item = document.createElement('div'); item.className = 'rounded-lg border border-slate-700/80 bg-ink-800/80 p-2'; const timestamp = typeof signal === 'object' && signal.timestamp ? new Date(signal.timestamp).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }) : new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }); item.textContent = `${timestamp}  ${text}`; stream.prepend(item); while (stream.children.length > 8) stream.lastChild.remove(); }
 
   // ---- Live index SPOT ----
@@ -620,6 +624,25 @@
   async function refreshOptions() { try { const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); loadedExpiry = data.expiry_date || null; updateSpotPrice(data); allRows = Array.isArray(data.option_chain) ? data.option_chain.sort((a, b) => number(a.strike) - number(b.strike)) : []; populateExpiry(); updateSentiment(allRows); renderRows(); updateScalperPlayground(); updateAITrades(); synced.textContent = `Synced ${new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })}`; } catch (error) { console.warn('Option-chain fetch failed:', error); } }
   async function refreshGamma() { try { const response = await fetch('/gamma/status/', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); const status = data?.status || data; if (status?.last_profile) renderProfile(status.last_profile); if (Array.isArray(status?.gamma_alerts)) status.gamma_alerts.forEach(renderSignal); if (status?.last_signal != null) renderSignal(status.last_signal); } catch (error) { console.warn('Gamma status fetch failed:', error); } }
 
+  function updatePreopen(data) {
+    const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+    const fmtIep = value => (value === null || value === undefined) ? 'None' : fmtFlip(value);
+    setText('preopen-max', fmtIep(data.preopen_max));
+    setText('preopen-min', fmtIep(data.preopen_min));
+    setText('preopen-final', fmtIep(data.preopen_final));
+    setText('preopen-call-wall', fmt(data.call_wall));
+    setText('preopen-put-wall', fmt(data.put_wall));
+    const signalEl = document.getElementById('preopen-trap-signal');
+    if (signalEl) {
+      const signal = data.trap_signal || 'WAITING FOR TBT DATA';
+      signalEl.textContent = signal;
+      const hot = String(signal).includes('HIGH PROBABILITY');
+      signalEl.classList.toggle('text-neon-green', hot);
+      signalEl.classList.toggle('text-slate-500', !hot);
+    }
+  }
+  async function refreshPreopen() { try { const response = await fetch('{% url "live_dashboard:preopen_trap_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); updatePreopen(await response.json()); } catch (error) { console.warn('Pre-open fetch failed:', error); } }
+
   function populateExpiry() {
     const selected = expiryFilter.value;
     const expiries = [...new Set([
@@ -638,7 +661,7 @@
   }
   function refreshFilters() { renderRows(); }
   expiryFilter.addEventListener('change', refreshFilters);
-  refreshOptions(); refreshGamma(); setInterval(refreshOptions, 1000); setInterval(refreshGamma, 2000);
+  refreshOptions(); refreshGamma(); refreshPreopen(); setInterval(refreshOptions, 1000); setInterval(refreshGamma, 2000); setInterval(refreshPreopen, 5000);
 
   // SCALPER'S PLAYGROUND: standalone removable interaction.
   const scalperModal = document.getElementById('scalper-playground-modal');

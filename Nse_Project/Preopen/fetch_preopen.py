@@ -12,8 +12,9 @@ def download_graph_csv():
         # Force the Proactor policy right before Playwright executes
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-    # Path to save the file
-    save_dir = r"C:\Users\ADMIN\Desktop\preopen"
+    # Path to save the file. Keep this in sync with Live_dashboard.views.PREOPEN_TBT_DIR
+    # via the shared PREOPEN_TBT_DIR env var so the backend always reads where we write.
+    save_dir = os.getenv("PREOPEN_TBT_DIR", r"C:\Users\ADMIN\Desktop\preopen")
 
     # Create the folder if it doesn't exist
     if not os.path.exists(save_dir):

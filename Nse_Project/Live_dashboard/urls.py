@@ -7,4 +7,5 @@ urlpatterns = [
     path('', views.dashboard_view, name='dashboard'),
     path('live-signals/', views.live_signals_view, name='live_signals'),
     path('api/live-options/', views.live_option_chain_api, name='live_option_chain_api'),
+    path('api/preopen-trap/', views.preopen_trap_api, name='preopen_trap_api'),
 ]

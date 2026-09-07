@@ -1,9 +1,9 @@
 {
   "api_key": "0a02ae84-2ac8-4c54-974a-af1202562a43",
   "api_secret": "ca5k88sap1",
-  "access_token": "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUFGR1ciLCJqdGkiOiI2YTk2NDYzZGVmODU3ZTNkN2JiMmY1YWIiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzg4MjMzMjc3LCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3ODgzMDAwMDB9.RQRsW7vRMZwsx0HulLWhi3kCk33chZZmtW74TukuQjg",
-  "fetched_at": 1788233276,
+  "access_token": "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUFGR1ciLCJqdGkiOiI2YTllMmY0Y2Y0ZDdjZTRkMDQ5NTQzNTAiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzg4NzUxNjkyLCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3ODg4MTg0MDB9.YChj432F37F4TSdtEZ7mj3q7m-oIGOh22bwuqxkLsG4",
+  "fetched_at": 1788751691,
   "expires_in": 86400,
-  "expires_at": "2026-09-02T08:57:56",
-  "saved_at": "2026-09-01T08:57:56.592214"
+  "expires_at": "2026-09-08T08:58:11",
+  "saved_at": "2026-09-07T08:58:11.671110"
 }

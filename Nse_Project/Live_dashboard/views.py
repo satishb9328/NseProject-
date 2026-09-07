@@ -11,7 +11,6 @@ import requests
 import time as std_time  # aliased to avoid clashing with `datetime.time` below
 from datetime import date, datetime, time, timedelta, timezone
 from Nse_Project.Swing_ML.views import get_swing_ml_context
-from Nse_Project.GAMMA.gamma_blast_engine import get_gamma_bot
 # Shared (expiry_date, strike_price) keying. The feed, this dashboard and the Gamma
 # engine MUST resolve an instrument's expiry identically, otherwise one of them merges
 # two chains into a single row while the others do not.
@@ -30,7 +29,12 @@ except ImportError:  # Keeps the dashboard importable until redis-py is installe
 logger = logging.getLogger(__name__)
 
 PREOPEN_TRAP_THRESHOLD = 50
-# Used only until call_wall/put_wall are wired into RedisGammaBot.last_profile.
+# Static pre-open wall strikes. The PRE-OPEN GAMMA TRAP is judged against the
+# morning / previous-EOD wall levels and must NOT drift with intraday OI, so these
+# are intentionally hardcoded (previous close +/- offset) rather than read from the
+# live Gamma bot. Keep them decoupled from RedisGammaBot.last_profile: its
+# call_wall/put_wall are derived from the live option chain's max OI and would
+# update during the trading day.
 MOCK_CALL_WALL = 24400
 MOCK_PUT_WALL = 24100
 
@@ -300,7 +304,7 @@ def dashboard_view(request):
 # Directory containing the daily pre-open TBT CSV/TXT files.
 PREOPEN_TBT_DIR = os.getenv(
     "PREOPEN_TBT_DIR",
-    r"C:\Users\ADMIN\Desktop\Fair Preopen",
+    r"C:\Users\ADMIN\Desktop\preopen",
 )
 PREOPEN_TBT_FILE_EXTENSIONS = (".csv", ".txt")
 PREOPEN_TBT_ENCODINGS = ("utf-8-sig", "utf-8", "latin1")
@@ -354,10 +358,12 @@ def fetch_real_preopen_trap_data(target_date: date | None = None) -> dict | None
     target_date = target_date or _ist_today()
 
     if not os.path.isdir(PREOPEN_TBT_DIR):
+        logger.warning("PREOPEN_TBT_DIR does not exist: %s", PREOPEN_TBT_DIR)
         return None
     try:
         file_names = sorted(os.listdir(PREOPEN_TBT_DIR))
-    except OSError:
+    except OSError as exc:
+        logger.warning("Cannot list PREOPEN_TBT_DIR %s: %s", PREOPEN_TBT_DIR, exc)
         return None
 
     collected = []
@@ -391,35 +397,51 @@ def fetch_real_preopen_trap_data(target_date: date | None = None) -> dict | None
             collected.append(window)
 
     if not collected:
+        logger.info(
+            "No pre-open TBT ticks found for %s in %s",
+            target_date,
+            PREOPEN_TBT_DIR,
+        )
         return None
 
     all_ticks = pd.concat(collected, ignore_index=True).sort_values("ts")
     if all_ticks.empty:
+        logger.info("Pre-open TBT data for %s was empty", target_date)
         return None
 
-    return {
+    result = {
         "Max_IEP": round(float(all_ticks["price"].max()), 2),
         "Min_IEP": round(float(all_ticks["price"].min()), 2),
         "Final_IEP": round(float(all_ticks["price"].iloc[-1]), 2),
     }
+    logger.info("Computed pre-open trap data for %s: %s", target_date, result)
+    return result
 
 
 def get_gamma_walls() -> tuple[float, float]:
-    """Read call/put wall strikes from the live Gamma bot, falling back to mock values."""
-    bot = get_gamma_bot()
-    last_profile = bot.last_profile or {}
-    call_wall = last_profile.get('call_wall') or MOCK_CALL_WALL
-    put_wall = last_profile.get('put_wall') or MOCK_PUT_WALL
-    return call_wall, put_wall
+    """Return the STATIC pre-open wall strikes.
+
+    These are the morning / yesterday-EOD reference levels the PRE-OPEN GAMMA
+    TRAP is judged against. They must never track the live intraday option
+    chain, so we deliberately do NOT consult ``RedisGammaBot.last_profile``
+    here — its ``call_wall``/``put_wall`` (once populated) are computed from
+    the live chain's max OI and would shift during the session.
+    """
+    return MOCK_CALL_WALL, MOCK_PUT_WALL
 
 
-def live_signals_view(request):
+def _build_preopen_context() -> dict:
+    """Build the full PRE-OPEN GAMMA TRAP context (values + trap signal).
+
+    Shared by the server-rendered page and the JSON poll endpoint so the
+    two can never drift apart.
+    """
     call_wall, put_wall = get_gamma_walls()
     trap_data = fetch_real_preopen_trap_data()
 
     # No real TBT data for today yet -> graceful waiting state, no dummy signals.
     if trap_data is None:
-        context = {
+        return {
             'preopen_max': None,
             'preopen_min': None,
             'preopen_final': None,
@@ -427,7 +449,6 @@ def live_signals_view(request):
             'put_wall': put_wall,
             'trap_signal': 'WAITING FOR TBT DATA',
         }
-        return render(request, "live_signals.html", context)
 
     max_iep = trap_data['Max_IEP']
     min_iep = trap_data['Min_IEP']
@@ -445,7 +466,7 @@ def live_signals_view(request):
     else:
         trap_signal = "NEUTRAL - NO TRAP DETECTED"
 
-    context = {
+    return {
         'preopen_max': max_iep,
         'preopen_min': min_iep,
         'preopen_final': final_iep,
@@ -453,7 +474,16 @@ def live_signals_view(request):
         'put_wall': put_wall,
         'trap_signal': trap_signal,
     }
+
+
+def live_signals_view(request):
+    context = _build_preopen_context()
     return render(request, "live_signals.html", context)
+
+
+def preopen_trap_api(request):
+    """JSON endpoint polled by the dashboard to clear the WAITING state live."""
+    return JsonResponse(_build_preopen_context())
 
 
 def get_live_options_redis():

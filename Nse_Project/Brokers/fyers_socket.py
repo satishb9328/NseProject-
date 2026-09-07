@@ -37,6 +37,36 @@ from fyers_apiv3 import fyersModel
 logger = logging.getLogger(__name__)
 
 
+def _coerce_float(value):
+    """Coerce a value to float, returning None for missing/NaN/unparseable."""
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f else None
+
+
+def _extract_bid_ask(msg: dict):
+    """Best bid / best ask from a Fyers tick payload (handles depth arrays)."""
+    bid = _coerce_float(msg.get("bid"))
+    ask = _coerce_float(msg.get("ask"))
+    if bid is None:
+        bids = msg.get("bids")
+        if isinstance(bids, list) and bids and isinstance(bids[0], (list, tuple)):
+            bid = _coerce_float(bids[0][0])
+    if ask is None:
+        asks = msg.get("asks")
+        if isinstance(asks, list) and asks and isinstance(asks[0], (list, tuple)):
+            ask = _coerce_float(asks[0][0])
+    if bid is None:
+        bid = _coerce_float(msg.get("bp1", msg.get("bidP")))
+    if ask is None:
+        ask = _coerce_float(msg.get("sp1", msg.get("ap1", msg.get("askP"))))
+    return bid, ask
+
+
 # ════════════════════════════════════════════════════════════════════════════════
 # DATA CONTAINERS
 # ════════════════════════════════════════════════════════════════════════════════
@@ -52,6 +82,8 @@ class Tick:
     close: float
     volume: int
     change: float
+    bid: Optional[float] = None
+    ask: Optional[float] = None
     timestamp: datetime = field(default_factory=datetime.now)
 
     @classmethod
@@ -64,6 +96,7 @@ class Tick:
               'low': 2840.0, 'open': 2845.0, 'close': 2848.0,
               'vol_traded': 1234567, 'ch': 2.0, 'chp': 0.07, ... }
         """
+        bid, ask = _extract_bid_ask(msg)
         return cls(
             symbol=msg.get("symbol", ""),
             ltp=float(msg.get("ltp", 0)),
@@ -73,6 +106,8 @@ class Tick:
             close=float(msg.get("close", 0)),
             volume=int(msg.get("vol_traded", 0)),
             change=float(msg.get("ch", 0)),
+            bid=bid,
+            ask=ask,
             timestamp=datetime.now(),
         )
 
