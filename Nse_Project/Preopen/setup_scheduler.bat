@@ -6,7 +6,7 @@ echo ============================================================
 echo NSE Preopen Data Fetcher - Task Scheduler Setup
 echo ============================================================
 echo.
-echo This will create a scheduled task that runs at 9:08 AM
+echo This will create a scheduled task that runs at 9:10 AM
 echo every weekday (automatically skipping weekends and holidays)
 echo.
 

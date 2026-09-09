@@ -101,6 +101,12 @@
   .gamma-flip-warning-track { display: inline-block; white-space: nowrap; will-change: transform; animation: gamma-flip-scroll 14s linear infinite; }
   @keyframes gamma-flip-scroll { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
   @media (prefers-reduced-motion: reduce) { .gamma-flip-warning-track { animation: none; } }
+
+  /* ---- Cumulative Volume Delta (CVD) live widget ---- */
+  .cvd-value { font-variant-numeric: tabular-nums; transition: color .4s ease, text-shadow .4s ease; }
+  .cvd-bull { color: #4ade80; text-shadow: 0 0 14px rgba(74,222,128,.45); }
+  .cvd-bear { color: #f87171; text-shadow: 0 0 14px rgba(248,113,113,.45); }
+  .cvd-neutral { color: #eab308; }
 </style>
 {% endblock %}
 
@@ -148,17 +154,17 @@
       <section id="preopen-trap-snapshot" class="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
         <div class="mb-2 flex items-center justify-between gap-3">
           <h2 class="text-sm font-bold uppercase tracking-[.18em] text-slate-200">PRE-OPEN GAMMA TRAP</h2>
-          <span class="text-xs uppercase tracking-wider text-slate-500">09:00 - 09:07 IEP</span>
+          <span class="text-xs uppercase tracking-wider text-slate-500">09:00 - 09:10 IST</span>
         </div>
         <div class="mb-2 flex items-center justify-between gap-3 text-sm">
-          <span class="font-medium text-slate-400">MAX IEP <span id="preopen-max" class="font-mono font-semibold text-red-400">{{ preopen_max }}</span></span>
-          <span class="font-medium text-slate-400">MIN IEP <span id="preopen-min" class="font-mono font-semibold text-green-400">{{ preopen_min }}</span></span>
-          <span class="font-medium text-slate-400">FINAL IEP <span id="preopen-final" class="font-mono font-semibold text-amber-400">{{ preopen_final }}</span></span>
+          <span class="font-medium text-slate-400">MAX IEP <span id="preopen-max" class="font-mono font-semibold text-red-400">{{ preopen_max|default_if_none:"—" }}</span></span>
+          <span class="font-medium text-slate-400">MIN IEP <span id="preopen-min" class="font-mono font-semibold text-green-400">{{ preopen_min|default_if_none:"—" }}</span></span>
+          <span class="font-medium text-slate-400">FINAL IEP <span id="preopen-final" class="font-mono font-semibold text-amber-400">{{ preopen_final|default_if_none:"—" }}</span></span>
         </div>
         <div class="mb-2 flex items-center justify-between gap-3 border-b border-slate-700/50 pb-2 text-sm">
-          <span class="font-medium text-orange-300">PRE CALL <span id="preopen-call-wall" class="font-mono">{{ call_wall }}</span></span>
+          <span class="font-medium text-orange-300">PRE CALL <span id="preopen-call-wall" class="font-mono">{{ call_wall|default_if_none:"—" }}</span></span>
           <span id="preopen-trap-signal" class="flex-1 text-center text-sm font-bold uppercase tracking-wider {% if 'HIGH PROBABILITY' in trap_signal %}text-neon-green{% else %}text-slate-500{% endif %}">{{ trap_signal }}</span>
-          <span class="font-medium text-emerald-300">PRE PUT <span id="preopen-put-wall" class="font-mono">{{ put_wall }}</span></span>
+          <span class="font-medium text-emerald-300">PRE PUT <span id="preopen-put-wall" class="font-mono">{{ put_wall|default_if_none:"—" }}</span></span>
         </div>
         <div class="flex flex-col gap-2">
           <div id="sentiment-bias-chip" class="sentiment-metric metric-neutral flex w-full items-center justify-between gap-3">
@@ -199,6 +205,27 @@
         </div>
         <div id="sentiment-insight" class="sentiment-insight insight-neutral mt-2 px-2.5 py-1.5 text-xs font-medium leading-snug">
           <span class="font-bold uppercase tracking-wider opacity-80">💡 Smart Market Insight · </span><span id="sentiment-insight-text">Loading live sentiment…</span>
+        </div>
+        <div id="cvd-widget" class="mt-3 rounded-xl border border-slate-800 bg-slate-900/50 p-3">
+          <div class="mb-2 flex items-center justify-between">
+            <h3 class="text-xs font-bold uppercase tracking-[.18em] text-slate-300">📊 Cumulative Volume Delta</h3>
+            <span id="cvd-status" class="rounded-full border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-slate-400">Connecting…</span>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
+              <p class="text-[10px] uppercase tracking-wider text-slate-500">CVD</p>
+              <p id="cvd-value" class="cvd-value cvd-neutral font-mono text-xl font-bold">--</p>
+            </div>
+            <div class="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
+              <p class="text-[10px] uppercase tracking-wider text-slate-500">CVD Trend · 4m</p>
+              <p id="cvd-trend" class="cvd-value cvd-neutral font-mono text-xl font-bold">--</p>
+            </div>
+          </div>
+          <div class="mt-2 flex items-center justify-between text-[11px] text-slate-400">
+            <span>Symbol <span id="cvd-symbol" class="font-mono text-slate-200">--</span></span>
+            <span>Delta <span id="cvd-delta" class="font-mono text-slate-200">--</span></span>
+            <span>Close <span id="cvd-close" class="font-mono text-slate-200">--</span></span>
+          </div>
         </div>
       </section>
 
@@ -415,41 +442,55 @@
   }
 
   function updateSentiment(rows) {
+    // The PRE-OPEN GAMMA TRAP widget's Bias / Momentum / Score are now driven by the
+    // pre-open settlement snapshot (renderPreopenSentiment). This function only feeds
+    // the intraday option-chain sentiment into the AI trade setups once the chain is
+    // live (after 09:15); until then it must not overwrite the pre-open values.
+    if (!rows || !rows.length) return;
     let callOi = 0, putOi = 0, callCoi = 0, putCoi = 0;
     rows.forEach(row => { callOi += number(row.call_oi); putOi += number(row.put_oi); callCoi += number(row.call_coi); putCoi += number(row.put_coi); });
     const totalOi = callOi + putOi, bias = totalOi ? ((putOi - callOi) / totalOi) * 100 : 0;
     const momentum = totalOi ? ((callCoi + putCoi) / totalOi) * 100 : 0;
     const score = Math.max(0, Math.min(100, Math.round(50 + bias * .5 + momentum)));
-    const theme = score >= 65 ? 'bullish' : score <= 34 ? 'bearish' : 'neutral';
-    currentSentiment = theme; // expose live sentiment to the AI trade setups A/B test
+    currentSentiment = score >= 65 ? 'bullish' : score <= 34 ? 'bearish' : 'neutral';
+  }
+
+  function renderPreopenSentiment(data) {
+    const bias = Number.isFinite(Number(data.bias)) ? Number(data.bias) : 0;
+    const momentum = Number.isFinite(Number(data.momentum)) ? Number(data.momentum) : 0;
+    const score = Number.isFinite(Number(data.score)) ? Math.round(Number(data.score)) : 50;
+    const theme = data.theme === 'bullish' || data.theme === 'bearish' ? data.theme
+      : (score >= 65 ? 'bullish' : score <= 34 ? 'bearish' : 'neutral');
+    currentSentiment = theme;
+
     const explosive = Math.abs(momentum) > 10;
     const label = Math.abs(momentum) < 5 ? 'Quiet' : Math.abs(momentum) <= 10 ? 'Healthy Trend' : 'EXPLOSIVE!';
-    const bar = document.getElementById('sentiment-bar');
-    Object.values(themes).flat().forEach(cls => bar.classList.remove(cls)); themes[theme].forEach(cls => bar.classList.add(cls));
-    // Elastic bars: advance session peaks (peak-hold), expose the same-side peak
-    // next to the live value, then render the active + ghost bars.
+
     peakMaxBias = Math.max(peakMaxBias, bias); peakMinBias = Math.min(peakMinBias, bias);
     peakMaxMom = Math.max(peakMaxMom, momentum); peakMinMom = Math.min(peakMinMom, momentum);
     peakMaxScore = Math.max(peakMaxScore, score); peakMinScore = Math.min(peakMinScore, score);
     const peakBias = bias >= 0 ? peakMaxBias : peakMinBias;
     const peakMom = momentum >= 0 ? peakMaxMom : peakMinMom;
     const peakScore = score >= 50 ? peakMaxScore : peakMinScore;
+
     document.getElementById('sentiment-bias').textContent = `${signedPct(bias)} (Peak: ${signedPct(peakBias)})`;
     document.getElementById('sentiment-momentum').textContent = `${signedPct(momentum)} (Peak: ${signedPct(peakMom)})`;
     renderElasticBar(document.getElementById('sentiment-bias-bar'), bias, 0, 100, peakMaxBias, peakMinBias);
     renderElasticBar(document.getElementById('sentiment-momentum-bar'), momentum, 0, 100, peakMaxMom, peakMinMom);
     renderElasticBar(document.getElementById('sentiment-score-bar'), score, 50, 50, peakMaxScore, peakMinScore);
 
-    // Requirement 1: per-metric dynamic color coding.
     applyTone('sentiment-bias-chip', tonePct(bias), METRIC_TONES);
     applyTone('sentiment-momentum-chip', tonePct(momentum), METRIC_TONES);
     applyTone('sentiment-score-chip', toneScore(score), METRIC_TONES);
 
-    const momentumEl = document.getElementById('sentiment-momentum-label'); momentumEl.textContent = `(${label})`; momentumEl.classList.toggle('font-bold', explosive); momentumEl.classList.toggle('text-orange-500', explosive);
+    const momentumEl = document.getElementById('sentiment-momentum-label');
+    momentumEl.textContent = `(${label})`;
+    momentumEl.classList.toggle('font-bold', explosive);
+    momentumEl.classList.toggle('text-orange-500', explosive);
+
     document.getElementById('sentiment-score').textContent = `${score}/100 (Peak: ${peakScore}/100)`;
     document.getElementById('sentiment-score-label').textContent = `(${theme === 'bullish' ? 'Bullish' : theme === 'bearish' ? 'Bearish' : 'Neutral'})`;
 
-    // Requirement 2: Smart Market Insight.
     const insight = buildInsight(bias, momentum, score);
     const insightBox = document.getElementById('sentiment-insight');
     Object.values(INSIGHT_TONES).forEach(function(cls) { insightBox.classList.remove(cls); });
@@ -626,12 +667,12 @@
 
   function updatePreopen(data) {
     const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
-    const fmtIep = value => (value === null || value === undefined) ? 'None' : fmtFlip(value);
+    const fmtIep = value => (value === null || value === undefined || value === '') ? '—' : fmtFlip(value);
     setText('preopen-max', fmtIep(data.preopen_max));
     setText('preopen-min', fmtIep(data.preopen_min));
     setText('preopen-final', fmtIep(data.preopen_final));
-    setText('preopen-call-wall', fmt(data.call_wall));
-    setText('preopen-put-wall', fmt(data.put_wall));
+    setText('preopen-call-wall', fmt(data.pre_call ?? data.call_wall));
+    setText('preopen-put-wall', fmt(data.pre_put ?? data.put_wall));
     const signalEl = document.getElementById('preopen-trap-signal');
     if (signalEl) {
       const signal = data.trap_signal || 'WAITING FOR TBT DATA';
@@ -640,6 +681,7 @@
       signalEl.classList.toggle('text-neon-green', hot);
       signalEl.classList.toggle('text-slate-500', !hot);
     }
+    renderPreopenSentiment(data);
   }
   async function refreshPreopen() { try { const response = await fetch('{% url "live_dashboard:preopen_trap_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); updatePreopen(await response.json()); } catch (error) { console.warn('Pre-open fetch failed:', error); } }
 
@@ -695,6 +737,127 @@
   scalperModal.addEventListener('click', event => { if (event.target === scalperModal) closeScalperPlayground(); });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && !scalperModal.classList.contains('hidden')) closeScalperPlayground(); });
   setInterval(() => { if (!scalperModal.classList.contains('hidden')) { scalperDecay = scalperDecay <= 8 ? 100 : scalperDecay - 1; document.getElementById('scalper-decay-bar').style.width = `${scalperDecay}%`; updateScalperPlayground(); } }, 1000);
+})();
+</script>
+<script>
+(() => {
+  // ---- Cumulative Volume Delta (CVD) live widget ----
+  const el = (id) => document.getElementById(id);
+  const cvdValue = el('cvd-value');
+  if (!cvdValue) return; // widget absent on other pages
+
+  const cvdTrend = el('cvd-trend');
+  const cvdSymbol = el('cvd-symbol');
+  const cvdDelta = el('cvd-delta');
+  const cvdClose = el('cvd-close');
+  const cvdStatus = el('cvd-status');
+
+  const TONES = ['cvd-bull', 'cvd-bear', 'cvd-neutral'];
+
+  function tone(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n === 0) return 'cvd-neutral';
+    return n > 0 ? 'cvd-bull' : 'cvd-bear';
+  }
+
+  function setTone(node, value) {
+    TONES.forEach(cls => node.classList.remove(cls));
+    node.classList.add(tone(value));
+  }
+
+  function fmt(v) {
+    if (v === null || v === undefined || v === '') return '--';
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '--';
+    return n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+  }
+
+  function setStatus(label, color) {
+    cvdStatus.textContent = label;
+    cvdStatus.style.color = color || '#94a3b8';
+  }
+
+  function render(payload) {
+    if (!payload || typeof payload !== 'object') return;
+    cvdValue.textContent = fmt(payload.cvd);
+    cvdTrend.textContent = fmt(payload.cvd_trend_4m);
+    cvdSymbol.textContent = payload.symbol || '--';
+    cvdDelta.textContent = fmt(payload.delta);
+    cvdClose.textContent = fmt(payload.close);
+    setTone(cvdValue, payload.cvd);
+    setTone(cvdTrend, payload.cvd_trend_4m);
+    setStatus('Live', '#4ade80');
+  }
+
+  // ---- WebSocket with automatic reconnect (exponential backoff) ----
+  const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const url = `${scheme}://${window.location.host}/ws/cvd-live/`;
+  let retry = 0;
+  let ws = null;
+
+  function connect() {
+    setStatus('Connecting…', '#fbbf24');
+    ws = new WebSocket(url);
+
+    ws.onopen = () => {
+      retry = 0;
+      setStatus('Connecting…', '#fbbf24');
+    };
+
+    ws.onmessage = (event) => {
+      let msg;
+      try { msg = JSON.parse(event.data); } catch (e) { return; }
+      if (msg && (msg.type === 'cvd_update' || msg.type === 'cvd_snapshot')) {
+        render(msg.payload);
+      }
+    };
+
+    ws.onclose = () => {
+      ws = null;
+      setStatus('Offline', '#f87171');
+      const delay = Math.min(1000 * Math.pow(2, retry), 15000);
+      retry += 1;
+      setTimeout(connect, delay);
+    };
+
+    ws.onerror = () => {
+      if (ws) { try { ws.close(); } catch (e) {} }
+    };
+  }
+
+  connect();
+
+  // ---- PRE-OPEN GAMMA TRAP real-time bridge (WebSocket) ----
+  const preopenUrl = `${scheme}://${window.location.host}/ws/preopen-live/`;
+  let preopenRetry = 0;
+  let preopenWs = null;
+
+  function connectPreopen() {
+    preopenWs = new WebSocket(preopenUrl);
+
+    preopenWs.onopen = () => { preopenRetry = 0; };
+
+    preopenWs.onmessage = (event) => {
+      let msg;
+      try { msg = JSON.parse(event.data); } catch (e) { return; }
+      if (msg && msg.type === 'preopen_update' && msg.payload) {
+        updatePreopen(msg.payload);
+      }
+    };
+
+    preopenWs.onclose = () => {
+      preopenWs = null;
+      const delay = Math.min(1000 * Math.pow(2, preopenRetry), 15000);
+      preopenRetry += 1;
+      setTimeout(connectPreopen, delay);
+    };
+
+    preopenWs.onerror = () => {
+      if (preopenWs) { try { preopenWs.close(); } catch (e) {} }
+    };
+  }
+
+  connectPreopen();
 })();
 </script>
 {% endblock %}

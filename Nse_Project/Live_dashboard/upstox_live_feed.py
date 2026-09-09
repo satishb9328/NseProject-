@@ -38,6 +38,7 @@ from Nse_Project.graceful_shutdown import is_shutdown_requested, setup_signal_ha
 # the SAME helpers, so what this producer considers "the active expiry" is exactly what
 # they consider it to be.
 from Nse_Project.expiry_utils import belongs_to_expiry, normalize_expiry, resolve_row_expiry
+from Nse_Project.Brokers.cvd_engine import CVDEngine
 
 import pandas as pd
 import redis
@@ -50,6 +51,13 @@ BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent
 TOKEN_DIR = BASE_DIR / 'Nse_Project' / 'Brokers' / 'upstox'
 JSON_PATH = os.path.join(BASE_DIR, 'live_options_data.json')
 MASTER_INSTRUMENTS_URL = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.csv.gz"
+# Some Upstox asset endpoints reject the default python-requests User-Agent (HTTP 403).
+UPSTOX_INSTRUMENTS_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+    ),
+}
 # Previous-day OI ("POI") comes from ONE Upstox option-chain REST call per refresh.
 # This replaces the old per-instrument historical-candle baseline (774 HTTP calls),
 # the on-disk baseline_oi_cache_*.json files, and all previous-trading-day/holiday
@@ -686,6 +694,107 @@ def earliest_tradable_expiry(now_ist: datetime | None = None) -> date:
     if now_ist > market_close_at(now_ist):
         return now_ist.date() + timedelta(days=1)
     return now_ist.date()
+
+
+# How often (seconds) to re-resolve the nearest NIFTY future while the feed runs, so
+# the CVD engine rolls over to the next monthly contract without a process restart.
+FUTURE_ROLLOVER_CHECK_SECONDS = 3600
+
+
+def find_nearest_nifty_future_key():
+    """Return the nearest (current-month) NIFTY index future ``(instrument_key, expiry)``.
+
+    Downloads the Upstox NSE instrument master, keeps ``instrument_type == 'FUTIDX'``
+    rows whose ``name`` is 'NIFTY', then returns the ``instrument_key`` of the contract
+    with the earliest expiry on/after ``earliest_tradable_expiry()``.  Returns
+    ``(None, None)`` on any failure so the caller can fall back to a manual list.
+    """
+    try:
+        logger.info("📥 Fetching Upstox instrument master to resolve the nearest NIFTY future...")
+        response = requests.get(
+            MASTER_INSTRUMENTS_URL, headers=UPSTOX_INSTRUMENTS_HEADERS, timeout=30
+        )
+        response.raise_for_status()
+        df = pd.read_csv(io.BytesIO(gzip.decompress(response.content)))
+    except Exception as exc:
+        logger.error("❌ Unable to load Upstox instrument master for NIFTY future: %s", exc)
+        return None, None
+
+    columns_lower = {col.lower().strip(): col for col in df.columns}
+    key_col = columns_lower.get("instrument_key")
+    name_col = columns_lower.get("name")
+    type_col = columns_lower.get("instrument_type")
+    expiry_col = columns_lower.get("expiry")
+    symbol_col = columns_lower.get("tradingsymbol")
+
+    if not (key_col and type_col and expiry_col):
+        logger.error(
+            "❌ Upstox master file missing required columns "
+            "(instrument_key/instrument_type/expiry). Available: %s", list(df.columns),
+        )
+        return None, None
+
+    df = df.copy()
+    df[type_col] = df[type_col].astype(str).str.upper().str.strip()
+    fut = df[df[type_col].eq("FUTIDX")]
+
+    if name_col:
+        fut = fut[fut[name_col].astype(str).str.upper().str.strip().eq("NIFTY")]
+    elif symbol_col:
+        # Older master-file revisions without `name`: fall back to tradingsymbol prefix.
+        fut = fut[fut[symbol_col].astype(str).str.upper().str.startswith("NIFTY")]
+
+    if fut.empty:
+        logger.error("❌ No NIFTY FUTIDX rows found in the Upstox instrument master.")
+        return None, None
+
+    fut[expiry_col] = pd.to_datetime(fut[expiry_col], errors="coerce")
+    fut = fut.dropna(subset=[expiry_col, key_col])
+    if fut.empty:
+        logger.error("❌ NIFTY futures have no usable expiry/instrument_key.")
+        return None, None
+
+    earliest = earliest_tradable_expiry()
+    fut = fut[fut[expiry_col] >= pd.Timestamp(earliest)]
+    if fut.empty:
+        logger.error("❌ No NIFTY future expiry on/after %s.", earliest)
+        return None, None
+
+    fut = fut.sort_values(expiry_col)
+    nearest_key = str(fut.iloc[0][key_col])
+    nearest_expiry = fut.iloc[0][expiry_col].date()
+
+    logger.info(
+        "🎯 Auto-selected nearest NIFTY future: %s (expiry %s).",
+        nearest_key, nearest_expiry.isoformat(),
+    )
+    return nearest_key, nearest_expiry
+
+
+async def _rollover_nifty_future(streamer, active, new_future_key, new_future_expiry, cvd_engine):
+    """Swap the subscription + CVD allowlist to a new NIFTY future contract."""
+    old_key = active.get("nifty_future_key")
+    if old_key and old_key != new_future_key:
+        try:
+            streamer.unsubscribe([old_key])
+            logger.info("🔻 Unsubscribed expired NIFTY future %s.", old_key)
+        except Exception as exc:
+            logger.warning("Could not unsubscribe expired NIFTY future (%s); continuing.", exc)
+
+    try:
+        streamer.subscribe([new_future_key], mode=MarketDataStreamerV3.Mode["FULL"])
+    except Exception:
+        logger.error("❌ Failed to subscribe new NIFTY future %s.", new_future_key, exc_info=True)
+        return
+
+    active["nifty_future_key"] = new_future_key
+    active["nifty_future_expiry"] = new_future_expiry
+    if cvd_engine is not None:
+        cvd_engine.set_symbol_allowlist({new_future_key})
+    logger.info(
+        "🔁 NIFTY future rolled over to %s (expiry %s).",
+        new_future_key, new_future_expiry.isoformat() if new_future_expiry else "?",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1561,7 +1670,18 @@ async def dump_live_state() -> None:
                 )
 
 
-def build_streamer(token: str, instrument_keys: list[str], expiry_date: date, loop: asyncio.AbstractEventLoop) -> MarketDataStreamerV3:
+def _parse_cvd_symbols():
+    """Parse CVD_SYMBOLS (comma-separated) into a symbol allowlist.
+
+    Empty/unset => None (track every instrument the feed delivers).
+    """
+    raw = os.getenv("CVD_SYMBOLS", "")
+    if not raw.strip():
+        return None
+    return {s.strip() for s in raw.split(",") if s.strip()}
+
+
+def build_streamer(token: str, instrument_keys: list[str], expiry_date: date, loop: asyncio.AbstractEventLoop, cvd_engine=None, future_key=None) -> MarketDataStreamerV3:
     config = Configuration()
     config.access_token = token
     api_client = ApiClient(configuration=config)
@@ -1570,7 +1690,7 @@ def build_streamer(token: str, instrument_keys: list[str], expiry_date: date, lo
     # afterwards: MarketDataStreamerV3.handle_open() calls subscribe_to_initial_keys(),
     # which replays only the keys it already knows about. Anything missing from this
     # list therefore vanishes silently after the first auto-reconnect.
-    subscription_keys = list(dict.fromkeys([*instrument_keys, INDEX_INSTRUMENT_KEY]))
+    subscription_keys = list(dict.fromkeys([*instrument_keys, INDEX_INSTRUMENT_KEY, *([future_key] if future_key else [])]))
 
     streamer = MarketDataStreamerV3(
         api_client=api_client,
@@ -1588,7 +1708,7 @@ def build_streamer(token: str, instrument_keys: list[str], expiry_date: date, lo
         # expiry rollover), so a reconnect after 15:30 re-subscribes the NEW chain
         # rather than replaying the expired one.
         try:
-            keys = list(dict.fromkeys([*instrument_keys, INDEX_INSTRUMENT_KEY]))
+            keys = list(dict.fromkeys([*instrument_keys, INDEX_INSTRUMENT_KEY, *([future_key] if future_key else [])]))
             streamer.subscribe(keys, mode=MarketDataStreamerV3.Mode["FULL"])
             logger.info(
                 "📡 Subscribed to %d instruments on full mode (%d options + index spot '%s').",
@@ -1608,6 +1728,9 @@ def build_streamer(token: str, instrument_keys: list[str], expiry_date: date, lo
         if message is None:
             logger.warning("⚠️ Upstox feed MESSAGE received with no payload.")
             return
+        # CVD: parse the same envelope and enqueue ticks (non-blocking, WS-thread safe).
+        if cvd_engine is not None:
+            cvd_engine.ingest_upstox_message(message)
         asyncio.run_coroutine_threadsafe(update_live_state_from_message(message), loop)
 
     def on_error(*args):
@@ -1693,7 +1816,8 @@ async def apply_expiry_rollover(
     await loop.run_in_executor(None, refresh_previous_oi, new_expiry)
 
     try:
-        keys = list(dict.fromkeys([*new_keys, INDEX_INSTRUMENT_KEY]))
+        future_key = active.get("nifty_future_key")
+        keys = list(dict.fromkeys([*new_keys, INDEX_INSTRUMENT_KEY, *([future_key] if future_key else [])]))
         streamer.subscribe(keys, mode=MarketDataStreamerV3.Mode["FULL"])
         logger.info(
             "🔁 Rolled over to expiry %s (%d options + index spot).",
@@ -1748,14 +1872,59 @@ async def run_streamer(instrument_keys: list[str], expiry_date: date) -> None:
 
     poi_task = asyncio.create_task(previous_oi_refresh_loop(active))
 
-    streamer = build_streamer(token, instrument_keys, expiry_date, loop)
+    # ── NIFTY future auto-selection (no manual CVD_SYMBOLS needed) ────────────
+    # Resolve the nearest (current-month) NIFTY index future from the Upstox master
+    # and feed ONLY that instrument into the CVD engine. Falls back to CVD_SYMBOLS
+    # (or "track all") if the master file can't be fetched.
+    nifty_future_key, nifty_future_expiry = await loop.run_in_executor(
+        None, find_nearest_nifty_future_key
+    )
+    active["nifty_future_key"] = nifty_future_key
+    active["nifty_future_expiry"] = nifty_future_expiry
+
+    if nifty_future_key:
+        cvd_allowlist = {nifty_future_key}
+    else:
+        cvd_allowlist = _parse_cvd_symbols()
+
+    # ── CVD engine: live Upstox ticks -> 2m candles -> Redis pub/sub ──────────
+    cvd_engine = CVDEngine(symbol_allowlist=cvd_allowlist)
+    cvd_engine.start()
+    if nifty_future_key:
+        logger.info(
+            "📊 CVD engine started — tracking NIFTY future %s (expiry %s).",
+            nifty_future_key, nifty_future_expiry.isoformat(),
+        )
+    elif cvd_allowlist:
+        logger.info(
+            "📊 CVD engine started — tracking %d symbol(s): %s",
+            len(cvd_allowlist), ", ".join(sorted(cvd_allowlist)),
+        )
+    else:
+        logger.info("📊 CVD engine started — tracking ALL instruments.")
+
+    streamer = build_streamer(token, instrument_keys, expiry_date, loop, cvd_engine=cvd_engine, future_key=nifty_future_key)
     logger.info(f"🔌 Connecting to Upstox live feed for {len(instrument_keys) + 1} instruments (options + index spot)...")
     streamer.connect()
 
     last_rollover_check = time.monotonic()
+    last_future_check = time.monotonic()
     try:
         while not is_shutdown_requested():
             await asyncio.sleep(1)
+
+            # --- NIFTY future rollover watch (monthly contract swap) ----------
+            if time.monotonic() - last_future_check >= FUTURE_ROLLOVER_CHECK_SECONDS:
+                last_future_check = time.monotonic()
+                try:
+                    new_future_key, new_future_expiry = await loop.run_in_executor(
+                        None, find_nearest_nifty_future_key
+                    )
+                except Exception:
+                    logger.error("NIFTY future rollover lookup failed; will retry.", exc_info=True)
+                    new_future_key = None
+                if new_future_key and new_future_key != active.get("nifty_future_key"):
+                    await _rollover_nifty_future(streamer, active, new_future_key, new_future_expiry, cvd_engine)
 
             # --- expiry rollover watch -------------------------------------
             # Checked while running, not just at startup: a process launched at 09:00
@@ -1800,6 +1969,7 @@ async def run_streamer(instrument_keys: list[str], expiry_date: date) -> None:
                 streamer.close()
             except Exception:
                 pass
+        cvd_engine.stop()
 
 
 async def main() -> None:

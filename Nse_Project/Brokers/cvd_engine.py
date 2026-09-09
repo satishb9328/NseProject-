@@ -303,6 +303,7 @@ class CVDEngine:
         on_candle: Optional[Callable[[dict], None]] = None,
         clock: Optional[Callable[[], datetime]] = None,
         publish: bool = True,
+        symbol_allowlist: Optional[Any] = None,
     ):
         self.candle_seconds = int(candle_seconds)
         self.trend_periods = int(trend_periods)
@@ -317,6 +318,8 @@ class CVDEngine:
         self.redis_data_key = redis_data_key
         self.redis_channel = redis_channel
         self.publish_enabled = bool(publish) and redis_url is not None
+        # Optional instrument-key allowlist: when set, only these symbols are tracked.
+        self._symbol_allowlist = set(symbol_allowlist) if symbol_allowlist else None
         self.on_candle = on_candle
         self._clock = clock or (lambda: datetime.now(IST))
         self._flush_interval = float(flush_interval)
@@ -353,6 +356,8 @@ class CVDEngine:
 
     def ingest(self, tick: "CVDTick") -> bool:
         """Enqueue a tick. Non-blocking; drops the oldest tick if the queue is full."""
+        if self._symbol_allowlist is not None and tick.symbol not in self._symbol_allowlist:
+            return False
         try:
             self._tick_queue.put_nowait(tick)
             return True
@@ -371,9 +376,16 @@ class CVDEngine:
     def ingest_upstox_message(self, msg: Any) -> int:
         """Parse an Upstox V3 message envelope and enqueue every instrument tick."""
         ticks = upstox_message_to_ticks(msg)
+        accepted = 0
         for tick in ticks:
-            self.ingest(tick)
-        return len(ticks)
+            if self.ingest(tick):
+                accepted += 1
+        if ticks:
+            self.logger.debug(
+                "CVD ingest: parsed %d Upstox ticks, enqueued %d (queue=%d)",
+                len(ticks), accepted, self.queue_size(),
+            )
+        return accepted
 
     def queue_size(self) -> int:
         return self._tick_queue.qsize()
@@ -397,6 +409,13 @@ class CVDEngine:
         with self._state_lock:
             self._reset_all()
             self._session_date = None
+
+    def set_symbol_allowlist(self, symbols) -> None:
+        """Replace the symbol allowlist at runtime (e.g. on a NIFTY future rollover).
+
+        ``None`` / empty means "track all instruments".
+        """
+        self._symbol_allowlist = set(symbols) if symbols else None
 
 
     # ── Worker thread ──────────────────────────────────────────────────────────
@@ -530,6 +549,11 @@ class CVDEngine:
             "cvd_trend_4m": cvd_trend,
         }
         st["last_candle"] = candle
+        self.logger.info(
+            "CVD candle formed: %s %s O=%.2f H=%.2f L=%.2f C=%.2f vol=%d delta=%+.0f cvd=%.0f trend_4m=%s",
+            symbol, bucket_ts.isoformat(), open_, high, low, close,
+            volume, delta, st["cvd"], cvd_trend,
+        )
         return candle
 
     def _cvd_trend(self, st: dict) -> Optional[float]:
@@ -570,6 +594,7 @@ class CVDEngine:
     def _state_for(self, symbol: str) -> dict:
         st = self._states.get(symbol)
         if st is None:
+            self.logger.info("CVD: tracking new symbol '%s'", symbol)
             st = {
                 "last_total_volume": None,
                 "buffer": [],
@@ -601,6 +626,11 @@ class CVDEngine:
             self.logger.warning("redis-py is not installed; skipping CVD Redis publish.")
             return
 
+        self.logger.info(
+            "CVD publish -> channel=%s key=%s symbol=%s cvd=%s delta=%s",
+            self.redis_channel, self.redis_data_key,
+            payload.get("symbol"), payload.get("cvd"), payload.get("delta"),
+        )
         try:
             client = self._get_redis_client()
             data = json.dumps(payload, default=str, separators=(",", ":"))

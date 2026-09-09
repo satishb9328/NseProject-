@@ -1,9 +1,9 @@
 # PowerShell script to create a Windows Task Scheduler task
-# This task runs the preopen data fetcher at 9:08 AM every weekday
+# This task runs the preopen data fetcher at 9:10 AM every weekday
 
 # Configuration
 $TaskName = "NSE_Preopen_Data_Fetcher"
-$Description = "Fetches NSE preopen market data at 9:08 AM on trading days"
+$Description = "Fetches NSE preopen market data at 9:10 AM on trading days"
 $ScriptPath = "$PSScriptRoot\fetch_and_import_preopen.py"
 $PythonPath = "C:\Users\ADMIN\Desktop\Api Project V SYNTH V\Api Project V 1\.venv\Scripts\python.exe"
 $WorkingDirectory = "$PSScriptRoot"
@@ -44,7 +44,7 @@ Write-Host "="*70 -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Configuration:" -ForegroundColor Yellow
 Write-Host "  Task Name:   $TaskName"
-Write-Host "  Schedule:    Daily at 9:08 AM (Monday-Friday)"
+Write-Host "  Schedule:    Daily at 9:10 AM (Monday-Friday)"
 Write-Host "  Script:      $ScriptPath"
 Write-Host "  Python:      $PythonPath"
 Write-Host "  Working Dir: $WorkingDirectory"
@@ -69,8 +69,8 @@ $Action = New-ScheduledTaskAction -Execute $PythonPath `
     -Argument "`"$ScriptPath`"" `
     -WorkingDirectory $WorkingDirectory
 
-# Create the trigger (daily at 9:08 AM, Monday through Friday)
-$Trigger = New-ScheduledTaskTrigger -Weekly -At "09:08AM" -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday
+# Create the trigger (daily at 9:10 AM, Monday through Friday)
+$Trigger = New-ScheduledTaskTrigger -Weekly -At "09:10AM" -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday
 
 # Create the task settings
 $Settings = New-ScheduledTaskSettingsSet `
@@ -115,7 +115,7 @@ try {
     Write-Host "[SUCCESS] Task '$TaskName' has been created successfully!" -ForegroundColor Green
     Write-Host ""
     Write-Host "Task Details:" -ForegroundColor Cyan
-    Write-Host "  - Runs daily at 9:08 AM (Monday-Friday)"
+    Write-Host "  - Runs daily at 9:10 AM (Monday-Friday)"
     Write-Host "  - Automatically checks for weekends and NSE holidays"
     Write-Host "  - Logs saved to: $WorkingDirectory\scheduler.log"
     Write-Host ""

@@ -29,14 +29,13 @@ except ImportError:  # Keeps the dashboard importable until redis-py is installe
 logger = logging.getLogger(__name__)
 
 PREOPEN_TRAP_THRESHOLD = 50
-# Static pre-open wall strikes. The PRE-OPEN GAMMA TRAP is judged against the
-# morning / previous-EOD wall levels and must NOT drift with intraday OI, so these
-# are intentionally hardcoded (previous close +/- offset) rather than read from the
-# live Gamma bot. Keep them decoupled from RedisGammaBot.last_profile: its
-# call_wall/put_wall are derived from the live option chain's max OI and would
-# update during the trading day.
-MOCK_CALL_WALL = 24400
-MOCK_PUT_WALL = 24100
+# Pre-open wall strikes are derived from the previous session close +/- an offset and
+# rounded to the nearest NIFTY strike. The PRE-OPEN GAMMA TRAP is judged against these
+# morning / previous-EOD wall levels and must NOT drift with intraday OI, so they are
+# decoupled from RedisGammaBot.last_profile (its call_wall/put_wall come from the live
+# option chain's max OI and would shift during the session).
+GAMMA_WALL_OFFSET = 100          # points around the reference (previous close / Final IEP)
+GAMMA_WALL_STRIKE_STEP = 50      # round walls to the nearest 50-point NIFTY strike
 
 # ---------------------------------------------------------------------------
 # Live options IPC — Redis first, cold JSON only as a fallback
@@ -317,6 +316,20 @@ _PRICE_COLUMN_HINTS = (
     "iep", "ltp", "last price", "last_price", "price", "close",
 )
 
+# Pre-open Redis IPC. The 09:10 publisher SETs this snapshot key and PUBLISHes to the
+# matching channel; the Channels consumer bridge then fans the payload out to browsers.
+PREOPEN_REDIS_URL = os.getenv("PREOPEN_REDIS_URL", "redis://127.0.0.1:6379/0")
+PREOPEN_REDIS_DATA_KEY = os.getenv("PREOPEN_REDIS_DATA_KEY", "preopen_trap_data")
+PREOPEN_REDIS_CHANNEL = os.getenv("PREOPEN_REDIS_CHANNEL", "preopen:trap_updated")
+PREOPEN_REDIS_TIMEOUT = float(os.getenv("PREOPEN_REDIS_TIMEOUT", "2.0"))
+
+_preopen_redis = None
+
+
+def _clamp(value: float, low: float, high: float) -> float:
+    """Clamp ``value`` into the inclusive ``[low, high]`` band."""
+    return max(low, min(high, value))
+
 
 def _ist_today() -> date:
     """Return the current date in the India (IST) timezone."""
@@ -352,7 +365,7 @@ def fetch_real_preopen_trap_data(target_date: date | None = None) -> dict | None
 
     Scans ``PREOPEN_TBT_DIR`` for today's tick file(s), keeps only ticks within the
     09:00:00 - 09:10:00 pre-open window, and returns
-    ``{'Max_IEP', 'Min_IEP', 'Final_IEP'}``. Returns ``None`` when today's file is
+    ``{'Open_IEP', 'Max_IEP', 'Min_IEP', 'Final_IEP'}``. Returns ``None`` when today's file is
     missing, empty, or unreadable so the dashboard can show a graceful fallback.
     """
     target_date = target_date or _ist_today()
@@ -410,6 +423,7 @@ def fetch_real_preopen_trap_data(target_date: date | None = None) -> dict | None
         return None
 
     result = {
+        "Open_IEP": round(float(all_ticks["price"].iloc[0]), 2),
         "Max_IEP": round(float(all_ticks["price"].max()), 2),
         "Min_IEP": round(float(all_ticks["price"].min()), 2),
         "Final_IEP": round(float(all_ticks["price"].iloc[-1]), 2),
@@ -418,26 +432,132 @@ def fetch_real_preopen_trap_data(target_date: date | None = None) -> dict | None
     return result
 
 
-def get_gamma_walls() -> tuple[float, float]:
-    """Return the STATIC pre-open wall strikes.
+def _round_to_strike(price: float, step: int = GAMMA_WALL_STRIKE_STEP) -> int:
+    """Round ``price`` to the nearest strike on a ``step``-point ladder (round-half-up)."""
+    return int(math.floor(price / step + 0.5) * step)
 
-    These are the morning / yesterday-EOD reference levels the PRE-OPEN GAMMA
-    TRAP is judged against. They must never track the live intraday option
-    chain, so we deliberately do NOT consult ``RedisGammaBot.last_profile``
-    here — its ``call_wall``/``put_wall`` (once populated) are computed from
-    the live chain's max OI and would shift during the session.
+
+def _parse_feed_timestamp(value) -> date | None:
+    """Parse a feed timestamp (ISO-8601 string or epoch milliseconds) into an IST date."""
+    if value is None:
+        return None
+
+    ist = timezone(timedelta(hours=5, minutes=30))
+
+    if isinstance(value, (int, float)):
+        try:
+            # Upstox ``ltt`` arrives as epoch *milliseconds*; guard the rare seconds case.
+            seconds = value / 1000.0 if value > 10_000_000_000 else value
+            return datetime.fromtimestamp(seconds, tz=ist).date()
+        except (OverflowError, OSError, ValueError):
+            return None
+
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            # Last resort: a bare "YYYY-MM-DD" prefix.
+            try:
+                return datetime.strptime(text[:10], "%Y-%m-%d").date()
+            except ValueError:
+                return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=ist)
+        return parsed.astimezone(ist).date()
+
+    return None
+
+
+def _snapshot_is_fresh_today(payload: dict) -> bool:
+    """True when the snapshot carries a data-production timestamp from today (IST).
+
+    Uses only data-production timestamps: ``updated_at`` (when live data was produced),
+    ``spot_updated_at`` (when the index tick that carries ``cp`` arrived) and the index
+    tick's own ``ltt``. Deliberately ignores ``dumped_at`` (the file-write time) and
+    ``restored_snapshot_updated_at`` (provenance of a stale restore), neither of which
+    proves the data is from today.
     """
-    return MOCK_CALL_WALL, MOCK_PUT_WALL
+    today = _ist_today()
+
+    for key in ("updated_at", "spot_updated_at"):
+        if _parse_feed_timestamp(payload.get(key)) == today:
+            return True
+
+    ltt = (
+        payload.get("index_raw_sample", {})
+        .get("fullFeed", {})
+        .get("indexFF", {})
+        .get("ltpc", {})
+        .get("ltt")
+    )
+    return _parse_feed_timestamp(ltt) == today
+
+
+def _read_previous_close() -> float | None:
+    """Return the NIFTY previous-session close from the live feed snapshot, if fresh.
+
+    The feed keeps the last raw index tick under ``index_raw_sample``; the previous
+    close is the ``cp`` field of ``fullFeed.indexFF.ltpc``. The value is only trusted
+    when the snapshot is from today (IST) — otherwise (feed not yet initialized, or a
+    stale cold JSON from an earlier session) this returns ``None`` so ``get_gamma_walls``
+    derives the walls from the Final IEP instead.
+    """
+    try:
+        payload = read_live_options_data()
+        if not isinstance(payload, dict) or not _snapshot_is_fresh_today(payload):
+            logger.debug("Ignoring previous close: live snapshot is not from today.")
+            return None
+
+        ltpc = (
+            payload.get("index_raw_sample", {})
+            .get("fullFeed", {})
+            .get("indexFF", {})
+            .get("ltpc", {})
+        )
+        cp = ltpc.get("cp") if isinstance(ltpc, dict) else None
+        if isinstance(cp, (int, float)) and cp > 0:
+            return float(cp)
+    except Exception:
+        logger.debug("Could not read the previous close from the live snapshot.", exc_info=True)
+    return None
+
+
+def get_gamma_walls(reference_price: float | None = None) -> tuple[int | None, int | None]:
+    """Return dynamic pre-open wall strikes ``(call_wall, put_wall)``.
+
+    The reference is the actual previous session close when the live feed provides it,
+    otherwise the caller-supplied ``reference_price`` (the Final IEP). Walls are the
+    reference +/- ``GAMMA_WALL_OFFSET`` rounded to the nearest NIFTY strike so they stay
+    decoupled from the live intraday option chain. Returns ``(None, None)`` when no
+    usable reference exists.
+    """
+    base = _read_previous_close()
+    if base is None or base <= 0:
+        base = reference_price
+    if base is None or base <= 0:
+        return None, None
+
+    call_wall = _round_to_strike(base + GAMMA_WALL_OFFSET)
+    put_wall = _round_to_strike(base - GAMMA_WALL_OFFSET)
+    return call_wall, put_wall
 
 
 def _build_preopen_context() -> dict:
-    """Build the full PRE-OPEN GAMMA TRAP context (values + trap signal).
+    """Build the full PRE-OPEN GAMMA TRAP context (values + sentiment + trap signal).
 
-    Shared by the server-rendered page and the JSON poll endpoint so the
-    two can never drift apart.
+    Shared by the server-rendered page, the JSON poll endpoint and the Redis
+    publisher so the three can never drift apart.
     """
-    call_wall, put_wall = get_gamma_walls()
     trap_data = fetch_real_preopen_trap_data()
+    ist_now = datetime.now(timezone(timedelta(hours=5, minutes=30))).isoformat()
+
+    # Dynamic walls. Prefer the real previous close; fall back to the Final IEP when
+    # the previous close is not available in this scope.
+    final_iep_hint = trap_data.get('Final_IEP') if trap_data else None
+    call_wall, put_wall = get_gamma_walls(reference_price=final_iep_hint)
 
     # No real TBT data for today yet -> graceful waiting state, no dummy signals.
     if trap_data is None:
@@ -445,24 +565,77 @@ def _build_preopen_context() -> dict:
             'preopen_max': None,
             'preopen_min': None,
             'preopen_final': None,
+            'preopen_open': None,
+            'pre_call': call_wall,
+            'pre_put': put_wall,
+            # Legacy keys kept so the existing template/widget never breaks.
             'call_wall': call_wall,
             'put_wall': put_wall,
+            'bias': 0.0,
+            'momentum': 0.0,
+            'score': 50,
+            'theme': 'neutral',
             'trap_signal': 'WAITING FOR TBT DATA',
+            'updated_at': ist_now,
         }
 
     max_iep = trap_data['Max_IEP']
     min_iep = trap_data['Min_IEP']
     final_iep = trap_data['Final_IEP']
+    open_iep = trap_data.get('Open_IEP', min_iep)
 
+    range_iep = max_iep - min_iep
+
+    # BIAS — where the FINAL settlement sits inside the auction range.
+    # +100 = settled at the top (bullish), -100 = settled at the bottom (bearish),
+    # 0 = settled exactly at the midpoint (balanced).
+    if range_iep > 0:
+        final_pos = (final_iep - min_iep) / range_iep  # 0..1
+        bias = (final_pos - 0.5) * 200.0               # -100..+100
+    else:
+        bias = 0.0
+
+    # MOMENTUM — the auction's open->final % move scaled to a -100..+100 band so it
+    # maps onto the existing frontend tone thresholds (0.1% move == 10 momentum pts).
+    if open_iep and open_iep > 0:
+        momentum = _clamp(((final_iep - open_iep) / open_iep) * 10000.0, -100.0, 100.0)
+    else:
+        momentum = 0.0
+
+    score = int(round(_clamp(50.0 + bias * 0.5 + momentum, 0.0, 100.0)))
+    theme = 'bullish' if score >= 65 else 'bearish' if score <= 34 else 'neutral'
+
+    # Directional confluence guards. The trap headline must agree with the score and
+    # momentum shown in the same card, otherwise the card would show a bullish "BUY CE"
+    # next to a bearish score (the original contradiction).
+    buy_ce_confirmed = score >= 60 and momentum > 0
+    buy_pe_confirmed = score <= 40 and momentum < 0
+
+    # Trap patterns: a bull trap fades off the highs (bearish -> BUY PE); a bear trap
+    # reclaims off the lows (bullish -> BUY CE).
     bull_trap = (max_iep - final_iep) > PREOPEN_TRAP_THRESHOLD
     bear_trap = (final_iep - min_iep) > PREOPEN_TRAP_THRESHOLD
-    high_prob_buy_pe = bull_trap and final_iep > call_wall
-    high_prob_buy_ce = bear_trap and final_iep < put_wall
+
+    walls_available = call_wall is not None and put_wall is not None
+    high_prob_buy_pe = (
+        bull_trap
+        and walls_available
+        and final_iep > call_wall
+        and buy_pe_confirmed
+    )
+    high_prob_buy_ce = (
+        bear_trap
+        and walls_available
+        and final_iep < put_wall
+        and buy_ce_confirmed
+    )
 
     if high_prob_buy_pe:
         trap_signal = "HIGH PROBABILITY BUY PE"
     elif high_prob_buy_ce:
         trap_signal = "HIGH PROBABILITY BUY CE"
+    elif bull_trap or bear_trap:
+        trap_signal = "NEUTRAL - CONFLICTING DATA"
     else:
         trap_signal = "NEUTRAL - NO TRAP DETECTED"
 
@@ -470,9 +643,17 @@ def _build_preopen_context() -> dict:
         'preopen_max': max_iep,
         'preopen_min': min_iep,
         'preopen_final': final_iep,
+        'preopen_open': open_iep,
+        'pre_call': call_wall,
+        'pre_put': put_wall,
         'call_wall': call_wall,
         'put_wall': put_wall,
+        'bias': round(bias, 2),
+        'momentum': round(momentum, 2),
+        'score': score,
+        'theme': theme,
         'trap_signal': trap_signal,
+        'updated_at': ist_now,
     }
 
 
@@ -481,9 +662,92 @@ def live_signals_view(request):
     return render(request, "live_signals.html", context)
 
 
+def _get_preopen_redis():
+    """Return the process-wide Redis client for the pre-open publisher, or None."""
+    global _preopen_redis
+
+    if redis is None:
+        return None
+    if _preopen_redis is None:
+        try:
+            _preopen_redis = redis.Redis.from_url(
+                PREOPEN_REDIS_URL,
+                decode_responses=True,
+                socket_connect_timeout=PREOPEN_REDIS_TIMEOUT,
+                socket_timeout=PREOPEN_REDIS_TIMEOUT,
+            )
+        except Exception as exc:  # bad URL, unsupported scheme, ...
+            logger.warning("Could not build the pre-open Redis client: %s", exc)
+            return None
+    return _preopen_redis
+
+
+def publish_preopen_trap_to_redis(payload: dict | None = None) -> dict:
+    """SET + PUBLISH the final pre-open snapshot so the dashboard bridge fans it out.
+
+    Builds the payload from today's TBT file when none is supplied (this is what the
+    09:10 scheduler calls), so the Windows task and the poll endpoint always ship the
+    same shape. Also dispatched synchronously into the Channels group when running
+    inside the ASGI process, so a browser already on the page gets it without polling.
+    """
+    payload = payload or _build_preopen_context()
+
+    client = _get_preopen_redis()
+    if client is not None:
+        try:
+            raw = json.dumps(payload, default=str)
+            client.set(PREOPEN_REDIS_DATA_KEY, raw)
+            client.publish(PREOPEN_REDIS_CHANNEL, raw)
+            logger.info("Published pre-open trap snapshot to Redis (%s).", PREOPEN_REDIS_DATA_KEY)
+        except Exception as exc:
+            logger.warning("Failed to publish pre-open snapshot to Redis: %s", exc)
+    else:
+        logger.warning("Pre-open Redis unavailable; snapshot was not published.")
+
+    # Best-effort in-process fan-out (the consumer bridge handles the raw Redis
+    # channel above; this covers the case where the scheduler runs under ASGI).
+    try:
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        layer = get_channel_layer()
+        if layer is not None:
+            async_to_sync(layer.group_send)(
+                "preopen_updates", {"type": "preopen.update", "payload": payload}
+            )
+    except Exception:
+        logger.debug("Channels group fan-out skipped.", exc_info=True)
+
+    return payload
+
+
+def read_preopen_from_redis() -> dict | None:
+    """Return the published pre-open snapshot, or None if Redis cannot serve it."""
+    client = _get_preopen_redis()
+    if client is None:
+        return None
+    try:
+        raw = client.get(PREOPEN_REDIS_DATA_KEY)
+    except Exception as exc:
+        logger.debug("Pre-open snapshot read failed: %s", exc)
+        return None
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def preopen_trap_api(request):
-    """JSON endpoint polled by the dashboard to clear the WAITING state live."""
-    return JsonResponse(_build_preopen_context())
+    """JSON endpoint polled by the dashboard to clear the WAITING state live.
+
+    Reads the published Redis snapshot first so the poll and the WebSocket always
+    agree, then falls back to a fresh on-disk computation while Redis is down or the
+    snapshot has not been published yet.
+    """
+    cached = read_preopen_from_redis()
+    return JsonResponse(cached if cached is not None else _build_preopen_context())
 
 
 def get_live_options_redis():

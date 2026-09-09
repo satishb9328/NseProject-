@@ -75,7 +75,24 @@ CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": ["redis://127.0.0.1:6379/0"],
+            "hosts": [
+                {
+                    "address": "redis://127.0.0.1:6379/0",
+                    # PING an idle connection before reuse so a silently-closed
+                    # socket is detected and replaced instead of timing out.
+                    "health_check_interval": 30,
+                    # MUST be > channels_redis's 5s BRPOP/BZPOPMIN poll timeout,
+                    # otherwise the socket read races the server poll and raises
+                    # redis.exceptions.TimeoutError ("Timeout reading from ...").
+                    "socket_timeout": 10,
+                    "socket_connect_timeout": 5,
+                    "socket_keepalive": True,
+                },
+            ],
+            # channels_redis defaults — kept explicit and self-documenting.
+            "expiry": 60,
+            "group_expiry": 86400,
+            "capacity": 100,
         },
     },
 }

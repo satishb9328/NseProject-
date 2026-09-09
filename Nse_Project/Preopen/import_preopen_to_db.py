@@ -7,8 +7,9 @@ from datetime import datetime, timedelta, timezone
 # Ensure project root is in sys.path and set working directory
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 repository_root = os.path.dirname(project_root)
-# Central location for preopen CSVs
-PREOPEN_CSV_DIR = r"C:\Users\ADMIN\Desktop\preopen"
+# Central location for preopen CSVs (same env var the fetcher and dashboard use,
+# so the three can never point at different folders again).
+PREOPEN_CSV_DIR = os.getenv("PREOPEN_TBT_DIR", r"C:\Users\ADMIN\Desktop\preopen")
 os.chdir(project_root)
 sys.path.insert(0, repository_root)
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Nse_Project.settings')
@@ -141,11 +142,38 @@ def import_preopen_data_to_db():
     from collections import defaultdict
     csv_directory = PREOPEN_CSV_DIR
     IST = timezone(timedelta(hours=5, minutes=30))
-    # Find candidate CSV files (manual uploads)
-    csv_files = glob.glob(os.path.join(csv_directory, '*.csv'))
+
+    # The fetcher (fetch_preopen.py) writes two files:
+    #   * nifty50_graph_data.csv                    -> ACTIVE file (today's data)
+    #   * archive/nifty50_graph_data_YYYY-MM-DD.csv -> dated history (NOT read here)
+    # Prefer today's dated file / the active file, then fall back to any other CSV
+    # dropped directly in this folder (manual uploads). The archive/ subfolder is
+    # deliberately excluded because it holds historical backups, not fresh input.
+    today_str = datetime.now(IST).date().strftime("%Y-%m-%d")
+    priority_names = [
+        f"nifty50_graph_data_{today_str}.csv",
+        "nifty50_graph_data.csv",
+    ]
+
+    csv_files = []
+    seen = set()
+    for name in priority_names:
+        path = os.path.abspath(os.path.join(csv_directory, name))
+        if path in seen:
+            continue
+        seen.add(path)
+        if os.path.isfile(path):
+            csv_files.append(path)
+
+    for path in sorted(glob.glob(os.path.join(csv_directory, '*.csv'))):
+        path = os.path.abspath(path)
+        if path not in seen:
+            seen.add(path)
+            csv_files.append(path)
+
     if not csv_files:
         print('No CSV files found in', csv_directory)
-        return
+        return False
 
     def parse_date_from_name(path):
         name = os.path.basename(path)
@@ -281,7 +309,7 @@ def import_preopen_data_to_db():
 
     if not per_date_data:
         print('No usable data found in CSV files')
-        return
+        return False
 
     # Process dates in chronological order for consistency
     for date in sorted(per_date_data.keys()):
@@ -341,38 +369,27 @@ def import_preopen_data_to_db():
             }
         )
         print(("Created" if created else "Updated") + f' PreopenSummary for {date} (source: {per_date_data[date]["source"]})')
+    return True
+
+
 def main():
-    # Check for CSV in manual path (optional manual upload)
+    """Import today's fresh pre-open CSV into the DB.
+
+    Returns 0 on success, 1 when no fresh CSV was imported. The legacy
+    ``pre_hist_data/preopen_data.json`` archive (historical dates, e.g. 2025-07-30)
+    is deliberately NOT used here — importing it was the cause of the false
+    "Updated PreopenSummary for 2025-07-30" SUCCESS.
+    """
     manual_folder = PREOPEN_CSV_DIR
     print(f"Checking for CSV in: {manual_folder}")
-    import_preopen_data_to_db()  # process newest CSV if present; silently skip otherwise
+    imported = import_preopen_data_to_db()
 
-    # If grapthData / graphData is present, process it
-    graph_key = None
-    for k in ['grapthData', 'graphData', 'graphdata']:
-        if k in data:
-            graph_key = k
-            break
-    if graph_key:
-        process_preopen_nifty50_from_json(data[graph_key])
-        # Move processed JSON file to pre_hist_data folder only if it was the current file
-        if json_path and os.path.normpath(json_path) == os.path.normpath(current_json_path):
-            pre_hist_folder = os.path.join(project_root, 'Preopen', 'data', 'pre_hist_data')
-            os.makedirs(pre_hist_folder, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            base_name = os.path.splitext(os.path.basename(json_path))[0]
-            extension = os.path.splitext(os.path.basename(json_path))[1]
-            new_filename = f"{base_name}_{timestamp}{extension}"
-            new_path = os.path.join(pre_hist_folder, new_filename)
-            try:
-                shutil.move(json_path, new_path)
-                print(f"Archived processed JSON to {new_path}")
-            except Exception as e:
-                print(f"WARNING: Could not archive {json_path}: {e}")
-        else:
-            print("Skipping archive: using legacy/history file as source.")
-    else:
-        print('No grapthData / graphData key found in JSON. Nothing to import.')
+    if not imported:
+        print("FAILED: no fresh pre-open CSV was imported.")
+        return 1
+
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

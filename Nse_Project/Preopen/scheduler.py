@@ -91,10 +91,26 @@ def main():
 
     try:
         # Import and run the fetch function
-        from fetch_preopen import fetch_and_save_preopen_data_selenium
+        from fetch_preopen import download_graph_csv
 
-        fetch_and_save_preopen_data_selenium(use_selenium=False)
+        download_graph_csv()
         logging.info("[SUCCESS] Preopen data fetched successfully!")
+
+        # Publish the final 09:10 settlement snapshot to Redis so the dashboard
+        # updates in real time (no page refresh needed).
+        try:
+            import django
+            os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Nse_Project.settings')
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+            if project_root not in sys.path:
+                sys.path.insert(0, project_root)
+            django.setup()
+            from Nse_Project.Live_dashboard.views import publish_preopen_trap_to_redis
+            publish_preopen_trap_to_redis()
+            logging.info("[SUCCESS] Preopen snapshot published to Redis.")
+        except Exception as pub_exc:
+            logging.error(f"[WARN] Could not publish preopen snapshot to Redis: {pub_exc}")
+
         return 0
 
     except Exception as e:

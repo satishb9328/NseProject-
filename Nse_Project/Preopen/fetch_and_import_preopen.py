@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""Clean wrapper for Preopen fetch + import.
+"""Clean, fail-fast wrapper for Preopen fetch + import + Redis publish.
 
-Uses the existing Preopen app modules and avoids duplicate script logic.
+Order of operations is strict: if the fetch step fails, the whole run HALTS with a
+non-zero exit code and the import/publish steps are skipped. This prevents the old
+false-positive behaviour where a failed download still printed "SUCCESS" and updated
+a stale legacy date.
 """
 
 import argparse
@@ -19,55 +22,89 @@ os.chdir(PROJECT_ROOT)
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Nse_Project.settings')
 
 
+def _print_summary(fetch_ok, import_ok, publish_ok):
+    print('\n=== fetch_and_import_preopen summary ===')
+    print('Fetch: SUCCESS' if fetch_ok else 'Fetch: FAILED')
+
+    if import_ok is None:
+        print('Import: SKIPPED (fetch failed)')
+    else:
+        print('Import: SUCCESS' if import_ok else 'Import: FAILED')
+
+    if publish_ok is None:
+        print('Publish: SKIPPED (earlier step failed)')
+    else:
+        print('Publish: SUCCESS' if publish_ok else 'Publish: FAILED')
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Fetch preopen CSV from NSE and import it into the Django PreopenSummary model.'
     )
     parser.add_argument('--skip-fetch', action='store_true', help='Skip the fetch step and use existing local files.')
     parser.add_argument('--skip-import', action='store_true', help='Skip the database import step.')
+    parser.add_argument('--skip-publish', action='store_true', help='Skip publishing the final snapshot to Redis.')
     parser.add_argument('--verbose', action='store_true', help='Print extra status information.')
     args = parser.parse_args()
 
-    try:
-        from Nse_Project.Preopen.fetch_preopen import download_graph_csv
-    except Exception as exc:
-        print('ERROR: cannot import Nse_Project.Preopen.fetch_preopen:', exc)
-        raise
-
-    try:
-        from Nse_Project.Preopen.import_preopen_to_db import main as import_preopen_data_to_db
-    except Exception as exc:
-        print('ERROR: cannot import Nse_Project.Preopen.import_preopen_to_db:', exc)
-        raise
-
+    # ---- 1. FETCH (must succeed before anything else) ----
+    fetch_ok = args.skip_fetch
     if not args.skip_fetch:
         if args.verbose:
             print('Fetching preopen CSV from NSE...')
         try:
-            download_graph_csv()
-            if args.verbose:
-                print('Fetch completed successfully.')
+            from Nse_Project.Preopen.fetch_preopen import download_graph_csv
+            csv_path = download_graph_csv()
+            fetch_ok = True
+            print(f'Fetch: SUCCESS — {csv_path}')
         except Exception as exc:
-            print('ERROR: fetch failed:', exc)
-            print('Continuing to import stage if skip-import is not set.')
+            print(f'Fetch: FAILED — {exc}')
 
+    if not fetch_ok:
+        print('Halting: the pre-open download failed, so import and publish will not run.')
+        _print_summary(fetch_ok=False, import_ok=None, publish_ok=None)
+        return 1
+
+    # ---- 2. IMPORT ----
+    import_ok = args.skip_import
     if not args.skip_import:
         if args.verbose:
             print('Importing preopen data into the database...')
         try:
-            import_preopen_data_to_db()
-            if args.verbose:
-                print('Import completed successfully.')
+            from Nse_Project.Preopen.import_preopen_to_db import main as import_preopen_main
+            exit_code = import_preopen_main()
+            import_ok = exit_code in (0, None)
+            if import_ok:
+                print('Import: SUCCESS')
+            else:
+                print(f'Import: FAILED (exit code {exit_code})')
         except Exception as exc:
-            print('ERROR: import failed:', exc)
-            raise
+            print(f'Import: FAILED — {exc}')
+            import_ok = False
 
-    if not args.skip_fetch and not args.skip_import:
-        print('\n=== fetch_and_import_preopen - Copy summary ===')
-        print('Fetch: SUCCESS' if not args.skip_fetch else 'Fetch: SKIPPED')
-        print('Import: SUCCESS' if not args.skip_import else 'Import: SKIPPED')
+    if not import_ok:
+        print('Halting: the database import failed, so publish will not run.')
+        _print_summary(fetch_ok=True, import_ok=False, publish_ok=None)
+        return 1
+
+    # ---- 3. PUBLISH ----
+    publish_ok = args.skip_publish
+    if not args.skip_publish:
+        if args.verbose:
+            print('Publishing the final 09:10 pre-open snapshot to Redis...')
+        try:
+            from Nse_Project.Live_dashboard.views import publish_preopen_trap_to_redis
+            publish_preopen_trap_to_redis()
+            publish_ok = True
+            print('Publish: SUCCESS')
+        except Exception as exc:
+            print(f'Publish: FAILED — {exc}')
+            publish_ok = False
+
+    _print_summary(fetch_ok=True, import_ok=True, publish_ok=publish_ok)
+    return 0 if publish_ok else 1
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
 
