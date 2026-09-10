@@ -39,6 +39,11 @@ from Nse_Project.graceful_shutdown import is_shutdown_requested, setup_signal_ha
 # they consider it to be.
 from Nse_Project.expiry_utils import belongs_to_expiry, normalize_expiry, resolve_row_expiry
 from Nse_Project.Brokers.cvd_engine import CVDEngine
+from Nse_Project.Live_dashboard.market_state import (
+    load_market_state,
+    market_state_key,
+    save_market_state,
+)
 
 import pandas as pd
 import redis
@@ -190,6 +195,33 @@ redis_client = redis.Redis.from_url(
     socket_connect_timeout=1,
     socket_timeout=1,
 )
+
+# ---------------------------------------------------------------------------
+# Live market-metrics persistence (CVD + peak Bias / Momentum / Score)
+# ---------------------------------------------------------------------------
+# The four dashboard metrics below are cumulative / peak-hold values that used to
+# live only in memory. They are now mirrored to Redis under a date-scoped key
+# (``market_state:YYYY-MM-DD``) so they survive a worker restart and can be served
+# by views.py on the initial page render. See Live_dashboard/market_state.py.
+market_state = {
+    "cumulative_cvd": 0.0,
+    "peak_bias": 0.0,
+    "peak_momentum": 0.0,
+    "peak_score": 50.0,
+}
+# Peak-hold extremes needed to derive the single "current-side" peak the dashboard
+# shows (mirrors the frontend's peakMax/peakMin logic). Score is centred on 50.
+_sentiment_extremes = {
+    "bias_max": 0.0,
+    "bias_min": 0.0,
+    "mom_max": 0.0,
+    "mom_min": 0.0,
+    "score_max": 50.0,
+    "score_min": 50.0,
+}
+# Latest cumulative CVD, fed by CVDEngine's on_candle callback (a separate worker
+# thread) and folded into the Redis market state on the next publish beat.
+_latest_cumulative_cvd = 0.0
 
 state_lock = asyncio.Lock()
 live_state = {
@@ -1334,6 +1366,97 @@ def snapshot_for_publish() -> tuple[dict, str | None]:
     return payload, active_expiry
 
 
+def _compute_live_sentiment(instrument_data=None) -> tuple[float, float, float]:
+    """Derive bias / momentum / score from the live option chain.
+
+    Mirrors the frontend's intraday ``updateSentiment`` so the persisted peaks
+    describe the same live market signal the dashboard renders.
+    """
+    if instrument_data is None:
+        instrument_data = live_state.get("instrument_data", {})
+    call_oi = put_oi = call_coi = put_coi = 0.0
+    for item in instrument_data.values():
+        if not isinstance(item, dict):
+            continue
+        side = (item.get("option_type") or "").upper()
+        oi = item.get("oi")
+        coi = item.get("coi")
+        if side == "CE":
+            call_oi += oi if isinstance(oi, (int, float)) else 0.0
+            call_coi += coi if isinstance(coi, (int, float)) else 0.0
+        elif side == "PE":
+            put_oi += oi if isinstance(oi, (int, float)) else 0.0
+            put_coi += coi if isinstance(coi, (int, float)) else 0.0
+
+    total_oi = call_oi + put_oi
+    if total_oi > 0:
+        bias = ((put_oi - call_oi) / total_oi) * 100.0
+        momentum = ((call_coi + put_coi) / total_oi) * 100.0
+    else:
+        bias = momentum = 0.0
+    score = max(0.0, min(100.0, 50.0 + bias * 0.5 + momentum))
+    return bias, momentum, score
+
+
+def _on_cvd_candle(payload: dict) -> None:
+    """Record the latest cumulative CVD from the CVD engine (its worker thread)."""
+    global _latest_cumulative_cvd
+    if not isinstance(payload, dict):
+        return
+    cvd = payload.get("cvd")
+    if isinstance(cvd, (int, float)):
+        _latest_cumulative_cvd = float(cvd)
+
+
+def _refresh_market_state(instrument_data=None) -> None:
+    """Fold the latest CVD + live sentiment peaks into the in-memory market state."""
+    bias, momentum, score = _compute_live_sentiment(instrument_data)
+
+    ex = _sentiment_extremes
+    ex["bias_max"] = max(ex["bias_max"], bias)
+    ex["bias_min"] = min(ex["bias_min"], bias)
+    ex["mom_max"] = max(ex["mom_max"], momentum)
+    ex["mom_min"] = min(ex["mom_min"], momentum)
+    ex["score_max"] = max(ex["score_max"], score)
+    ex["score_min"] = min(ex["score_min"], score)
+
+    market_state["cumulative_cvd"] = _latest_cumulative_cvd
+    market_state["peak_bias"] = ex["bias_max"] if bias >= 0 else ex["bias_min"]
+    market_state["peak_momentum"] = ex["mom_max"] if momentum >= 0 else ex["mom_min"]
+    market_state["peak_score"] = ex["score_max"] if score >= 50 else ex["score_min"]
+
+
+def _persist_market_state() -> None:
+    """Write the in-memory market state to its date-scoped Redis key (24h TTL)."""
+    try:
+        if not save_market_state(redis_client, market_state):
+            logger.warning("⚠️ Market state was not persisted (Redis unavailable).")
+    except Exception as exc:
+        logger.warning("⚠️ Failed to persist market state to Redis: %s", exc)
+
+
+def _load_market_state() -> None:
+    """Restore CVD + peak sentiment from today's Redis key on startup."""
+    global _latest_cumulative_cvd
+
+    restored = load_market_state(redis_client)
+    market_state.update(restored)
+    _latest_cumulative_cvd = float(restored.get("cumulative_cvd", 0.0))
+
+    # Seed the running extremes from the persisted current-side peaks. Only one
+    # number per metric was persisted, so the opposite-side extreme restarts from
+    # the neutral baseline (0 for bias/momentum, 50 for score).
+    ex = _sentiment_extremes
+    ex["bias_max"] = restored["peak_bias"] if restored["peak_bias"] >= 0 else 0.0
+    ex["bias_min"] = restored["peak_bias"] if restored["peak_bias"] < 0 else 0.0
+    ex["mom_max"] = restored["peak_momentum"] if restored["peak_momentum"] >= 0 else 0.0
+    ex["mom_min"] = restored["peak_momentum"] if restored["peak_momentum"] < 0 else 0.0
+    ex["score_max"] = restored["peak_score"] if restored["peak_score"] >= 50 else 50.0
+    ex["score_min"] = restored["peak_score"] if restored["peak_score"] < 50 else 50.0
+
+    logger.info("♻️ Market state restored from %s: %s", market_state_key(), restored)
+
+
 async def publish_live_state(force: bool = False) -> None:
     """Push ``live_state`` to Redis and notify the Gamma engine, throttled.
 
@@ -1376,6 +1499,11 @@ async def publish_live_state(force: bool = False) -> None:
         redis_client.set(REDIS_DATA_KEY, serialized_state)
         redis_client.publish(REDIS_CHANNEL, "updated")
         _last_redis_publish_ts = now
+        # Persist the cumulative / peak market metrics on every published update so
+        # they survive a restart and stay fresh for views.py's initial render. Use
+        # the same sanitised (active-expiry) chain the dashboard renders.
+        _refresh_market_state(payload.get("instrument_data"))
+        _persist_market_state()
     except redis.RedisError as exc:
         logger.warning(f"⚠️ Failed to publish live state to Redis: {exc}")
 
@@ -1870,6 +1998,10 @@ async def run_streamer(instrument_keys: list[str], expiry_date: date) -> None:
     hydrate_previous_oi(expiry_date)
     await loop.run_in_executor(None, refresh_previous_oi, expiry_date)
 
+    # Restore the cumulative CVD + peak sentiment persisted under market_state:{date}
+    # so a worker restart continues the trading day instead of resetting to 0.
+    _load_market_state()
+
     poi_task = asyncio.create_task(previous_oi_refresh_loop(active))
 
     # ── NIFTY future auto-selection (no manual CVD_SYMBOLS needed) ────────────
@@ -1888,7 +2020,15 @@ async def run_streamer(instrument_keys: list[str], expiry_date: date) -> None:
         cvd_allowlist = _parse_cvd_symbols()
 
     # ── CVD engine: live Upstox ticks -> 2m candles -> Redis pub/sub ──────────
-    cvd_engine = CVDEngine(symbol_allowlist=cvd_allowlist)
+    cvd_engine = CVDEngine(symbol_allowlist=cvd_allowlist, on_candle=_on_cvd_candle)
+    # Continue the running CVD from the value persisted under market_state:{date}
+    # so a worker restart does not reset the day's cumulative volume delta to 0.
+    if nifty_future_key and _latest_cumulative_cvd:
+        cvd_engine.restore_cumulative_cvd(nifty_future_key, _latest_cumulative_cvd)
+        logger.info(
+            "♻️ Seeded CVD for %s with restored cumulative CVD %.2f.",
+            nifty_future_key, _latest_cumulative_cvd,
+        )
     cvd_engine.start()
     if nifty_future_key:
         logger.info(

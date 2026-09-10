@@ -605,6 +605,30 @@ class CVDEngine:
             self._states[symbol] = st
         return st
 
+    def restore_cumulative_cvd(self, symbol: str, value: Any) -> None:
+        """Seed ``symbol``'s running CVD after a process restart.
+
+        A fresh process otherwise starts every symbol's cumulative CVD at 0, so a
+        worker restart would visibly reset the CVD line even though the trading
+        day is not over. The feed worker calls this on startup with the value it
+        persisted under ``market_state:YYYY-MM-DD`` so the running total (and the
+        ``cvd_2m_snapshot`` published to the dashboard) continues from where the
+        previous process left off.
+        """
+        try:
+            seed = float(value)
+        except (TypeError, ValueError):
+            return
+        if seed != seed:  # NaN guard
+            return
+        with self._state_lock:
+            st = self._state_for(symbol)
+            st["cvd"] = seed
+            # Seed the trend history with a single baseline point so cvd_trend_4m
+            # still computes relative to the restored base rather than to zero.
+            st["cvd_history"].clear()
+            st["cvd_history"].append((self._floor_bucket(self._now()), seed))
+
 
     # ── Redis Pub/Sub ──────────────────────────────────────────────────────────
 

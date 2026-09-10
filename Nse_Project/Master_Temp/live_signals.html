@@ -109,12 +109,12 @@
   .cvd-neutral { color: #eab308; }
 
   /* ---- Compact Options Chain (center column) ---- */
-  .compact-chain-table { width: 100%; border-collapse: collapse; font-size: 10px; line-height: 1.25; text-align: center; }
-  .compact-chain-table th, .compact-chain-table td { white-space: nowrap; padding: 2px 3px; }
-  .compact-chain-table th.call-side, .compact-chain-table td.call-side { background: rgba(248, 113, 113, .14); color: #fca5a5; }
-  .compact-chain-table th.put-side, .compact-chain-table td.put-side { background: rgba(34, 197, 94, .14); color: #86efac; }
-  .compact-chain-table th.strike-header, .compact-chain-table td.strike-cell { background: rgba(148, 163, 184, .08); color: #cbd5e1; }
-  .compact-chain-table tr.atm-row td { background: rgba(56, 189, 248, .18); box-shadow: inset 0 0 0 1px rgba(56, 189, 248, .6); color: #e0f2fe; font-weight: 700; }
+  .compact-chain-table { width: 100%; height: 100%; border-collapse: collapse; font-size: 10px; line-height: 1.25; text-align: center; }
+  .compact-chain-table th, .compact-chain-table td { white-space: nowrap; padding: 4px 3px; }
+  .compact-chain-table th.call-side, .compact-chain-table td.call-side { color: #fca5a5; }
+  .compact-chain-table th.put-side, .compact-chain-table td.put-side { color: #86efac; }
+  .compact-chain-table th.strike-header, .compact-chain-table td.strike-cell { color: #cbd5e1; }
+  .compact-chain-table tr.atm-row td { background-color: rgba(6, 182, 212, 0.1); box-shadow: inset 0 0 0 1px rgba(56, 189, 248, .6); color: #e0f2fe; font-weight: 700; }
 </style>
 {% endblock %}
 
@@ -132,8 +132,8 @@
     </div>
 
     <section id="gamma-snapshot" class="mt-0">
-      <div class="grid grid-cols-1 items-start gap-3 lg:grid-cols-3">
-        <div class="rounded-xl border border-sky-500/30 bg-sky-950/20 p-3 lg:col-start-1 lg:row-start-1">
+      <div class="grid grid-cols-1 items-stretch gap-x-3 gap-y-2 lg:grid-cols-3">
+        <div class="flex h-full flex-col rounded-xl border border-sky-500/30 bg-sky-950/20 p-3 lg:col-start-1 lg:row-start-1">
           <div class="mb-1 flex items-center justify-between"><h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-sky-300">NIFTY WEEKLY GAMMA</h2><span class="text-[10px] uppercase tracking-wider text-slate-500">Total OI</span></div>
           <div class="grid grid-cols-3 gap-2 text-xs">
             <div><span class="block uppercase tracking-wider text-slate-500">PCR</span><span id="weekly-pcr" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
@@ -142,9 +142,9 @@
             <div class="col-span-3 mt-1 grid grid-cols-2 gap-2 border-t border-sky-500/20 pt-2 text-[11px]"><span class="font-medium text-orange-300">CALL WALL (Res): <span id="weekly-call-wall" class="font-mono">--</span></span><span class="text-right font-medium text-emerald-300">PUT WALL (Sup): <span id="weekly-put-wall" class="font-mono">--</span></span></div>
             <div class="col-span-3 grid grid-cols-2 gap-2 text-[11px]"><span class="font-medium text-slate-400">NET CHARM: <span id="weekly-net-charm" class="font-mono text-slate-200">--</span></span><span class="text-right font-medium text-slate-400">NET VANNA: <span id="weekly-net-vanna" class="font-mono text-slate-200">--</span></span></div>
           </div>
-          <p id="weekly-net-gex-summary" class="mt-2 text-[11px] font-medium text-slate-400">--</p>
+          <p id="weekly-net-gex-summary" class="mt-auto pt-2 text-[11px] font-medium text-slate-400">--</p>
         </div>
-        <div class="rounded-xl border border-amber-500/30 bg-amber-950/20 p-3 lg:col-start-3 lg:row-start-1">
+        <div class="flex h-full flex-col rounded-xl border border-amber-500/30 bg-amber-950/20 p-3 lg:col-start-3 lg:row-start-1">
           <div class="mb-1 flex items-center justify-between"><h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-amber-300">NIFTY DAY GAMMA</h2><span class="text-[10px] uppercase tracking-wider text-slate-500">Today COI</span></div>
           <div class="grid grid-cols-3 gap-2 text-xs">
             <div><span class="block uppercase tracking-wider text-slate-500">PCR</span><span id="day-pcr" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
@@ -153,31 +153,31 @@
             <div class="col-span-3 mt-1 grid grid-cols-2 gap-2 border-t border-amber-500/20 pt-2 text-[11px]"><span class="font-medium text-orange-300">CALL WALL (Res): <span id="day-call-wall" class="font-mono">--</span></span><span class="text-right font-medium text-emerald-300">PUT WALL (Sup): <span id="day-put-wall" class="font-mono">--</span></span></div>
             <div class="col-span-3 grid grid-cols-2 gap-2 text-[11px]"><span class="font-medium text-slate-400">NET CHARM: <span id="day-net-charm" class="font-mono text-slate-200">--</span></span><span class="text-right font-medium text-slate-400">NET VANNA: <span id="day-net-vanna" class="font-mono text-slate-200">--</span></span></div>
           </div>
-          <p id="day-net-gex-summary" class="mt-2 text-[11px] font-medium text-slate-400">--</p>
+          <p id="day-net-gex-summary" class="mt-auto pt-2 text-[11px] font-medium text-slate-400">--</p>
         </div>
-        <section id="compact-options-chain" class="rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-3 lg:col-start-2 lg:row-start-1">
+        <section id="compact-options-chain" class="flex h-full flex-col rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-3 lg:col-start-2 lg:row-start-1 lg:row-span-2">
           <div class="mb-1 flex items-center justify-between">
             <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-cyan-300">⚡ Compact Options Chain</h2>
-            <span id="compact-chain-spot" class="text-[10px] uppercase tracking-wider text-slate-500">Spot --</span>
+            <span id="compact-chain-spot" class="text-[11px] uppercase tracking-wider text-slate-500">Spot --</span>
           </div>
-          <div class="overflow-hidden rounded-lg">
+          <div class="flex-1 overflow-hidden rounded-lg">
             <table id="compact-options-table" class="compact-chain-table">
               <tbody>
                 <tr>
-                  <th scope="col" class="call-side">CALL COI%</th>
-                  <th scope="col" class="call-side">CALL LTP</th>
-                  <th scope="col" class="strike-header">STRIKE</th>
-                  <th scope="col" class="put-side">PUT LTP</th>
-                  <th scope="col" class="put-side">PUT COI%</th>
+                  <th scope="col" class="call-side text-[11px]">CALL COI%</th>
+                  <th scope="col" class="call-side text-[11px]">CALL LTP</th>
+                  <th scope="col" class="strike-header text-[11px]">STRIKE</th>
+                  <th scope="col" class="put-side text-[11px]">PUT LTP</th>
+                  <th scope="col" class="put-side text-[11px]">PUT COI%</th>
                 </tr>
               </tbody>
               <tbody id="compact-options-tbody">
-                <tr><td colspan="5" class="px-1 py-2 text-[10px] text-slate-500">Loading compact chain…</td></tr>
+                <tr><td colspan="5" class="px-1 py-2 text-[11px] text-slate-500">Loading compact chain…</td></tr>
               </tbody>
             </table>
           </div>
         </section>
-      <section id="preopen-trap-snapshot" class="rounded-xl border border-slate-800 bg-slate-900/40 p-4 lg:col-start-1 lg:row-start-2">
+      <section id="preopen-trap-snapshot" class="flex h-full flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-4 lg:col-start-1 lg:row-start-2">
         <div class="mb-2 flex items-center justify-between gap-3">
           <h2 class="text-sm font-bold uppercase tracking-[.18em] text-slate-200">PRE-OPEN GAMMA TRAP</h2>
           <span class="text-xs uppercase tracking-wider text-slate-500">09:00 - 09:10 IST</span>
@@ -255,7 +255,7 @@
         </div>
       </section>
 
-      <section id="ai-trade-setups" class="rounded-xl border border-slate-800 bg-slate-900/40 p-4 lg:col-start-3 lg:row-start-2">
+      <section id="ai-trade-setups" class="flex h-full flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-4 lg:col-start-3 lg:row-start-2">
         <div class="mb-2 flex items-center justify-between">
           <h2 class="text-sm font-bold uppercase tracking-[.18em] text-slate-200">🤖 AI TRADE SETUPS (LIVE TEST)</h2>
           <span class="text-xs uppercase tracking-wider text-slate-500">A/B Entry Models</span>
@@ -280,14 +280,15 @@
             </div>
           </div>
         </div>
+        <div class="mt-auto flex w-full justify-end pt-3">
+          <button id="full-table-toggle" type="button" class="rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2 text-sm font-bold uppercase tracking-[.2em] text-cyan-300 transition hover:bg-slate-700/60" aria-controls="full-option-chain-wrap" aria-expanded="false">TABLE</button>
+        </div>
+
       </section>
     </div>
     </section>
 
     <div class="mt-4">
-      <div class="mb-2 flex items-center justify-between">
-        <button id="full-table-toggle" type="button" class="rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2 text-sm font-bold uppercase tracking-[.2em] text-cyan-300 transition hover:bg-slate-700/60" aria-controls="full-option-chain-wrap" aria-expanded="false">TABLE</button>
-      </div>
       <div id="full-option-chain-wrap" class="hidden">
         <div class="min-w-0 overflow-x-auto">
     <section id="option-chain" class="mt-0">
@@ -368,7 +369,15 @@
   const seenSignals = new Set();
   let allRows = [], loadedExpiry = null, currentSpot = null, previousSignature = '', expiryInitialized = false, currentSentiment = 'neutral';
   // Session peak-hold extremes for the elastic sentiment bars (ghost trail).
-  let peakMaxBias = 0, peakMinBias = 0, peakMaxMom = 0, peakMinMom = 0, peakMaxScore = 50, peakMinScore = 50;
+  // Seeded from the Redis-backed market state injected by views.py so a hard
+  // refresh keeps the accumulated peaks instead of resetting them to 0 before the
+  // next WebSocket / pre-open tick arrives.
+  let peakMaxBias = Math.max(0, {{ peak_bias|default:"0" }});
+  let peakMinBias = Math.min(0, {{ peak_bias|default:"0" }});
+  let peakMaxMom = Math.max(0, {{ peak_momentum|default:"0" }});
+  let peakMinMom = Math.min(0, {{ peak_momentum|default:"0" }});
+  let peakMaxScore = Math.max(50, {{ peak_score|default:"50" }});
+  let peakMinScore = Math.min(50, {{ peak_score|default:"50" }});
 
   const number = value => { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : 0; };
   const fmt = value => value === null || value === undefined || value === '-' ? '-' : typeof value === 'number' ? value.toLocaleString('en-IN') : value;
@@ -685,7 +694,10 @@
     const bSl = bEntry * 0.8;
     const bTarget = bEntry * 1.4;
 
-    const strikeText = atmStrike > 0 ? fmt(atmStrike) : '--';
+    // Direction-appropriate option leg: bearish sentiment trades the ATM PUT (PE),
+    // while bullish / neutral sentiment trades the ATM CALL (CE).
+    const optionSide = bearish ? 'PE' : 'CE';
+    const strikeText = atmStrike > 0 ? `${fmt(atmStrike)} ${optionSide}` : '--';
     const render = (prefix, entry, sl, target) => {
       setText(`${prefix}-strike`, strikeText);
       setText(`${prefix}-entry`, ltp > 0 ? px(entry) : '--');
@@ -737,6 +749,10 @@
   }
   function refreshFilters() { renderRows(); }
   expiryFilter.addEventListener('change', refreshFilters);
+  // Render the restored peak extremes immediately (using neutral current values)
+  // so the "Peak: …" readouts and ghost bars show the persisted session peaks
+  // before the first pre-open snapshot / WebSocket tick arrives.
+  renderPreopenSentiment({ bias: 0, momentum: 0, score: 50, theme: 'neutral' });
   refreshOptions(); refreshGamma(); refreshPreopen(); setInterval(refreshOptions, 1000); setInterval(refreshGamma, 2000); setInterval(refreshPreopen, 5000);
 
   // SCALPER'S PLAYGROUND: standalone removable interaction.
@@ -921,14 +937,14 @@
 
     function compactCell(text, cls) {
       const td = document.createElement('td');
-      td.className = cls;
+      td.className = `${cls} text-[11px]`;
       td.textContent = text;
       return td;
     }
 
     function renderCompactChain(rows, spot) {
       if (!Array.isArray(rows) || !rows.length) {
-        compactBody.innerHTML = '<tr><td colspan="5" class="px-1 py-2 text-[10px] text-slate-500">No option chain data yet…</td></tr>';
+        compactBody.innerHTML = '<tr><td colspan="5" class="px-1 py-2 text-[11px] text-slate-500">No option chain data yet…</td></tr>';
         return;
       }
       const sorted = rows.slice().sort((a, b) => toNumber(a.strike) - toNumber(b.strike));

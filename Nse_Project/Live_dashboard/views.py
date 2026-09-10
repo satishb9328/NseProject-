@@ -20,6 +20,7 @@ from Nse_Project.expiry_utils import (
     normalize_expiry,
     resolve_row_expiry,
 )
+from Nse_Project.Live_dashboard.market_state import load_market_state
 
 try:
     import redis
@@ -657,8 +658,22 @@ def _build_preopen_context() -> dict:
     }
 
 
+def _read_market_state_for_today() -> dict:
+    """Return today's persisted CVD + peak sentiment (safe defaults on failure).
+
+    The feed worker writes these under ``market_state:YYYY-MM-DD``; reading them
+    here means a hard refresh renders the accumulated values immediately instead of
+    starting at 0 until the next WebSocket tick arrives.
+    """
+    return load_market_state(get_live_options_redis())
+
+
 def live_signals_view(request):
     context = _build_preopen_context()
+    # Persisted live market metrics (CVD + peak Bias/Momentum/Score). These are
+    # read from the date-scoped Redis key written by the feed worker so a hard
+    # refresh shows the accumulated values instead of starting at 0.
+    context.update(_read_market_state_for_today())
     return render(request, "live_signals.html", context)
 
 
