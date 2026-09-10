@@ -107,6 +107,14 @@
   .cvd-bull { color: #4ade80; text-shadow: 0 0 14px rgba(74,222,128,.45); }
   .cvd-bear { color: #f87171; text-shadow: 0 0 14px rgba(248,113,113,.45); }
   .cvd-neutral { color: #eab308; }
+
+  /* ---- Compact Options Chain (center column) ---- */
+  .compact-chain-table { width: 100%; border-collapse: collapse; font-size: 10px; line-height: 1.25; text-align: center; }
+  .compact-chain-table th, .compact-chain-table td { white-space: nowrap; padding: 2px 3px; }
+  .compact-chain-table th.call-side, .compact-chain-table td.call-side { background: rgba(248, 113, 113, .14); color: #fca5a5; }
+  .compact-chain-table th.put-side, .compact-chain-table td.put-side { background: rgba(34, 197, 94, .14); color: #86efac; }
+  .compact-chain-table th.strike-header, .compact-chain-table td.strike-cell { background: rgba(148, 163, 184, .08); color: #cbd5e1; }
+  .compact-chain-table tr.atm-row td { background: rgba(56, 189, 248, .18); box-shadow: inset 0 0 0 1px rgba(56, 189, 248, .6); color: #e0f2fe; font-weight: 700; }
 </style>
 {% endblock %}
 
@@ -124,8 +132,8 @@
     </div>
 
     <section id="gamma-snapshot" class="mt-0">
-      <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <div class="rounded-xl border border-sky-500/30 bg-sky-950/20 p-3">
+      <div class="grid grid-cols-1 items-start gap-3 lg:grid-cols-3">
+        <div class="rounded-xl border border-sky-500/30 bg-sky-950/20 p-3 lg:col-start-1 lg:row-start-1">
           <div class="mb-1 flex items-center justify-between"><h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-sky-300">NIFTY WEEKLY GAMMA</h2><span class="text-[10px] uppercase tracking-wider text-slate-500">Total OI</span></div>
           <div class="grid grid-cols-3 gap-2 text-xs">
             <div><span class="block uppercase tracking-wider text-slate-500">PCR</span><span id="weekly-pcr" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
@@ -136,7 +144,7 @@
           </div>
           <p id="weekly-net-gex-summary" class="mt-2 text-[11px] font-medium text-slate-400">--</p>
         </div>
-        <div class="rounded-xl border border-amber-500/30 bg-amber-950/20 p-3">
+        <div class="rounded-xl border border-amber-500/30 bg-amber-950/20 p-3 lg:col-start-3 lg:row-start-1">
           <div class="mb-1 flex items-center justify-between"><h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-amber-300">NIFTY DAY GAMMA</h2><span class="text-[10px] uppercase tracking-wider text-slate-500">Today COI</span></div>
           <div class="grid grid-cols-3 gap-2 text-xs">
             <div><span class="block uppercase tracking-wider text-slate-500">PCR</span><span id="day-pcr" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
@@ -147,11 +155,29 @@
           </div>
           <p id="day-net-gex-summary" class="mt-2 text-[11px] font-medium text-slate-400">--</p>
         </div>
-      </div>
-    </section>
-
-    <div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-      <section id="preopen-trap-snapshot" class="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+        <section id="compact-options-chain" class="rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-3 lg:col-start-2 lg:row-start-1">
+          <div class="mb-1 flex items-center justify-between">
+            <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-cyan-300">⚡ Compact Options Chain</h2>
+            <span id="compact-chain-spot" class="text-[10px] uppercase tracking-wider text-slate-500">Spot --</span>
+          </div>
+          <div class="overflow-hidden rounded-lg">
+            <table id="compact-options-table" class="compact-chain-table">
+              <tbody>
+                <tr>
+                  <th scope="col" class="call-side">CALL COI%</th>
+                  <th scope="col" class="call-side">CALL LTP</th>
+                  <th scope="col" class="strike-header">STRIKE</th>
+                  <th scope="col" class="put-side">PUT LTP</th>
+                  <th scope="col" class="put-side">PUT COI%</th>
+                </tr>
+              </tbody>
+              <tbody id="compact-options-tbody">
+                <tr><td colspan="5" class="px-1 py-2 text-[10px] text-slate-500">Loading compact chain…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      <section id="preopen-trap-snapshot" class="rounded-xl border border-slate-800 bg-slate-900/40 p-4 lg:col-start-1 lg:row-start-2">
         <div class="mb-2 flex items-center justify-between gap-3">
           <h2 class="text-sm font-bold uppercase tracking-[.18em] text-slate-200">PRE-OPEN GAMMA TRAP</h2>
           <span class="text-xs uppercase tracking-wider text-slate-500">09:00 - 09:10 IST</span>
@@ -229,7 +255,7 @@
         </div>
       </section>
 
-      <section id="ai-trade-setups" class="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+      <section id="ai-trade-setups" class="rounded-xl border border-slate-800 bg-slate-900/40 p-4 lg:col-start-3 lg:row-start-2">
         <div class="mb-2 flex items-center justify-between">
           <h2 class="text-sm font-bold uppercase tracking-[.18em] text-slate-200">🤖 AI TRADE SETUPS (LIVE TEST)</h2>
           <span class="text-xs uppercase tracking-wider text-slate-500">A/B Entry Models</span>
@@ -256,9 +282,14 @@
         </div>
       </section>
     </div>
+    </section>
 
-    <div class="flex w-full flex-col items-start gap-4 mt-4 lg:flex-row">
-      <div class="min-w-0 flex-grow overflow-x-auto">
+    <div class="mt-4">
+      <div class="mb-2 flex items-center justify-between">
+        <button id="full-table-toggle" type="button" class="rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2 text-sm font-bold uppercase tracking-[.2em] text-cyan-300 transition hover:bg-slate-700/60" aria-controls="full-option-chain-wrap" aria-expanded="false">TABLE</button>
+      </div>
+      <div id="full-option-chain-wrap" class="hidden">
+        <div class="min-w-0 overflow-x-auto">
     <section id="option-chain" class="mt-0">
       <div id="sentiment-bar" class="sentiment-bar mb-2 flex items-center justify-end gap-2 rounded-lg px-2 py-1">
         <div class="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-800 bg-slate-900/60 p-1">
@@ -277,9 +308,12 @@
       </div>
       <div class="mt-2 flex justify-between text-xs text-slate-500"><span>ATM strike is highlighted in blue.</span><span id="live-synced">Waiting for data...</span></div>
     </section>
+        </div>
       </div>
+    </div>
 
-      <aside class="flex w-80 flex-shrink-0 flex-col gap-4 lg:sticky lg:top-3" aria-label="Gamma signals terminal">
+    <div class="mt-4">
+      <aside class="grid grid-cols-1 gap-4 md:grid-cols-2" aria-label="Gamma signals terminal">
         <section class="rounded-xl border border-slate-700 bg-gray-900/90 p-3 shadow-card">
           <h2 class="border-b border-slate-700 pb-2 text-[11px] font-bold uppercase tracking-[.18em] text-amber-300">Daily Gamma Signals</h2>
           <div id="daily-signals-stream" class="gamma-alert-feed mt-2 max-h-64 space-y-2 overflow-y-auto text-xs leading-5 text-slate-300"><p class="text-slate-500">Waiting for daily signals...</p></div>
@@ -858,6 +892,97 @@
   }
 
   connectPreopen();
+})();
+</script>
+
+<script>
+(() => {
+  // ====================================================================
+  // NEW (isolated) — Compact Options Chain + full-table "TABLE" toggle.
+  // Reuses the existing live option-chain API payload. Nothing here
+  // touches the existing WebSocket / option-chain rendering scripts.
+  // ====================================================================
+
+  // ---- Compact Options Chain (center column) ----
+  const compactBody = document.getElementById('compact-options-tbody');
+  const compactSpot = document.getElementById('compact-chain-spot');
+  if (compactBody) {
+    const COMPACT_URL = '{% url "live_dashboard:live_option_chain_api" %}';
+
+    const toNumber = (value) => { const n = Number(value); return Number.isFinite(n) ? n : 0; };
+    const fmtLtp = (value) => (value === null || value === undefined || value === '-' || value === '') ? '-' : toNumber(value).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+    const fmtStrike = (value) => (value === null || value === undefined || value === '-' || value === '') ? '-' : toNumber(value).toLocaleString('en-IN');
+    const fmtCoi = (value) => {
+      if (value === null || value === undefined || value === '-' || value === '') return '-';
+      const n = toNumber(value);
+      if (n === 0) return '0.0%';
+      return `${n > 0 ? '+' : ''}${n.toFixed(1)}%`;
+    };
+
+    function compactCell(text, cls) {
+      const td = document.createElement('td');
+      td.className = cls;
+      td.textContent = text;
+      return td;
+    }
+
+    function renderCompactChain(rows, spot) {
+      if (!Array.isArray(rows) || !rows.length) {
+        compactBody.innerHTML = '<tr><td colspan="5" class="px-1 py-2 text-[10px] text-slate-500">No option chain data yet…</td></tr>';
+        return;
+      }
+      const sorted = rows.slice().sort((a, b) => toNumber(a.strike) - toNumber(b.strike));
+      let atmIndex = Math.floor(sorted.length / 2);
+      if (Number.isFinite(spot) && spot > 0) {
+        atmIndex = sorted.reduce((best, row, i) =>
+          Math.abs(toNumber(row.strike) - spot) < Math.abs(toNumber(sorted[best].strike) - spot) ? i : best, 0);
+      }
+      // ATM strike + 10 strikes above + 10 strikes below = 21 rows.
+      const start = Math.max(0, atmIndex - 10);
+      const windowRows = sorted.slice(start, atmIndex + 11);
+      const atmStrike = toNumber(sorted[atmIndex].strike);
+
+      const fragment = document.createDocumentFragment();
+      windowRows.forEach((row) => {
+        const tr = document.createElement('tr');
+        if (toNumber(row.strike) === atmStrike) tr.className = 'atm-row';
+        tr.appendChild(compactCell(fmtCoi(row.call_coi_pct), 'call-side font-mono font-semibold'));
+        tr.appendChild(compactCell(fmtLtp(row.call_ltp), 'call-side font-mono'));
+        tr.appendChild(compactCell(fmtStrike(row.strike), 'strike-cell font-mono font-bold'));
+        tr.appendChild(compactCell(fmtLtp(row.put_ltp), 'put-side font-mono'));
+        tr.appendChild(compactCell(fmtCoi(row.put_coi_pct), 'put-side font-mono font-semibold'));
+        fragment.appendChild(tr);
+      });
+      compactBody.replaceChildren(fragment);
+    }
+
+    async function refreshCompactChain() {
+      try {
+        const response = await fetch(COMPACT_URL, { cache: 'no-store' });
+        if (!response.ok) throw new Error(response.statusText);
+        const data = await response.json();
+        const spot = toNumber(data.spot_price);
+        if (compactSpot && spot > 0) compactSpot.textContent = `Spot ${spot.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+        renderCompactChain(Array.isArray(data.option_chain) ? data.option_chain : [], spot);
+      } catch (error) {
+        console.warn('Compact option-chain fetch failed:', error);
+      }
+    }
+
+    refreshCompactChain();
+    setInterval(refreshCompactChain, 1000);
+  }
+
+  // ---- "TABLE" toggle for the full Scalper's Playground table ----
+  const toggleBtn = document.getElementById('full-table-toggle');
+  const wrap = document.getElementById('full-option-chain-wrap');
+  if (toggleBtn && wrap) {
+    toggleBtn.addEventListener('click', () => {
+      const willShow = wrap.classList.contains('hidden');
+      wrap.classList.toggle('hidden', !willShow);
+      toggleBtn.setAttribute('aria-expanded', String(willShow));
+    });
+  }
 })();
 </script>
 {% endblock %}
