@@ -1,199 +1,634 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════════╗
 ║   NIFTY 200 — SMC & PRICE ACTION REVERSAL SCANNER                                ║
-║   Finds stocks at 52-week lows showing Liquidity Sweeps, FVGs, and MSS.          ║
+║   v4.0 — LOCAL UPSTOX PARQUET + AS-OF-DATE ENGINE (consolidated final)           ║
+║                                                                                  ║
+║   DATA       : Your local Upstox parquet (Day + Weeks folders, ISIN-keyed files) ║
+║   Yahoo      : ONLY for NIFTY regime check (history trimmed to the as-of date)   ║
+║   "TODAY"    : The data's own last candle — stale DBs are scanned as HISTORICAL  ║
+║                snapshots with a loud banner, never silently dropped              ║
+║   SIGNALS    : 52W-low proximity + strict Liquidity Sweep + unfilled FVG +       ║
+║                MSS (3-bar fractal, no lookahead) + Hammer + Volume Dry-Up +      ║
+║                Weekly HTF confluence (uses your real weekly parquet)             ║
+║   SAFETY     : up-close demand, RSI ceiling, crash filter, proximity alone can   ║
+║                never qualify, split-gap detector, adaptive lookback              ║
+║   OUTPUT     : ranked console report + timestamped CSV with Data_As_Of column    ║
+║                                                                                  ║
+║   ⚠ EOD scanner. If DB is stale, signals are historical, NOT current setups.     ║
+║   ⚠ Backtest before trading anything this flags. Not financial advice.           ║
 ╚══════════════════════════════════════════════════════════════════════════════════╝
 """
 
-import pandas as pd
-import yfinance as yf
-import numpy as np
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import requests
+import time
 import warnings
+from datetime import datetime
+from io import StringIO
+from pathlib import Path
 
-warnings.filterwarnings("ignore")
+import numpy as np
+import pandas as pd
+import requests
+import yfinance as yf   # regime check only
 
-# ════════════════════════════════════════════════════════════════════════════════
-# CONFIGURATION
-# ════════════════════════════════════════════════════════════════════════════════
-MAX_WORKERS = 5
-SCAN_UNIVERSE = "NIFTY_200"
-
-# ════════════════════════════════════════════════════════════════════════════════
-# DATA FETCHING
-# ════════════════════════════════════════════════════════════════════════════════
-
-def get_nifty200_symbols():
-    print("  Fetching latest NIFTY 200 list from NSE...")
-    try:
-        url = "https://archives.nseindia.com/content/indices/ind_nifty200list.csv"
-        # Stronger headers to prevent NSE from blocking the request
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
-        }
-        response = requests.get(url, headers=headers, timeout=10)
-        from io import StringIO
-        df = pd.read_csv(StringIO(response.text))
-        symbols = df['Symbol'].tolist()
-        print(f"  Successfully loaded {len(symbols)} stocks.\n")
-        return symbols
-    except Exception as e:
-        print(f"  Failed to fetch NSE list: {e}. Using fallback list.")
-        return ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN", "LTIM", "ITC"]
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 # ════════════════════════════════════════════════════════════════════════════════
-# SMC SCORING ENGINE
+# CONFIGURATION — every tunable in one place
 # ════════════════════════════════════════════════════════════════════════════════
 
-def scan_stock_for_spring(symbol: str) -> dict | None:
-    try:
-        # Download 2 years of data to ensure rolling 252-day calculations work accurately for the current day
-        df = yf.Ticker(f"{symbol}.NS").history(period="2y", interval="1d")
-        df.dropna(subset=['Open', 'High', 'Low', 'Close', 'Volume'], inplace=True)
-        if df.empty or len(df) < 260:
-            return None
+UPSTOX_ROOT = Path(r"D:\Api data\ML_HISTO_DATA\Upstox Data")
+DAY_DIR  = UPSTOX_ROOT / "Day Data"
+WEEK_DIR = UPSTOX_ROOT / "Weeks Data"
 
-        last_close = df['Close'].iloc[-1]
-        
-        # 1. Identify 52-Week Low Proximity
-        # Get the minimum low of the last 252 trading days
-        low_52w = df['Low'].tail(252).min()
-        
-        proximity_pct = (last_close - low_52w) / low_52w
-        if proximity_pct > 0.10:  # > 10% away from low, skip it
-            return None
+UNIVERSE_CACHE_FILE     = Path("nifty200_symbol_isin_map.csv")
+UNIVERSE_CACHE_TTL_DAYS = 7
 
-        # 2. SMC: Liquidity Sweep (Stop Hunt)
-        # Did the price drop below the older 52-week low recently but close back above it?
-        old_52w_low = df['Low'].shift(3).rolling(252).min().iloc[-1]
-        recent_low = df['Low'].tail(3).min()
-        liquidity_sweep = (recent_low < old_52w_low) and (last_close > old_52w_low)
+# ── Freshness policy ──
+SKIP_IF_OLDER_THAN_DAYS = None   # None = never skip (scan as-of data date). Set 7 for live-only.
+STALE_WARN_DAYS = 10             # banner threshold: system clock vs data date
+LAG_WARN_DAYS   = 7              # warn if one stock lags the universe consensus date
 
-        # 3. SMC: Bullish Fair Value Gap (FVG)
-        # Formed when Low of current candle > High of candle 2 days ago
-        df['Bullish_FVG'] = df['Low'] > df['High'].shift(2)
-        recent_fvg = df['Bullish_FVG'].tail(5).any() # Check if FVG formed in the last 5 days
+# ── Data hygiene ──
+SPLIT_GAP_WARN   = 0.25          # warn on >25% overnight gaps (unadjusted split/bonus?)
+MIN_ROWS_HARD    = 120           # below this, a file is unusable
+DATE_SANITY_LO   = "1990-01-01"  # timestamps outside this window are corrupt → dropped
+DATE_SANITY_HI   = "2100-01-01"
 
-        # 4. SMC: Market Structure Shift (MSS)
-        # Identify swing highs (higher than prev and next day)
-        is_swing_high = (df['High'] > df['High'].shift(1)) & (df['High'] > df['High'].shift(-1))
-        df['Swing_High'] = np.where(is_swing_high, df['High'], np.nan)
-        df['Swing_High'] = df['Swing_High'].ffill() # Forward fill to track the active swing high
-        
-        last_swing_high = df['Swing_High'].iloc[-2] # Compare against yesterday's active swing high
-        mss_breakout = (last_close > last_swing_high) if pd.notna(last_swing_high) else False
+# ── Qualification ──
+MIN_SCORE          = 5           # proximity alone (max 3 pts) can NEVER qualify
+MIN_CONFIRMATIONS  = 1           # ≥1 of: sweep / MSS / FVG / hammer / weekly confluence
+MAX_SCORE          = 15
 
-        # 5. Corrected Hammer / Reversal Candle Logic
-        last_candle = df.iloc[-1]
-        body = abs(last_candle['Close'] - last_candle['Open'])
-        lower_wick = min(last_candle['Open'], last_candle['Close']) - last_candle['Low']
-        upper_wick = last_candle['High'] - max(last_candle['Open'], last_candle['Close'])
-        
-        is_hammer = (body > 0) and (lower_wick >= 2 * body) and (upper_wick < body)
+# ── Signal tuning ──
+LOOKBACK_52W       = 252
+SWEEP_WINDOW       = 3
+SWEEP_MIN_RECLAIM  = 0.01        # close must reclaim old low by ≥1%
+SWING_LOOKBACK     = 3           # fractal width each side
+FVG_LOOKBACK       = 5
+VOL_MA             = 60
+VOL_DRYUP_RATIO    = 0.7
 
-        # 6. Volume Exhaustion Check
-        vol_ma60 = df['Volume'].rolling(60).mean().iloc[-1]
-        last_vol = df['Volume'].iloc[-1]
-        vol_dry_up = last_vol < (vol_ma60 * 0.7)
+# ── Hard filters ──
+REQUIRE_UP_CLOSE   = True
+RSI_PERIOD         = 14
+RSI_MAX            = 45
+CRASH_LOOKBACK     = 10
+CRASH_MAX_DROP     = 0.25
+LOOKBACK_MAX_PROX  = 0.10
 
-        # ── SCORING SYSTEM ──
-        score = 0
-        reasons = []
+FALLBACK_SYMBOLS = [
+    "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "SBIN", "ITC", "LT",
+    "BHARTIARTL", "AXISBANK", "KOTAKBANK", "MARUTI", "TITAN", "ASIANPAINT", "BAJFINANCE",
+]
 
-        if proximity_pct <= 0.03:
-            score += 3; reasons.append("AT 52W LOW (<3%)")
-        elif proximity_pct <= 0.05:
-            score += 2; reasons.append("NEAR 52W LOW (<5%)")
-        else:
-            score += 1; reasons.append("CLOSE TO 52W LOW (<10%)")
+# ════════════════════════════════════════════════════════════════════════════════
+# UNIVERSE: Symbol → ISIN RESOLUTION
+# ════════════════════════════════════════════════════════════════════════════════
 
-        if liquidity_sweep:
-            score += 3; reasons.append("Liquidity Sweep (Stop Hunt)")
+def _http_get(url: str) -> str:
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"}
+    r = requests.get(url, headers=headers, timeout=10)
+    r.raise_for_status()
+    return r.text
 
-        if recent_fvg:
-            score += 2; reasons.append("Bullish FVG Formed")
 
-        if mss_breakout:
-            score += 3; reasons.append("MSS Confirmed (Broke Swing High)")
-
-        if is_hammer:
-            score += 2; reasons.append("Hammer Candle")
-            
-        if vol_dry_up:
-            score += 1; reasons.append("Volume Exhausted")
-
-        # Minimum score threshold for a valid setup (Adjustable based on strictness)
-        if score >= 3:
-            return {
-                "Symbol": symbol,
-                "Price": round(last_close, 2),
-                "52W_Low": round(low_52w, 2),
-                "Proximity_%": round(proximity_pct * 100, 2),
-                "Score": score,
-                "Signal": "🚀 SMC REVERSAL SETUP",
-                "Reasons": " | ".join(reasons)
-            }
-
-    except Exception as e:
-        # Uncomment the line below if you want to see exactly why a specific stock failed to process
-        # print(f"Error processing {symbol}: {e}")
-        pass
-
+def _find_col(df: pd.DataFrame, needle: str) -> str | None:
+    for c in df.columns:
+        if needle in str(c).strip().lower():
+            return c
     return None
 
+
+def _save_universe_cache(recs: list[dict]):
+    """Cache only if ≥80% resolved — never poison the cache with Nones."""
+    try:
+        with_isin = sum(1 for r in recs if r.get("isin"))
+        if with_isin >= 0.8 * len(recs):
+            pd.DataFrame(recs).to_csv(UNIVERSE_CACHE_FILE, index=False)
+            print(f"  💾 Cached symbol↔ISIN map → {UNIVERSE_CACHE_FILE}")
+    except Exception:
+        pass
+
+
+def get_nifty200_universe() -> list[dict]:
+    """Returns [{'symbol': 'RELIANCE', 'isin': 'INE002A01018'}, ...]"""
+    # 1) Local cache — works fully offline
+    if UNIVERSE_CACHE_FILE.exists():
+        age = time.time() - UNIVERSE_CACHE_FILE.stat().st_mtime
+        if age < UNIVERSE_CACHE_TTL_DAYS * 86400:
+            m = pd.read_csv(UNIVERSE_CACHE_FILE, dtype=str).dropna(subset=["symbol"])
+            if len(m) >= 150:
+                print(f"  ✅ Universe from cache: {len(m)} symbols (ISINs included)")
+                return m.to_dict("records")
+
+    # 2) NSE NIFTY-200 list (contains 'ISIN Code' column)
+    try:
+        df = pd.read_csv(StringIO(_http_get(
+            "https://archives.nseindia.com/content/indices/ind_nifty200list.csv")))
+        sym_col, isin_col = _find_col(df, "symbol"), _find_col(df, "isin")
+        recs = [{"symbol": str(s).strip().upper(),
+                 "isin":  (str(i).strip().upper() if isin_col and pd.notna(i) else None)}
+                for s, i in zip(df[sym_col],
+                                df[isin_col] if isin_col else [None] * len(df))]
+        print(f"  ✅ NIFTY 200 list from NSE: {len(recs)} symbols | "
+              f"ISIN column: {'✓ found' if isin_col else '✗ MISSING'}")
+        _save_universe_cache(recs)
+        return recs
+    except Exception as e:
+        print(f"  ⚠ NIFTY-200 list fetch failed: {e}")
+
+    # 3) Fallback: NSE full equity master (has SYMBOL + ISIN for everything)
+    eq_map = {}
+    try:
+        df = pd.read_csv(StringIO(_http_get(
+            "https://archives.nseindia.com/content/equities/EQUITY_L.csv")))
+        df.columns = [str(c).strip() for c in df.columns]
+        sym_col, isin_col = _find_col(df, "symbol"), _find_col(df, "isin")
+        ser_col = _find_col(df, "series")
+        if ser_col:
+            df = df[df[ser_col].astype(str).str.strip() == "EQ"]
+        eq_map = dict(zip(df[sym_col].astype(str).str.strip().str.upper(),
+                          df[isin_col].astype(str).str.strip().str.upper()))
+        print(f"  ✅ EQUITY_L.csv mapping: {len(eq_map)} symbols → ISIN")
+    except Exception as e:
+        print(f"  ⚠ EQUITY_L.csv also failed: {e}")
+
+    recs = [{"symbol": s, "isin": eq_map.get(s)} for s in FALLBACK_SYMBOLS]
+    _save_universe_cache(recs)
+    return recs
+
 # ════════════════════════════════════════════════════════════════════════════════
-# MAIN EXECUTION
+# LOCAL PARQUET DATA LAYER
+# ════════════════════════════════════════════════════════════════════════════════
+
+COLUMN_ALIASES = {
+    "date": "Date", "datetime": "Date", "time": "Date", "timestamp": "Date",
+    "ts": "Date", "candle_time": "Date",
+    "open": "Open", "high": "High", "low": "Low",
+    "close": "Close", "close_price": "Close",
+    "volume": "Volume", "vol": "Volume", "total_quantity": "Volume",
+}   # 'Open Interest' intentionally unmapped → dropped by column subset
+
+
+def build_file_index(folder: Path) -> dict[str, Path]:
+    """{stem.upper(): path} built ONCE — O(1) lookups for all 200 symbols."""
+    idx = {}
+    if folder.exists():
+        for p in folder.glob("*.parquet"):
+            idx[p.stem.strip().upper()] = p
+    return idx
+
+
+def resolve_file(index: dict[str, Path], isin) -> Path | None:
+    if isin is None:
+        return None
+    isin = str(isin).strip().upper()
+    if isin in ("", "NAN", "NONE"):
+        return None
+    p = index.get(f"NSE_EQ_{isin}")              # exact: NSE_EQ_<ISIN>.parquet
+    if p:
+        return p
+    for k, v in index.items():                   # loose: stem contains ISIN
+        if isin in k:
+            return v
+    return None
+
+
+def _normalise_ohlcv(df: pd.DataFrame) -> pd.DataFrame | None:
+    """
+    Any parquet → tz-aware IST DataFrame[Open, High, Low, Close, Volume].
+
+    Timestamp handling (v4 fix):
+      • Real datetimes  → parsed as-is
+      • Epoch SECONDS   → max value ≈ 1.8e9  (data ends ~2026)
+      • Epoch MILLISECONDS → min value ≈ 9.5e11 (data from ~2000)
+      → MAX value vs 1e11 threshold separates the two cleanly no matter
+        when history starts (the old first-value check misread pre-2001 ms data
+        as seconds → 'year 58652 is out of range').
+      • Sanitisation window 1990–2100 drops impossible dates with a visible count.
+    """
+    try:
+        df = df.copy()
+        df.columns = [str(c).strip().lower() for c in df.columns]
+        df = df.rename(columns={k: v for k, v in COLUMN_ALIASES.items() if k in df.columns})
+        required = {"Date", "Open", "High", "Low", "Close", "Volume"}
+        if not required.issubset(df.columns):
+            return None
+
+        d_num = pd.to_numeric(df["Date"], errors="coerce")
+        if d_num.notna().mean() > 0.9:
+            unit = "ms" if float(d_num.dropna().max()) > 1e11 else "s"
+            df["Date"] = pd.to_datetime(d_num, unit=unit, utc=True)
+        else:
+            df["Date"] = pd.to_datetime(df["Date"], errors="coerce", utc=True)
+
+        sane = (df["Date"] >= DATE_SANITY_LO) & (df["Date"] <= DATE_SANITY_HI)
+        if not sane.all():
+            print(f"     (dropped {int((~sane).sum())} corrupt timestamp row(s))")
+            df = df[sane]
+
+        df = df.dropna(subset=["Date"]).set_index("Date").sort_index()
+        df = df[~df.index.duplicated(keep="last")]
+        df.index = df.index.tz_convert("Asia/Kolkata")
+        df = df[["Open", "High", "Low", "Close", "Volume"]].astype(float).dropna()
+        return df if len(df) else None
+    except Exception:
+        return None
+
+
+def drop_partial_candle(df: pd.DataFrame) -> pd.DataFrame:
+    """Remove today's incomplete candle until 15:30 IST close + 90 min buffer.
+    No-op for historical snapshots. Hardened: one weird file can't kill the run."""
+    if df.empty:
+        return df
+    try:
+        now_ist = pd.Timestamp.now(tz="Asia/Kolkata")
+        cutoff = now_ist.normalize() + pd.Timedelta(hours=15, minutes=30) \
+                 + pd.Timedelta(minutes=90)
+        if df.index[-1].date() == now_ist.date() and now_ist < cutoff:
+            return df.iloc[:-1]
+    except (ValueError, OverflowError):
+        return df
+    return df
+
+
+def load_universe(universe: list[dict], day_idx, week_idx):
+    """
+    Loads every resolvable stock. Staleness never silently drops a stock
+    (unless SKIP_IF_OLDER_THAN_DAYS is set).
+    Returns (frames, weekly_frames, failed, as_of) where as_of = consensus
+    last-candle date → the scanner's reference 'today'.
+    """
+    today_ist = pd.Timestamp.now(tz="Asia/Kolkata").normalize()
+    meta, failed = [], []
+
+    for rec in universe:
+        sym, isin = rec["symbol"], rec.get("isin")
+
+        f_day = resolve_file(day_idx, isin)
+        if f_day is None:
+            failed.append((sym, "no parquet for ISIN"))
+            continue
+        df = _normalise_ohlcv(pd.read_parquet(f_day))
+        if df is None:
+            failed.append((sym, "unreadable columns"))
+            continue
+        if len(df) < MIN_ROWS_HARD:
+            failed.append((sym, f"too few rows ({len(df)})"))
+            continue
+
+        wall_age = (today_ist - df.index[-1].normalize()).days
+        if SKIP_IF_OLDER_THAN_DAYS is not None and wall_age > SKIP_IF_OLDER_THAN_DAYS:
+            failed.append((sym, f"stale vs system clock ({wall_age}d)"))
+            continue
+
+        wk = None
+        f_wk = resolve_file(week_idx, isin)
+        if f_wk:
+            wtmp = _normalise_ohlcv(pd.read_parquet(f_wk))
+            if wtmp is not None and len(wtmp) >= 10:
+                wk = drop_partial_candle(wtmp)
+
+        meta.append((sym, drop_partial_candle(df), wk, wall_age))
+
+    if not meta:
+        return {}, {}, failed, None
+
+    # ★ Consensus as-of date — the scanner's reference 'today' ★
+    as_of = max(m[1].index[-1] for m in meta).normalize()
+
+    frames, weekly_frames = {}, {}
+    laggers, short_hist = [], []
+    for sym, df, wk, _wall_age in meta:
+        lag = (as_of - df.index[-1].normalize()).days
+        if lag > LAG_WARN_DAYS:
+            laggers.append((sym, lag))          # still scanned; Signal_Date shows its date
+        if len(df) < LOOKBACK_52W + 10:
+            short_hist.append((sym, len(df)))
+        frames[sym] = df
+        if wk is not None:
+            weekly_frames[sym] = wk
+
+    if short_hist:
+        ex = ", ".join(f"{s}({n}r)" for s, n in short_hist[:5])
+        print(f"  ℹ {len(short_hist)} stocks <260 rows → adaptive lookback. e.g. {ex}")
+    if laggers:
+        ex = ", ".join(f"{s}(-{l}d)" for s, l in laggers[:5])
+        print(f"  ℹ {len(laggers)} stocks lag the as-of date. e.g. {ex}")
+
+    return frames, weekly_frames, failed, as_of
+
+# ════════════════════════════════════════════════════════════════════════════════
+# INDICATORS
+# ════════════════════════════════════════════════════════════════════════════════
+
+def compute_rsi(close: pd.Series, period: int = RSI_PERIOD) -> pd.Series:
+    """Wilder-smoothed RSI."""
+    delta = close.diff()
+    gain = delta.clip(lower=0).ewm(alpha=1/period, min_periods=period).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1/period, min_periods=period).mean()
+    return 100 - (100 / (1 + gain / loss))
+
+
+def compute_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    """Wilder-smoothed Average True Range."""
+    tr = pd.concat([
+        df["High"] - df["Low"],
+        (df["High"] - df["Close"].shift()).abs(),
+        (df["Low"] - df["Close"].shift()).abs(),
+    ], axis=1).max(axis=1)
+    return tr.ewm(alpha=1/period, min_periods=period).mean()
+
+
+def has_unmitigated_bullish_fvg(df: pd.DataFrame, lookback: int = FVG_LOOKBACK) -> bool:
+    """Bullish FVG = Low[t] > High[t-2]. Counts only if price hasn't traded
+    back below the gap bottom since formation (unfilled = real demand zone)."""
+    lows, highs = df["Low"].values, df["High"].values
+    for i in range(len(df) - lookback, len(df)):
+        gap_bottom, gap_top = highs[i - 2], lows[i]
+        if gap_top > gap_bottom:
+            post = lows[i + 1:]
+            if post.size == 0 or post.min() > gap_bottom:
+                return True
+    return False
+
+
+def weekly_context(daily_df: pd.DataFrame, weekly_df: pd.DataFrame | None) -> tuple[bool, str]:
+    """HTF confluence — uses your real weekly parquet when available,
+    falls back to resampling daily. Bonus: weekly holding above swing low + up-close."""
+    if weekly_df is not None and len(weekly_df) >= 10:
+        wk = weekly_df
+    else:
+        wk = daily_df.resample("W").agg(
+            {"Open": "first", "High": "max", "Low": "min",
+             "Close": "last", "Volume": "sum"}).dropna()
+    if len(wk) < 10:
+        return False, ""
+    last = wk.iloc[-1]
+    holding = last["Low"] > wk["Low"].tail(4).min() * 0.995
+    up_week = last["Close"] > last["Open"]
+    return (holding and up_week), "Weekly HTF Confluence" if (holding and up_week) else ""
+
+# ════════════════════════════════════════════════════════════════════════════════
+# SIGNAL ENGINE
+# ════════════════════════════════════════════════════════════════════════════════
+
+def scan(df: pd.DataFrame, symbol: str, weekly_df: pd.DataFrame | None = None) -> dict | None:
+    if df.empty or len(df) < MIN_ROWS_HARD:
+        return None
+
+    # Adaptive lookback — use whatever history the file actually has
+    eff_lb = min(LOOKBACK_52W, len(df) - SWEEP_WINDOW - 2)
+    lb_note = "" if eff_lb >= LOOKBACK_52W else f" (lookback {eff_lb}d)"
+
+    close = df["Close"]
+    last_close, prev_close = close.iloc[-1], close.iloc[-2]
+
+    # ── HARD FILTER 1: demand must exist today ──
+    if REQUIRE_UP_CLOSE and last_close <= prev_close:
+        return None
+
+    # ── HARD FILTER 2: falling knife (waterfall declines are usually news) ──
+    if len(df) > CRASH_LOOKBACK + 1:
+        crash_ret = last_close / close.iloc[-(CRASH_LOOKBACK + 1)] - 1
+        if crash_ret < -CRASH_MAX_DROP:
+            return None
+
+    # ── HARD FILTER 3: oversold-but-not-dead ──
+    rsi_val = compute_rsi(close).iloc[-1]
+    if pd.isna(rsi_val) or rsi_val > RSI_MAX:
+        return None
+
+    # ── 52W-low proximity (gatekeeper, max 3 pts — cannot qualify alone) ──
+    low_52w = df["Low"].tail(eff_lb).min()
+    proximity = (last_close - low_52w) / low_52w
+    if proximity > LOOKBACK_MAX_PROX:
+        return None
+
+    # ── SMC 1: STRICT liquidity sweep ──
+    old_low = df["Low"].shift(SWEEP_WINDOW).rolling(eff_lb).min().iloc[-1]
+    recent_low = df["Low"].tail(SWEEP_WINDOW).min()
+    sweep = (pd.notna(old_low) and recent_low < old_low
+             and last_close >= old_low * (1 + SWEEP_MIN_RECLAIM))
+
+    # ── SMC 2: MSS — 3-bar fractal swings, shift() = confirmation lag, no lookahead ──
+    w = SWING_LOOKBACK
+    is_swing = df["High"] >= df["High"].rolling(2 * w + 1, center=True).max()
+    swing_known = (pd.Series(np.where(is_swing, df["High"], np.nan), index=df.index)
+                     .shift(w).ffill())
+    last_swing_high = swing_known.iloc[-1]
+    mss = pd.notna(last_swing_high) and last_close > last_swing_high
+
+    # ── SMC 3: FVG still unfilled ──
+    fvg = has_unmitigated_bullish_fvg(df)
+
+    # ── Price action: hammer ──
+    c = df.iloc[-1]
+    body = abs(c["Close"] - c["Open"])
+    lower_wick = min(c["Open"], c["Close"]) - c["Low"]
+    upper_wick = c["High"] - max(c["Open"], c["Close"])
+    hammer = body > 0 and lower_wick >= 2 * body and upper_wick < body
+
+    # ── Volume dry-up ──
+    vol_ma = df["Volume"].rolling(min(VOL_MA, max(20, len(df) // 3))).mean().iloc[-1]
+    dry_up = pd.notna(vol_ma) and c["Volume"] < vol_ma * VOL_DRYUP_RATIO
+
+    # ── SCORING ──
+    score, reasons, confirmations = 0, [], 0
+
+    if proximity <= 0.03:
+        score += 3; reasons.append(f"AT 52W LOW (+{proximity*100:.1f}%){lb_note}")
+    elif proximity <= 0.05:
+        score += 2; reasons.append(f"NEAR 52W LOW (+{proximity*100:.1f}%){lb_note}")
+    else:
+        score += 1; reasons.append(f"CLOSE TO 52W LOW (+{proximity*100:.1f}%){lb_note}")
+
+    if sweep:  score += 3; confirmations += 1; reasons.append("Liquidity Sweep (strict)")
+    if mss:    score += 3; confirmations += 1; reasons.append("MSS Breakout")
+    if fvg:    score += 2; confirmations += 1; reasons.append("Bullish FVG (unfilled)")
+    if hammer: score += 2; confirmations += 1; reasons.append("Hammer Candle")
+    if dry_up: score += 1; reasons.append("Volume Dry-Up")
+
+    wk_ok, wk_reason = weekly_context(df, weekly_df)
+    if wk_ok:
+        score += 1; confirmations += 1; reasons.append(wk_reason)
+
+    # ★ Proximity alone can never qualify ★
+    if score < MIN_SCORE or confirmations < MIN_CONFIRMATIONS:
+        return None
+
+    # ── Actionable trade plan ──
+    atr_val = compute_atr(df).iloc[-1]
+    stop = recent_low - 0.5 * atr_val
+    target = last_swing_high if pd.notna(last_swing_high) else last_close + 2 * atr_val
+    if target <= last_close:
+        target = last_close + 2 * atr_val
+    risk = last_close - stop
+    rr = round((target - last_close) / risk, 2) if risk > 0 else None
+
+    return {
+        "Symbol": symbol, "Price": round(last_close, 2),
+        "52W_Low": round(low_52w, 2), "Proximity_%": round(proximity * 100, 2),
+        "RSI": round(rsi_val, 1), "ATR": round(atr_val, 2),
+        "Stop_Loss": round(stop, 2), "Target": round(target, 2), "R:R": rr,
+        "Score": score, "Confirms": confirmations,
+        "Signal": "🚀 SMC REVERSAL SETUP", "Reasons": " | ".join(reasons),
+        "Signal_Date": df.index[-1].date(),
+    }
+
+# ════════════════════════════════════════════════════════════════════════════════
+# REGIME — computed AS-OF the data date (no time-period mixing)
+# ════════════════════════════════════════════════════════════════════════════════
+
+def get_index_regime(as_of) -> tuple[bool, str]:
+    try:
+        n = yf.download("^NSEI", period="5y", interval="1d", auto_adjust=True, progress=False)
+        if isinstance(n.columns, pd.MultiIndex):
+            n.columns = n.columns.get_level_values(0)
+        n = n.dropna(subset=["Close"])
+        if n.index.tz is None:
+            n.index = n.index.tz_localize("UTC")
+        n.index = n.index.tz_convert("Asia/Kolkata")
+        if as_of is not None:
+            n = n[n.index.normalize() <= as_of]
+        as_of_txt = f" as-of {as_of.date()}" if as_of is not None else ""
+        if len(n) < 210:
+            return True, f"NIFTY regime UNKNOWN{as_of_txt} (insufficient trimmed history)"
+        sma = n["Close"].rolling(200).mean().iloc[-1]
+        last = n["Close"].iloc[-1]
+        return (last > sma,
+                f"NIFTY {'ABOVE' if last > sma else 'BELOW'} 200-SMA{as_of_txt} "
+                f"({last:.0f} vs {sma:.0f})")
+    except Exception as e:
+        return True, f"NIFTY regime UNKNOWN ({e})"
+
+# ════════════════════════════════════════════════════════════════════════════════
+# DIAGNOSTICS
+# ════════════════════════════════════════════════════════════════════════════════
+
+def probe_files(folder: Path):
+    print("  🔍 FILE PROBE (first 2 parquet files):")
+    for p in sorted(folder.glob("*.parquet"))[:2]:
+        try:
+            d = pd.read_parquet(p)
+            ts = d[d.columns[0]]
+            print(f"     {p.name!r}: rows={len(d)}  cols={list(d.columns)}  "
+                  f"first={ts.iloc[0]!r}  last={ts.iloc[-1]!r}")
+        except Exception as e:
+            print(f"     {p.name!r}: READ ERROR → {e}")
+
+
+def print_failure_summary(failed: list[tuple[str, str]]):
+    if not failed:
+        return
+    groups = {}
+    for sym, why in failed:
+        groups.setdefault(why.split(" (")[0], []).append(sym)
+    print(f"  ⚠ SKIPPED {len(failed)}: " +
+          ", ".join(f"{len(v)}× {k}" for k, v in groups.items()))
+    for k, v in groups.items():
+        print(f"     • {k}: {', '.join(v[:6])}{' ...' if len(v) > 6 else ''}")
+
+# ════════════════════════════════════════════════════════════════════════════════
+# MAIN
 # ════════════════════════════════════════════════════════════════════════════════
 
 def main():
-    symbols = get_nifty200_symbols()
-    
+    t0 = time.time()
+
     print("=" * 100)
-    print("  ★  NIFTY 200 — SMC ACCUMULATION SCANNER")
-    print("     Scanning for Liquidity Sweeps + FVGs + Market Structure Shifts")
+    print("  ★  NIFTY 200 — SMC ACCUMULATION SCANNER v4.0  (UPSTOX PARQUET · AS-OF ENGINE)")
     print("=" * 100)
-    print(f"  Scanning {len(symbols)} stocks with {MAX_WORKERS} parallel workers...\n")
 
-    results = []
+    universe = get_nifty200_universe()
 
-    # Parallel execution
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(scan_stock_for_spring, sym): sym for sym in symbols}
-        
-        for i, future in enumerate(as_completed(futures), 1):
-            sym = futures[future]
-            try:
-                result = future.result()
-                if result:
-                    results.append(result)
-                    print(f"  [{i:3d}/{len(symbols)}] ⚡ SETUP FOUND: {result['Symbol']} | Score: {result['Score']}/14 | {result['Reasons']}")
-            except Exception:
-                pass
+    day_idx, week_idx = build_file_index(DAY_DIR), build_file_index(WEEK_DIR)
+    print(f"  📂 Indexed {len(day_idx)} day files / {len(week_idx)} week files")
 
-    # Sort by highest score
-    results.sort(key=lambda x: x['Score'], reverse=True)
+    isins = [str(r.get("isin")).strip().upper() for r in universe
+             if r.get("isin") and str(r.get("isin")).upper() not in ("NAN", "NONE", "")]
+    exact = sum(1 for i in isins if f"NSE_EQ_{i}" in day_idx)
+    print(f"  🔍 ISIN match probe: exact {exact}/{len(isins)}")
 
-    print("\n" + "=" * 100)
-    print("  TOP SMC REVERSAL CANDIDATES AT 52-WEEK LOWS")
-    print("=" * 100)
-    
-    if not results:
-        print("  ❌ No stocks met the SMC criteria for a 52W Low Reversal today.")
-        print("=" * 100 + "\n")
+    print(f"\n  Loading local parquet for {len(universe)} symbols...")
+    frames, weekly_frames, failed, as_of = load_universe(universe, day_idx, week_idx)
+    print(f"  ✅ Usable: {len(frames)}/{len(universe)}  |  weekly files: {len(weekly_frames)}")
+
+    print_failure_summary(failed)
+
+    if not frames:
+        probe_files(DAY_DIR)
+        print("\n  ❌ Nothing loaded — paste this full output back.")
         return
 
-    df_results = pd.DataFrame(results)
-    
-    for index, row in df_results.iterrows():
-        print(f"  {index+1}. {row['Symbol']:12s} | Rs.{row['Price']:8.2f} | 52wLow: Rs.{row['52W_Low']:8.2f} ({row['Proximity_%']}%)")
-        print(f"     Score: {row['Score']}/14 | {row['Reasons']}")
-        print("-" * 100)
+    # ── ★ STALENESS BANNER — impossible to miss ★ ──
+    db_age = (pd.Timestamp.now(tz="Asia/Kolkata").normalize() - as_of).days
+    print("\n  " + "▲" * 98)
+    print(f"  ▲ DATA AS-OF: {as_of.date()}   (system clock is {db_age} days ahead of it)")
+    if db_age > STALE_WARN_DAYS:
+        print(f"  ▲ ⚠ LOCAL DB IS STALE → all signals below are a HISTORICAL snapshot of "
+              f"{as_of.date()}, NOT current setups.")
+        print("  ▲   Re-sync your Upstox downloader for live signals. If today is NOT "
+              "actually that far ahead, check your Windows clock.")
+    print("  " + "▲" * 98 + "\n")
 
-    output_file = "nifty200_smc_reversals.csv"
-    df_results.to_csv(output_file, index=False)
-    print(f"\n  ✅ Saved {len(df_results)} setups to {output_file}\n")
+    above, regime_txt = get_index_regime(as_of)
+    print(f"  Regime    : {regime_txt}")
+    print(f"  Thresholds: score ≥ {MIN_SCORE} AND ≥ {MIN_CONFIRMATIONS} confirm(s) | "
+          f"RSI ≤ {RSI_MAX} | crash filter {CRASH_MAX_DROP:.0%}/{CRASH_LOOKBACK}d")
+
+    print("  Sample (verify prices vs a chart for that date!):")
+    for sym in list(frames)[:3]:
+        d = frames[sym]
+        print(f"     {sym:12s} → {len(d)} candles, close Rs.{d['Close'].iloc[-1]:.2f} "
+              f"on {d.index[-1].date()}")
+
+    # ── Scan ──
+    results = []
+    for i, (sym, df) in enumerate(frames.items(), 1):
+        try:
+            r = scan(df, sym, weekly_frames.get(sym))
+            if r:
+                results.append(r)
+                print(f"  ⚡ SETUP: {r['Symbol']:12s} | Score {r['Score']}/{MAX_SCORE} | "
+                      f"{r['Confirms']} confirms | {r['Reasons']}")
+        except Exception:
+            pass
+        if i % 50 == 0:
+            print(f"  ... scanned {i}/{len(frames)}")
+
+    results.sort(key=lambda r: (r["Score"], -r["Proximity_%"]), reverse=True)
+
+    print("\n" + "=" * 100)
+    hdr = (f"  TOP SMC REVERSAL CANDIDATES  (AS OF {as_of.date()} — HISTORICAL)"
+           if db_age > STALE_WARN_DAYS else
+           f"  TOP SMC REVERSAL CANDIDATES  ({as_of.date()})")
+    print(hdr)
+    print("=" * 100)
+
+    if not results:
+        print("  ❌ No stock passed the filters for this data period.")
+        print("     (A quiet day can be a GOOD sign — the filters are doing their job.)")
+    else:
+        for rank, r in enumerate(results, 1):
+            print(f"  {rank}. {r['Symbol']:12s} | Rs.{r['Price']:>9.2f} | "
+                  f"Low: Rs.{r['52W_Low']:>9.2f} (+{r['Proximity_%']}%) | RSI {r['RSI']}")
+            print(f"     Score {r['Score']}/{MAX_SCORE} ({r['Confirms']} confirms) | "
+                  f"SL: Rs.{r['Stop_Loss']:.2f} | Tgt: Rs.{r['Target']:.2f} | R:R 1:{r['R:R']}")
+            print(f"     {r['Reasons']}")
+            print("-" * 100)
+
+    # ── Save (timestamped, includes as-of column, never overwrites) ──
+    if results:
+        out = f"smc_scan_{as_of.date()}_{datetime.now():%H%M}.csv"
+        out_df = pd.DataFrame(results)
+        out_df["Data_As_Of"] = as_of.date()
+        out_df.to_csv(out, index=False)
+        print(f"\n  ✅ Saved {len(results)} setups to {out}")
+
+    print(f"  Done in {time.time() - t0:.1f}s\n")
+
 
 if __name__ == "__main__":
     main()

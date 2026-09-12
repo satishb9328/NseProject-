@@ -1389,11 +1389,14 @@ def _compute_live_sentiment(instrument_data=None) -> tuple[float, float, float]:
             put_coi += coi if isinstance(coi, (int, float)) else 0.0
 
     total_oi = call_oi + put_oi
-    if total_oi > 0:
-        bias = ((put_oi - call_oi) / total_oi) * 100.0
-        momentum = ((call_coi + put_coi) / total_oi) * 100.0
-    else:
-        bias = momentum = 0.0
+    # Neutral baseline: an empty OR half-initialised chain (only CE or only PE OI
+    # present yet) is NOT a directional signal. Treating a one-sided chain as a
+    # bias of ±100 would pin the score to 0/100 during warm-up, which the dashboard
+    # misreads as an extreme bearish/bullish verdict.
+    if total_oi <= 0 or call_oi <= 0 or put_oi <= 0:
+        return 0.0, 0.0, 50.0
+    bias = ((put_oi - call_oi) / total_oi) * 100.0
+    momentum = ((call_coi + put_coi) / total_oi) * 100.0
     score = max(0.0, min(100.0, 50.0 + bias * 0.5 + momentum))
     return bias, momentum, score
 

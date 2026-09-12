@@ -640,6 +640,15 @@ def _build_preopen_context() -> dict:
     else:
         trap_signal = "NEUTRAL - NO TRAP DETECTED"
 
+    # A conflicting pre-open (trap pattern without momentum confirmation) must never
+    # ship an extreme directional score. A settle at the very bottom with zero
+    # open->final move collapses to bias=-100 + momentum=0 -> score=0, which reads as
+    # "extreme bearish" next to a "NEUTRAL - CONFLICTING DATA" headline. Collapse the
+    # conflicting state back to the neutral baseline (50 / neutral) instead.
+    if trap_signal == "NEUTRAL - CONFLICTING DATA":
+        score = 50
+        theme = 'neutral'
+
     return {
         'preopen_max': max_iep,
         'preopen_min': min_iep,

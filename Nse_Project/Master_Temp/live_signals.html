@@ -367,17 +367,17 @@
   const expiryFilter = document.getElementById('expiry-filter');
   const signalStreams = { weekly: document.getElementById('weekly-signals-stream'), daily: document.getElementById('daily-signals-stream') };
   const seenSignals = new Set();
-  let allRows = [], loadedExpiry = null, currentSpot = null, previousSignature = '', expiryInitialized = false, currentSentiment = 'neutral';
+  let allRows = [], loadedExpiry = null, currentSpot = null, previousSignature = '', expiryInitialized = false, currentSentiment = 'neutral', currentScore = 50, currentTheme = 'neutral', currentTrapSignal = '', currentLiveScore = 50;
   // Session peak-hold extremes for the elastic sentiment bars (ghost trail).
   // Seeded from the Redis-backed market state injected by views.py so a hard
   // refresh keeps the accumulated peaks instead of resetting them to 0 before the
   // next WebSocket / pre-open tick arrives.
-  let peakMaxBias = Math.max(0, {{ peak_bias|default:"0" }});
-  let peakMinBias = Math.min(0, {{ peak_bias|default:"0" }});
-  let peakMaxMom = Math.max(0, {{ peak_momentum|default:"0" }});
-  let peakMinMom = Math.min(0, {{ peak_momentum|default:"0" }});
-  let peakMaxScore = Math.max(50, {{ peak_score|default:"50" }});
-  let peakMinScore = Math.min(50, {{ peak_score|default:"50" }});
+  let peakMaxBias = Math.max(0, {{ peak_bias|default:"0"|floatformat:0 }});
+  let peakMinBias = Math.min(0, {{ peak_bias|default:"0"|floatformat:0 }});
+  let peakMaxMom = Math.max(0, {{ peak_momentum|default:"0"|floatformat:0 }});
+  let peakMinMom = Math.min(0, {{ peak_momentum|default:"0"|floatformat:0 }});
+  let peakMaxScore = Math.max(50, {{ peak_score|default:"50"|floatformat:0 }});
+  let peakMinScore = Math.min(50, {{ peak_score|default:"50"|floatformat:0 }});
 
   const number = value => { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : 0; };
   const fmt = value => value === null || value === undefined || value === '-' ? '-' : typeof value === 'number' ? value.toLocaleString('en-IN') : value;
@@ -485,25 +485,36 @@
   }
 
   function updateSentiment(rows) {
-    // The PRE-OPEN GAMMA TRAP widget's Bias / Momentum / Score are now driven by the
-    // pre-open settlement snapshot (renderPreopenSentiment). This function only feeds
-    // the intraday option-chain sentiment into the AI trade setups once the chain is
-    // live (after 09:15); until then it must not overwrite the pre-open values.
+    // Intraday option-chain score for the AI Trade Setups' aggressive scalping
+    // model. Kept in a SEPARATE variable (currentLiveScore) so the 1 Hz option-chain
+    // poll drives the AI card without overwriting the Pre-Open card's
+    // currentScore / currentTheme / currentTrapSignal (owned by renderPreopenSentiment).
     if (!rows || !rows.length) return;
     let callOi = 0, putOi = 0, callCoi = 0, putCoi = 0;
     rows.forEach(row => { callOi += number(row.call_oi); putOi += number(row.put_oi); callCoi += number(row.call_coi); putCoi += number(row.put_coi); });
     const totalOi = callOi + putOi, bias = totalOi ? ((putOi - callOi) / totalOi) * 100 : 0;
     const momentum = totalOi ? ((callCoi + putCoi) / totalOi) * 100 : 0;
-    const score = Math.max(0, Math.min(100, Math.round(50 + bias * .5 + momentum)));
-    currentSentiment = score >= 65 ? 'bullish' : score <= 34 ? 'bearish' : 'neutral';
+    currentLiveScore = Math.max(0, Math.min(100, Math.round(50 + bias * .5 + momentum)));
   }
 
   function renderPreopenSentiment(data) {
     const bias = Number.isFinite(Number(data.bias)) ? Number(data.bias) : 0;
     const momentum = Number.isFinite(Number(data.momentum)) ? Number(data.momentum) : 0;
-    const score = Number.isFinite(Number(data.score)) ? Math.round(Number(data.score)) : 50;
-    const theme = data.theme === 'bullish' || data.theme === 'bearish' ? data.theme
+    let score = Number.isFinite(Number(data.score)) ? Math.round(Number(data.score)) : 50;
+    let theme = data.theme === 'bullish' || data.theme === 'bearish' ? data.theme
       : (score >= 65 ? 'bullish' : score <= 34 ? 'bearish' : 'neutral');
+    // The trap headline is the final arbiter of "stand aside": a CONFLICTING or
+    // WAITING pre-open must never display an extreme score (0/100) nor feed the AI
+    // card a directional theme. Collapse it to the neutral baseline (50 / neutral).
+    const trapSignal = String(data.trap_signal || '').toUpperCase();
+    const standAside = trapSignal.includes('CONFLICTING') || trapSignal.includes('WAITING');
+    if (standAside) {
+      score = 50;
+      theme = 'neutral';
+    }
+    currentScore = score;
+    currentTheme = theme;
+    currentTrapSignal = data.trap_signal || '';
     currentSentiment = theme;
 
     const explosive = Math.abs(momentum) > 10;
@@ -531,7 +542,7 @@
     momentumEl.classList.toggle('font-bold', explosive);
     momentumEl.classList.toggle('text-orange-500', explosive);
 
-    document.getElementById('sentiment-score').textContent = `${score}/100 (Peak: ${peakScore}/100)`;
+    document.getElementById('sentiment-score').textContent = `${score}/100 (Peak: ${Math.round(peakScore)}/100)`;
     document.getElementById('sentiment-score-label').textContent = `(${theme === 'bullish' ? 'Bullish' : theme === 'bearish' ? 'Bearish' : 'Neutral'})`;
 
     const insight = buildInsight(bias, momentum, score);
@@ -673,13 +684,37 @@
     const putWall = aiParsePrice(document.getElementById('weekly-put-wall'));
     const atm = aiAtmRow();
     const atmStrike = atm ? number(atm.strike) : 0;
-    const bullish = currentSentiment === 'bullish';
-    const bearish = currentSentiment === 'bearish';
-    // LTP of the ATM strike: use the direction-appropriate premium (call for
-    // bullish/neutral, put for bearish) so entries line up with the trade side.
-    const ltp = atm ? (bearish ? number(atm.put_ltp) : number(atm.call_ltp)) : 0;
     const px = value => `₹${value.toFixed(2)}`;
     const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+
+    // ---- AGGRESSIVE SCALPING tri-state: Bullish / Bearish / NO_TRADE ----
+    // Driven SOLELY by the live option-chain score (currentLiveScore, updated at 1 Hz)
+    // plus the live CVD order-flow tie-breaker. The 09:15 Pre-Open auction
+    // (trap_signal / theme) is deliberately ignored for intraday scalps.
+    const score = currentLiveScore;
+
+    // Parse the live CVD number from the DOM (strip commas / currency marks).
+    const cvd = (() => {
+      const el = document.getElementById('cvd-value');
+      const raw = el ? String(el.textContent).replace(/[^\d.\-]/g, '') : '';
+      const parsed = parseFloat(raw);
+      return Number.isFinite(parsed) ? parsed : 0;
+    })();
+
+    // Chop band is 45-55 (inclusive). Outside it, the live score wins outright.
+    let bullish = score > 55;
+    let bearish = score < 45;
+    if (score >= 45 && score <= 55) {
+      // Order-flow tie-breaker: a strong CVD move overrides the chop.
+      bullish = cvd > 5000;
+      bearish = cvd < -5000;
+    }
+    const noTrade = !bullish && !bearish;
+    const optionSide = bearish ? 'PE' : 'CE';
+
+    // LTP of the ATM strike: use the direction-appropriate premium (call for
+    // bullish, put for bearish) so entries line up with the trade side.
+    const ltp = atm ? (bearish ? number(atm.put_ltp) : number(atm.call_ltp)) : 0;
 
     // Card A — Momentum pullback: buy a 15% dip off the ATM premium.
     const aEntry = ltp > 0 ? ltp * 0.85 : 0;
@@ -694,12 +729,19 @@
     const bSl = bEntry * 0.8;
     const bTarget = bEntry * 1.4;
 
-    // Direction-appropriate option leg: bearish sentiment trades the ATM PUT (PE),
-    // while bullish / neutral sentiment trades the ATM CALL (CE).
-    const optionSide = bearish ? 'PE' : 'CE';
-    const strikeText = atmStrike > 0 ? `${fmt(atmStrike)} ${optionSide}` : '--';
+    // NO_TRADE: blank the card instead of pretending a CE/PE edge exists.
+    // Otherwise render the correct CE/PE strike and the staged entry/SL/target.
+    const strikeText = noTrade
+      ? '🚫 NO TRADE ZONE'
+      : (atmStrike > 0 ? `${fmt(atmStrike)} ${optionSide}` : '--');
     const render = (prefix, entry, sl, target) => {
       setText(`${prefix}-strike`, strikeText);
+      if (noTrade) {
+        setText(`${prefix}-entry`, 'WAIT');
+        setText(`${prefix}-sl`, 'WAIT');
+        setText(`${prefix}-target`, 'WAIT');
+        return;
+      }
       setText(`${prefix}-entry`, ltp > 0 ? px(entry) : '--');
       setText(`${prefix}-sl`, ltp > 0 ? px(sl) : '--');
       setText(`${prefix}-target`, ltp > 0 ? px(target) : '--');
