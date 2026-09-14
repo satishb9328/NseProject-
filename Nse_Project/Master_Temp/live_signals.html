@@ -280,8 +280,23 @@
             </div>
           </div>
         </div>
-        <div class="mt-auto flex w-full justify-end pt-3">
+        <div id="math-console" class="hidden mt-3 rounded-lg border border-cyan-800/50 bg-black/50 p-2 font-mono text-[11px] leading-5">
+          <div class="mb-1 flex items-center justify-between border-b border-slate-800 pb-1">
+            <span class="uppercase tracking-wider text-cyan-400">⚙ Math Console</span>
+            <span class="text-slate-600">live debug</span>
+          </div>
+          <div class="space-y-0.5">
+            <div class="flex items-center justify-between"><span class="text-slate-500">Current Score</span><span id="math-score" class="text-cyan-300">--</span></div>
+            <div class="flex items-center justify-between"><span class="text-slate-500">Bias</span><span id="math-bias" class="text-emerald-300">--</span></div>
+            <div class="flex items-center justify-between"><span class="text-slate-500">Momentum</span><span id="math-momentum" class="text-emerald-300">--</span></div>
+            <div class="flex items-center justify-between"><span class="text-slate-500">[Delta Wt]</span><span id="math-delta-wt" class="text-cyan-300">--</span></div>
+            <div class="flex items-center justify-between"><span class="text-slate-500">[IV Skew]</span><span id="math-iv-skew" class="text-cyan-300">--</span></div>
+            <div class="flex items-center justify-between"><span class="text-slate-500">[Gamma Boost]</span><span id="math-gamma-boost" class="text-emerald-300">--</span></div>
+          </div>
+        </div>
+        <div class="mt-auto flex w-full justify-end gap-2 pt-3">
           <button id="full-table-toggle" type="button" class="rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2 text-sm font-bold uppercase tracking-[.2em] text-cyan-300 transition hover:bg-slate-700/60" aria-controls="full-option-chain-wrap" aria-expanded="false">TABLE</button>
+          <button id="math-toggle" type="button" class="rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2 text-sm font-bold uppercase tracking-[.2em] text-emerald-300 transition hover:bg-slate-700/60" aria-controls="math-console" aria-expanded="false">MATH</button>
         </div>
 
       </section>
@@ -368,6 +383,8 @@
   const signalStreams = { weekly: document.getElementById('weekly-signals-stream'), daily: document.getElementById('daily-signals-stream') };
   const seenSignals = new Set();
   let allRows = [], loadedExpiry = null, currentSpot = null, previousSignature = '', expiryInitialized = false, currentSentiment = 'neutral', currentScore = 50, currentTheme = 'neutral', currentTrapSignal = '', currentLiveScore = 50;
+  // Live option-chain bias / momentum, exposed for the AI card's math console.
+  let currentBias = 0, currentMomentum = 0;
   // Session peak-hold extremes for the elastic sentiment bars (ghost trail).
   // Seeded from the Redis-backed market state injected by views.py so a hard
   // refresh keeps the accumulated peaks instead of resetting them to 0 before the
@@ -495,6 +512,8 @@
     const totalOi = callOi + putOi, bias = totalOi ? ((putOi - callOi) / totalOi) * 100 : 0;
     const momentum = totalOi ? ((callCoi + putCoi) / totalOi) * 100 : 0;
     currentLiveScore = Math.max(0, Math.min(100, Math.round(50 + bias * .5 + momentum)));
+    currentBias = bias;
+    currentMomentum = momentum;
   }
 
   function renderPreopenSentiment(data) {
@@ -678,6 +697,29 @@
       return distance < closestDistance ? row : closest;
     }, allRows[0]);
   }
+  // Transparency: push the live score / bias / momentum into the AI card's
+  // hidden math console so the BUY CE / BUY PE logic is auditable in real time.
+  function updateMathConsole() {
+    const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+    const signed = value => (Number.isFinite(value) ? `${value >= 0 ? '+' : ''}${value.toFixed(1)}%` : '--');
+    setText('math-score', Number.isFinite(currentLiveScore) ? `${Math.round(currentLiveScore)}` : '--');
+    setText('math-bias', signed(currentBias));
+    setText('math-momentum', signed(currentMomentum));
+  }
+
+  function renderAdvancedMetrics(data) {
+    if (!data || typeof data !== 'object') return;
+    const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+    const signed = (value, suffix = '') => {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return '--';
+      return `${n >= 0 ? '+' : ''}${n.toFixed(1)}${suffix}`;
+    };
+    // Raw advanced-quant diagnostics pushed by the backend at the 1 Hz cadence.
+    setText('math-delta-wt', signed(data.delta_wt_impact));
+    setText('math-iv-skew', signed(data.iv_skew_est, '%'));
+    setText('math-gamma-boost', signed(data.gamma_boost_val));
+  }
   function updateAITrades() {
     const spot = Number.isFinite(currentSpot) ? currentSpot : 0;
     const callWall = aiParsePrice(document.getElementById('weekly-call-wall'));
@@ -748,9 +790,11 @@
     };
     render('ai-mom', aEntry, aSl, aTarget);
     render('ai-sr', bEntry, bSl, bTarget);
+    // Transparency: mirror the live math driving this card into the debug console.
+    updateMathConsole();
   }
 
-  async function refreshOptions() { try { const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); loadedExpiry = data.expiry_date || null; updateSpotPrice(data); allRows = Array.isArray(data.option_chain) ? data.option_chain.sort((a, b) => number(a.strike) - number(b.strike)) : []; populateExpiry(); updateSentiment(allRows); renderRows(); updateScalperPlayground(); updateAITrades(); synced.textContent = `Synced ${new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })}`; } catch (error) { console.warn('Option-chain fetch failed:', error); } }
+  async function refreshOptions() { try { const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); loadedExpiry = data.expiry_date || null; updateSpotPrice(data); allRows = Array.isArray(data.option_chain) ? data.option_chain.sort((a, b) => number(a.strike) - number(b.strike)) : []; populateExpiry(); updateSentiment(allRows); renderRows(); updateScalperPlayground(); updateAITrades(); renderAdvancedMetrics(data); synced.textContent = `Synced ${new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })}`; } catch (error) { console.warn('Option-chain fetch failed:', error); } }
   async function refreshGamma() { try { const response = await fetch('/gamma/status/', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); const status = data?.status || data; if (status?.last_profile) renderProfile(status.last_profile); if (Array.isArray(status?.gamma_alerts)) status.gamma_alerts.forEach(renderSignal); if (status?.last_signal != null) renderSignal(status.last_signal); } catch (error) { console.warn('Gamma status fetch failed:', error); } }
 
   function updatePreopen(data) {
@@ -1039,6 +1083,17 @@
       const willShow = wrap.classList.contains('hidden');
       wrap.classList.toggle('hidden', !willShow);
       toggleBtn.setAttribute('aria-expanded', String(willShow));
+    });
+  }
+
+  // ---- "MATH" toggle for the AI card's raw-calculation debug console ----
+  const mathBtn = document.getElementById('math-toggle');
+  const mathConsole = document.getElementById('math-console');
+  if (mathBtn && mathConsole) {
+    mathBtn.addEventListener('click', () => {
+      const willShow = mathConsole.classList.contains('hidden');
+      mathConsole.classList.toggle('hidden', !willShow);
+      mathBtn.setAttribute('aria-expanded', String(willShow));
     });
   }
 })();

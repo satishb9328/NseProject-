@@ -164,9 +164,9 @@
           <span class="nav-label">Queue Ticks</span>
         </a>
 
-        <a href="#performance" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-slate-100 hover:bg-ink-800/70 transition-all duration-200">
+        <a href="{% url 'trend_setups' %}" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium {% if request.resolver_match.url_name == 'trend_setups' %}bg-ink-800 text-neon-green border-l-2 border-l-neon-green{% else %}text-slate-400 hover:text-slate-100 hover:bg-ink-800/70{% endif %} transition-all duration-200">
           <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/></svg>
-          <span class="nav-label">Order Flow</span>
+          <span class="nav-label">Trend Setups</span>
         </a>
 
         <a href="#performance" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-slate-100 hover:bg-ink-800/70 transition-all duration-200">

@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-11T16:00:29.726741+05:30",
+  "updated_at": "2026-09-12T18:38:11.347726+05:30",
   "expiry_date": "2026-09-15",
   "spot_price": 23398.1,
   "underlying_ltp": 23398.1,
@@ -7,17 +7,17 @@
   "index_ltp": 23398.1,
   "nifty_ltp": 23398.1,
   "spot_source": "index_tick_ltp",
-  "spot_updated_at": "2026-09-11T15:59:59.979449+05:30",
+  "spot_updated_at": "2026-09-12T18:37:41.781846+05:30",
   "poi_source": "upstox_option_chain_prev_oi",
-  "poi_updated_at": "2026-09-11T16:41:59.942159+05:30",
-  "poi_instruments": 182,
+  "poi_updated_at": "2026-09-13T21:37:21.483244+05:30",
+  "poi_instruments": 184,
   "restored_from_disk": true,
   "restored_instruments": 183,
-  "restored_snapshot_updated_at": "2026-09-10T21:45:25.089716+05:30",
-  "feed_connected": true,
-  "feed_status": "stale_no_ticks",
-  "last_tick_at": "2026-09-11T15:59:59.979449+05:30",
-  "seconds_since_last_tick": 2623.23,
+  "restored_snapshot_updated_at": "2026-09-11T16:00:29.726741+05:30",
+  "feed_connected": false,
+  "feed_status": "disconnected:closed",
+  "last_tick_at": "2026-09-12T18:37:41.766176+05:30",
+  "seconds_since_last_tick": 144297.86,
   "stale": true,
   "instrument_data": {
     "NSE_FO|47358": {
@@ -26,7 +26,7 @@
       "tradingsymbol": "NIFTY2691524850PE",
       "expiry": "2026-09-15",
       "ltp": 629.7,
-      "latest_tick_at": "2026-09-11T15:51:55.314695+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.766176+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -79,7 +79,7 @@
       "poi": 2881450.0,
       "coi": -1259050.0,
       "coi_pct": -43.7,
-      "latest_tick_at": "2026-09-11T15:51:55.324868+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -172,7 +172,7 @@
       "coi": -452075.0,
       "coi_pct": -10.69,
       "iv": 29.296875,
-      "latest_tick_at": "2026-09-11T15:51:55.324868+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -267,7 +267,7 @@
       "coi": 188295575.0,
       "coi_pct": 84.82,
       "iv": 9.0179443359375,
-      "latest_tick_at": "2026-09-11T15:51:55.324868+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -362,7 +362,7 @@
       "poi": 13739700.0,
       "coi": -4394000.0,
       "coi_pct": -31.98,
-      "latest_tick_at": "2026-09-11T15:51:55.324868+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -455,7 +455,7 @@
       "coi": -39512200.0,
       "coi_pct": -31.43,
       "iv": 14.404296875,
-      "latest_tick_at": "2026-09-11T15:51:55.326871+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -547,7 +547,7 @@
       "coi": 4524975.0,
       "coi_pct": 8.57,
       "iv": 23.0712890625,
-      "latest_tick_at": "2026-09-11T15:51:55.324868+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -641,7 +641,7 @@
       "poi": 1584375.0,
       "coi": -270400.0,
       "coi_pct": -17.07,
-      "latest_tick_at": "2026-09-11T15:51:55.326871+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -732,7 +732,7 @@
       "coi": -57016375.0,
       "coi_pct": -21.63,
       "iv": 18.310546875,
-      "latest_tick_at": "2026-09-11T15:51:55.326871+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -826,7 +826,7 @@
       "poi": 27652625.0,
       "coi": -6958575.0,
       "coi_pct": -25.16,
-      "latest_tick_at": "2026-09-11T15:51:55.326871+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -919,7 +919,7 @@
       "coi": 3739125.0,
       "coi_pct": 150.0,
       "iv": 22.308349609375,
-      "latest_tick_at": "2026-09-11T15:51:55.326871+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -1015,7 +1015,7 @@
       "coi": -6557200.0,
       "coi_pct": -31.69,
       "iv": 12.63427734375,
-      "latest_tick_at": "2026-09-11T15:51:55.326871+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -1107,7 +1107,7 @@
       "coi": -62614500.0,
       "coi_pct": -64.09,
       "iv": 25.390625,
-      "latest_tick_at": "2026-09-11T15:51:55.326871+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -1202,7 +1202,7 @@
       "coi": -498550.0,
       "coi_pct": -1.84,
       "iv": 35.15625,
-      "latest_tick_at": "2026-09-11T15:51:55.326871+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -1291,7 +1291,7 @@
       "tradingsymbol": "NIFTY2691522350CE",
       "expiry": "2026-09-15",
       "ltp": 2265.3,
-      "latest_tick_at": "2026-09-11T15:51:55.326871+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -1352,7 +1352,7 @@
       "tradingsymbol": "NIFTY2691522750CE",
       "expiry": "2026-09-15",
       "ltp": 715.35,
-      "latest_tick_at": "2026-09-11T15:51:55.326871+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -1454,7 +1454,7 @@
       "coi": 502775.0,
       "coi_pct": 13.45,
       "iv": 32.2265625,
-      "latest_tick_at": "2026-09-11T15:51:55.326871+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -1549,7 +1549,7 @@
       "coi": -51418250.0,
       "coi_pct": -15.79,
       "iv": 11.7950439453125,
-      "latest_tick_at": "2026-09-11T15:51:55.326871+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -1639,7 +1639,7 @@
       "tradingsymbol": "NIFTY2691526150PE",
       "expiry": "2026-09-15",
       "ltp": 1603.05,
-      "latest_tick_at": "2026-09-11T15:51:55.326871+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -1692,7 +1692,7 @@
       "poi": 253500.0,
       "coi": 0.0,
       "coi_pct": 0.0,
-      "latest_tick_at": "2026-09-11T15:51:55.326871+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -1757,7 +1757,7 @@
       "poi": 3405350.0,
       "coi": -494325.0,
       "coi_pct": -14.52,
-      "latest_tick_at": "2026-09-11T15:51:55.326871+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -1850,7 +1850,7 @@
       "coi": 89185525.0,
       "coi_pct": 16.92,
       "iv": 18.61572265625,
-      "latest_tick_at": "2026-09-11T15:51:55.326871+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -1946,7 +1946,7 @@
       "coi": 3020875.0,
       "coi_pct": 13.59,
       "iv": 19.2413330078125,
-      "latest_tick_at": "2026-09-11T15:51:55.326871+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -2042,7 +2042,7 @@
       "coi": -17808375.0,
       "coi_pct": -34.13,
       "iv": 4.150390625,
-      "latest_tick_at": "2026-09-11T15:51:55.328874+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -2134,7 +2134,7 @@
       "coi": 6223425.0,
       "coi_pct": 15.26,
       "iv": 24.4140625,
-      "latest_tick_at": "2026-09-11T15:51:55.328874+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -2228,7 +2228,7 @@
       "poi": 494325.0,
       "coi": -76050.0,
       "coi_pct": -15.38,
-      "latest_tick_at": "2026-09-11T15:51:55.328874+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -2314,7 +2314,7 @@
       "coi": -85835100.0,
       "coi_pct": -61.05,
       "iv": 25.390625,
-      "latest_tick_at": "2026-09-11T15:51:55.328874+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -2408,7 +2408,7 @@
       "poi": 42250.0,
       "coi": -8450.0,
       "coi_pct": -20.0,
-      "latest_tick_at": "2026-09-11T15:51:55.328874+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -2473,7 +2473,7 @@
       "coi": 17022525.0,
       "coi_pct": 5.5,
       "iv": 10.7421875,
-      "latest_tick_at": "2026-09-11T15:51:55.328874+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -2569,7 +2569,7 @@
       "coi": -31028400.0,
       "coi_pct": -51.97,
       "iv": 3.90625,
-      "latest_tick_at": "2026-09-11T15:51:55.328874+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -2661,7 +2661,7 @@
       "coi": 304200.0,
       "coi_pct": 327.27,
       "iv": 27.923583984375,
-      "latest_tick_at": "2026-09-11T15:51:55.328874+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -2755,7 +2755,7 @@
       "coi": 289311100.0,
       "coi_pct": 60.21,
       "iv": 10.7574462890625,
-      "latest_tick_at": "2026-09-11T15:51:55.328874+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -2851,7 +2851,7 @@
       "coi": -123657300.0,
       "coi_pct": -30.46,
       "iv": 6.89697265625,
-      "latest_tick_at": "2026-09-11T15:51:55.328874+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -2942,7 +2942,7 @@
       "expiry": "2026-09-15",
       "ltp": 1062.75,
       "iv": 33.935546875,
-      "latest_tick_at": "2026-09-11T15:51:55.328874+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -3042,7 +3042,7 @@
       "poi": 8564075.0,
       "coi": -3054675.0,
       "coi_pct": -35.67,
-      "latest_tick_at": "2026-09-11T15:51:55.328874+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -3129,7 +3129,7 @@
       "tradingsymbol": "NIFTY2691525850PE",
       "expiry": "2026-09-15",
       "ltp": 1345.95,
-      "latest_tick_at": "2026-09-11T15:51:55.328874+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -3188,7 +3188,7 @@
       "coi": -28746900.0,
       "coi_pct": -28.39,
       "iv": 13.00048828125,
-      "latest_tick_at": "2026-09-11T15:51:55.330618+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -3280,7 +3280,7 @@
       "coi": 88517975.0,
       "coi_pct": 98.51,
       "iv": 20.751953125,
-      "latest_tick_at": "2026-09-11T15:51:55.328874+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -3376,7 +3376,7 @@
       "coi": -3219450.0,
       "coi_pct": -29.82,
       "iv": 11.3525390625,
-      "latest_tick_at": "2026-09-11T15:51:55.328874+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -3467,7 +3467,7 @@
       "poi": 33800.0,
       "coi": 0.0,
       "coi_pct": 0.0,
-      "latest_tick_at": "2026-09-11T15:51:55.330618+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -3550,7 +3550,7 @@
       "coi": -114265125.0,
       "coi_pct": -25.4,
       "iv": 15.9912109375,
-      "latest_tick_at": "2026-09-11T15:51:55.330618+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -3646,7 +3646,7 @@
       "coi": 78779350.0,
       "coi_pct": 613.56,
       "iv": 14.8162841796875,
-      "latest_tick_at": "2026-09-11T15:51:55.328874+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -3736,7 +3736,7 @@
       "tradingsymbol": "NIFTY2691525150PE",
       "expiry": "2026-09-15",
       "ltp": 1585.0,
-      "latest_tick_at": "2026-09-11T15:51:55.330618+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -3808,7 +3808,7 @@
       "coi": -3802500.0,
       "coi_pct": -3.14,
       "iv": 14.2822265625,
-      "latest_tick_at": "2026-09-11T15:51:55.330618+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -3903,7 +3903,7 @@
       "poi": 6117800.0,
       "coi": -2213900.0,
       "coi_pct": -36.19,
-      "latest_tick_at": "2026-09-11T15:51:55.330618+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -3996,7 +3996,7 @@
       "coi": -45313125.0,
       "coi_pct": -10.58,
       "iv": 12.6953125,
-      "latest_tick_at": "2026-09-11T15:51:55.330618+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -4086,7 +4086,7 @@
       "tradingsymbol": "NIFTY2691526100PE",
       "expiry": "2026-09-15",
       "ltp": 1559.2,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -4137,7 +4137,7 @@
       "tradingsymbol": "NIFTY2691522250CE",
       "expiry": "2026-09-15",
       "ltp": 2361.8,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -4206,7 +4206,7 @@
       "coi": -16304275.0,
       "coi_pct": -40.81,
       "iv": 23.4375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -4295,7 +4295,7 @@
       "tradingsymbol": "NIFTY2691526050PE",
       "expiry": "2026-09-15",
       "ltp": 1515.75,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -4340,7 +4340,7 @@
       "tradingsymbol": "NIFTY2691525750PE",
       "expiry": "2026-09-15",
       "ltp": 1263.75,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -4393,7 +4393,7 @@
       "poi": 811200.0,
       "coi": -240825.0,
       "coi_pct": -29.69,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -4486,7 +4486,7 @@
       "coi": -3367325.0,
       "coi_pct": -5.13,
       "iv": 19.53125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -4575,7 +4575,7 @@
       "tradingsymbol": "NIFTY2691522550CE",
       "expiry": "2026-09-15",
       "ltp": 2074.25,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -4637,7 +4637,7 @@
       "coi": 46314450.0,
       "coi_pct": 110.92,
       "iv": 16.6015625,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -4733,7 +4733,7 @@
       "coi": 22616425.0,
       "coi_pct": 6.85,
       "iv": 9.8876953125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -4829,7 +4829,7 @@
       "coi": -35025250.0,
       "coi_pct": -43.33,
       "iv": 15.625,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -4924,7 +4924,7 @@
       "coi": 25907700.0,
       "coi_pct": 12.61,
       "iv": 7.8582763671875,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -5020,7 +5020,7 @@
       "coi": -51447825.0,
       "coi_pct": -23.87,
       "iv": 19.287109375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -5115,7 +5115,7 @@
       "coi": -43830150.0,
       "coi_pct": -8.33,
       "iv": 10.80322265625,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -5205,7 +5205,7 @@
       "tradingsymbol": "NIFTY2691522200CE",
       "expiry": "2026-09-15",
       "ltp": 2410.3,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -5266,7 +5266,7 @@
       "poi": 6667050.0,
       "coi": -1884350.0,
       "coi_pct": -28.26,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -5359,7 +5359,7 @@
       "coi": 139484150.0,
       "coi_pct": 36.9,
       "iv": 11.627197265625,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -5455,7 +5455,7 @@
       "coi": -126750.0,
       "coi_pct": -40.0,
       "iv": 35.491943359375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -5547,7 +5547,7 @@
       "coi": 88868650.0,
       "coi_pct": 14.97,
       "iv": 10.07080078125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -5637,7 +5637,7 @@
       "tradingsymbol": "NIFTY2691522850CE",
       "expiry": "2026-09-15",
       "ltp": 618.35,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -5739,7 +5739,7 @@
       "coi": -1352000.0,
       "coi_pct": -2.55,
       "iv": 24.4140625,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -5834,7 +5834,7 @@
       "coi": 123116500.0,
       "coi_pct": 203.7,
       "iv": 13.75579833984375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -5930,7 +5930,7 @@
       "coi": -144165450.0,
       "coi_pct": -67.49,
       "iv": 15.13671875,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -6026,7 +6026,7 @@
       "coi": 46939750.0,
       "coi_pct": 103.4,
       "iv": 17.7001953125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -6122,7 +6122,7 @@
       "coi": 517600525.0,
       "coi_pct": 127.56,
       "iv": 9.6588134765625,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -6218,7 +6218,7 @@
       "coi": -40952925.0,
       "coi_pct": -17.25,
       "iv": 10.345458984375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -6308,7 +6308,7 @@
       "tradingsymbol": "NIFTY2691522950CE",
       "expiry": "2026-09-15",
       "ltp": 516.35,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -6409,7 +6409,7 @@
       "poi": 215475.0,
       "coi": -8450.0,
       "coi_pct": -3.92,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -6482,7 +6482,7 @@
       "coi": 114075.0,
       "coi_pct": 3.46,
       "iv": 30.2734375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -6577,7 +6577,7 @@
       "coi": -54565875.0,
       "coi_pct": -7.52,
       "iv": 17.08984375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -6672,7 +6672,7 @@
       "coi": -6726200.0,
       "coi_pct": -17.69,
       "iv": 28.3203125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -6761,7 +6761,7 @@
       "tradingsymbol": "NIFTY2691525350PE",
       "expiry": "2026-09-15",
       "ltp": 956.1,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -6824,7 +6824,7 @@
       "tradingsymbol": "NIFTY2691522650CE",
       "expiry": "2026-09-15",
       "ltp": 780.0,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -6924,7 +6924,7 @@
       "coi": 142251525.0,
       "coi_pct": 22.96,
       "iv": 10.040283203125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -7020,7 +7020,7 @@
       "coi": -45401850.0,
       "coi_pct": -31.7,
       "iv": 4.638671875,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -7112,7 +7112,7 @@
       "coi": -4351750.0,
       "coi_pct": -19.46,
       "iv": 29.296875,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -7207,7 +7207,7 @@
       "coi": -120691350.0,
       "coi_pct": -73.75,
       "iv": 22.4609375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -7296,7 +7296,7 @@
       "tradingsymbol": "NIFTY2691522100CE",
       "expiry": "2026-09-15",
       "ltp": 2507.55,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -7361,7 +7361,7 @@
       "coi": -3853200.0,
       "coi_pct": -1.16,
       "iv": 10.162353515625,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -7457,7 +7457,7 @@
       "coi": -18454800.0,
       "coi_pct": -8.49,
       "iv": 11.23046875,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -7552,7 +7552,7 @@
       "poi": 2332200.0,
       "coi": -697125.0,
       "coi_pct": -29.89,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -7645,7 +7645,7 @@
       "coi": 72175675.0,
       "coi_pct": 13.9,
       "iv": 8.4228515625,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -7735,7 +7735,7 @@
       "tradingsymbol": "NIFTY2691525250PE",
       "expiry": "2026-09-15",
       "ltp": 1685.0,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -7802,7 +7802,7 @@
       "coi": 154077300.0,
       "coi_pct": 121.26,
       "iv": 11.1236572265625,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -7898,7 +7898,7 @@
       "coi": 46542600.0,
       "coi_pct": 105.67,
       "iv": 21.484375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -7988,7 +7988,7 @@
       "tradingsymbol": "NIFTY2691522050CE",
       "expiry": "2026-09-15",
       "ltp": 2556.4,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -8039,7 +8039,7 @@
       "tradingsymbol": "NIFTY2691526200PE",
       "expiry": "2026-09-15",
       "ltp": 1647.25,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -8096,7 +8096,7 @@
       "coi": -125098025.0,
       "coi_pct": -65.99,
       "iv": 20.99609375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -8191,7 +8191,7 @@
       "coi": -2311075.0,
       "coi_pct": -18.52,
       "iv": 34.1796875,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -8286,7 +8286,7 @@
       "coi": -42190850.0,
       "coi_pct": -38.62,
       "iv": 11.7645263671875,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -8377,7 +8377,7 @@
       "poi": 92950.0,
       "coi": -33800.0,
       "coi_pct": -36.36,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -8452,7 +8452,7 @@
       "coi": 11635650.0,
       "coi_pct": 24.72,
       "iv": 19.04296875,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -8548,7 +8548,7 @@
       "coi": -17098575.0,
       "coi_pct": -35.44,
       "iv": 21.97265625,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -8643,7 +8643,7 @@
       "coi": -139298250.0,
       "coi_pct": -18.3,
       "iv": 11.1846923828125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -8739,7 +8739,7 @@
       "coi": -121396925.0,
       "coi_pct": -51.34,
       "iv": 27.34375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -8833,7 +8833,7 @@
       "poi": 295750.0,
       "coi": -38025.0,
       "coi_pct": -12.86,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -8917,7 +8917,7 @@
       "coi": 8010600.0,
       "coi_pct": 5.62,
       "iv": 13.3056640625,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -9012,7 +9012,7 @@
       "poi": 1478750.0,
       "coi": -595725.0,
       "coi_pct": -40.29,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -9105,7 +9105,7 @@
       "coi": -54781350.0,
       "coi_pct": -37.19,
       "iv": 4.7607421875,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -9196,7 +9196,7 @@
       "poi": 4761575.0,
       "coi": -422500.0,
       "coi_pct": -8.87,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -9288,7 +9288,7 @@
       "poi": 1161875.0,
       "coi": -164775.0,
       "coi_pct": -14.18,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -9381,7 +9381,7 @@
       "coi": -31096000.0,
       "coi_pct": -34.06,
       "iv": 6.072998046875,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -9477,7 +9477,7 @@
       "coi": 153261875.0,
       "coi_pct": 22.21,
       "iv": 12.542724609375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -9573,7 +9573,7 @@
       "coi": -5800925.0,
       "coi_pct": -29.83,
       "iv": 27.34375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -9668,7 +9668,7 @@
       "coi": 43496375.0,
       "coi_pct": 23.31,
       "iv": 13.0615234375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -9764,7 +9764,7 @@
       "coi": -9421750.0,
       "coi_pct": -15.89,
       "iv": 20.5078125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -9859,7 +9859,7 @@
       "coi": -583050.0,
       "coi_pct": -13.08,
       "iv": 31.25,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -9948,7 +9948,7 @@
       "tradingsymbol": "NIFTY2691522150CE",
       "expiry": "2026-09-15",
       "ltp": 2458.85,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -10015,7 +10015,7 @@
       "coi": 125997950.0,
       "coi_pct": 135.23,
       "iv": 14.190673828125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -10105,7 +10105,7 @@
       "tradingsymbol": "NIFTY2691525950PE",
       "expiry": "2026-09-15",
       "ltp": 1430.0,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -10164,7 +10164,7 @@
       "coi": -71216600.0,
       "coi_pct": -16.65,
       "iv": 13.5498046875,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -10260,7 +10260,7 @@
       "coi": 107454425.0,
       "coi_pct": 34.71,
       "iv": 14.46533203125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -10350,7 +10350,7 @@
       "tradingsymbol": "NIFTY2691523050CE",
       "expiry": "2026-09-15",
       "ltp": 412.9,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -10452,7 +10452,7 @@
       "coi": 52001300.0,
       "coi_pct": 220.14,
       "iv": 15.594482421875,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -10547,7 +10547,7 @@
       "poi": 16202875.0,
       "coi": -3033550.0,
       "coi_pct": -18.72,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -10640,7 +10640,7 @@
       "coi": 414476725.0,
       "coi_pct": 342.35,
       "iv": 10.284423828125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -10736,7 +10736,7 @@
       "coi": -34961875.0,
       "coi_pct": -25.42,
       "iv": 32.2265625,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -10825,7 +10825,7 @@
       "tradingsymbol": "NIFTY2691525700PE",
       "expiry": "2026-09-15",
       "ltp": 1223.4,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -10876,7 +10876,7 @@
       "coi": 217490325.0,
       "coi_pct": 96.44,
       "iv": 13.641357421875,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -10972,7 +10972,7 @@
       "coi": 95311775.0,
       "coi_pct": 134.41,
       "iv": 15.31982421875,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -11067,7 +11067,7 @@
       "poi": 35629425.0,
       "coi": -8935875.0,
       "coi_pct": -25.08,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -11160,7 +11160,7 @@
       "coi": -195317525.0,
       "coi_pct": -35.16,
       "iv": 21.97265625,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -11255,7 +11255,7 @@
       "coi": 3274375.0,
       "coi_pct": 4.86,
       "iv": 18.5546875,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -11350,7 +11350,7 @@
       "coi": 857675.0,
       "coi_pct": 21.12,
       "iv": 33.203125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -11444,7 +11444,7 @@
       "poi": 38025.0,
       "coi": -4225.0,
       "coi_pct": -11.11,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -11508,7 +11508,7 @@
       "coi": 80718625.0,
       "coi_pct": 39.65,
       "iv": 21.97265625,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -11603,7 +11603,7 @@
       "coi": 21560175.0,
       "coi_pct": 80.45,
       "iv": 20.263671875,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -11698,7 +11698,7 @@
       "poi": 6523400.0,
       "coi": -2450500.0,
       "coi_pct": -37.56,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -11789,7 +11789,7 @@
       "coi": -10330125.0,
       "coi_pct": -1.93,
       "iv": 10.43701171875,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -11885,7 +11885,7 @@
       "coi": 35789975.0,
       "coi_pct": 20.54,
       "iv": 12.0086669921875,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -11981,7 +11981,7 @@
       "coi": 14081925.0,
       "coi_pct": 149.39,
       "iv": 17.578125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -12077,7 +12077,7 @@
       "coi": -6007950.0,
       "coi_pct": -25.6,
       "iv": 27.83203125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -12172,7 +12172,7 @@
       "coi": -160651400.0,
       "coi_pct": -62.74,
       "iv": 23.92578125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -12266,7 +12266,7 @@
       "poi": null,
       "coi": null,
       "coi_pct": null,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -12355,7 +12355,7 @@
       "coi": -13296075.0,
       "coi_pct": -27.07,
       "iv": 21.484375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -12450,7 +12450,7 @@
       "coi": -35312550.0,
       "coi_pct": -64.54,
       "iv": 32.2265625,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -12544,7 +12544,7 @@
       "poi": 9016150.0,
       "coi": -3008200.0,
       "coi_pct": -33.36,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -12637,7 +12637,7 @@
       "coi": -16304275.0,
       "coi_pct": -60.91,
       "iv": 25.87890625,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -12732,7 +12732,7 @@
       "coi": 464750.0,
       "coi_pct": 0.27,
       "iv": 12.26806640625,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -12828,7 +12828,7 @@
       "coi": 80296125.0,
       "coi_pct": 50.72,
       "iv": 16.9677734375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -12924,7 +12924,7 @@
       "coi": 96397600.0,
       "coi_pct": 224.19,
       "iv": 13.09967041015625,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -13020,7 +13020,7 @@
       "coi": -50700.0,
       "coi_pct": -3.46,
       "iv": 31.18896484375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -13115,7 +13115,7 @@
       "poi": 35730825.0,
       "coi": -11813100.0,
       "coi_pct": -33.06,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -13207,7 +13207,7 @@
       "poi": 4225.0,
       "coi": 0.0,
       "coi_pct": 0.0,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -13287,7 +13287,7 @@
       "coi": 100009975.0,
       "coi_pct": 44.75,
       "iv": 19.71435546875,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -13377,7 +13377,7 @@
       "tradingsymbol": "NIFTY2691524950PE",
       "expiry": "2026-09-15",
       "ltp": 689.2,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -13440,7 +13440,7 @@
       "poi": 16900.0,
       "coi": 0.0,
       "coi_pct": 0.0,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -13519,7 +13519,7 @@
       "tradingsymbol": "NIFTY2691525900PE",
       "expiry": "2026-09-15",
       "ltp": 1387.75,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -13573,7 +13573,7 @@
       "coi": 1309750.0,
       "coi_pct": 88.32,
       "iv": 25.57373046875,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -13669,7 +13669,7 @@
       "coi": 54633475.0,
       "coi_pct": 14.74,
       "iv": 12.481689453125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -13765,7 +13765,7 @@
       "coi": -95941300.0,
       "coi_pct": -32.74,
       "iv": 20.01953125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -13860,7 +13860,7 @@
       "coi": -11006125.0,
       "coi_pct": -17.14,
       "iv": 30.2734375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -13954,7 +13954,7 @@
       "poi": 3130725.0,
       "coi": -625300.0,
       "coi_pct": -19.97,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -14047,7 +14047,7 @@
       "coi": 13591825.0,
       "coi_pct": 335.1,
       "iv": 16.91436767578125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -14143,7 +14143,7 @@
       "coi": -101590125.0,
       "coi_pct": -29.15,
       "iv": 14.6484375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -14239,7 +14239,7 @@
       "coi": 2915250.0,
       "coi_pct": 105.5,
       "iv": 24.688720703125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -14334,7 +14334,7 @@
       "poi": 105625.0,
       "coi": 0.0,
       "coi_pct": 0.0,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -14423,7 +14423,7 @@
       "coi": -2011100.0,
       "coi_pct": -24.74,
       "iv": 35.15625,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -14518,7 +14518,7 @@
       "coi": -64435475.0,
       "coi_pct": -24.63,
       "iv": 23.193359375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -14613,7 +14613,7 @@
       "coi": 152987250.0,
       "coi_pct": 88.5,
       "iv": 15.9912109375,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -14709,7 +14709,7 @@
       "coi": 6257225.0,
       "coi_pct": 0.69,
       "iv": 11.8408203125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -14805,7 +14805,7 @@
       "coi": -27158300.0,
       "coi_pct": -31.27,
       "iv": 17.578125,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -14894,7 +14894,7 @@
       "tradingsymbol": "NIFTY2691522450CE",
       "expiry": "2026-09-15",
       "ltp": 2169.4,
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -14959,7 +14959,7 @@
       "option_type": "PE",
       "tradingsymbol": "NIFTY2691521950PE",
       "expiry": "2026-09-15",
-      "latest_tick_at": "2026-09-11T15:51:55.324868+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -15054,7 +15054,7 @@
       "option_type": "PE",
       "tradingsymbol": "NIFTY2691522000PE",
       "expiry": "2026-09-15",
-      "latest_tick_at": "2026-09-11T15:51:55.326871+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -15149,7 +15149,7 @@
       "option_type": "CE",
       "tradingsymbol": "NIFTY2691521900CE",
       "expiry": "2026-09-15",
-      "latest_tick_at": "2026-09-11T15:51:55.326871+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -15210,7 +15210,7 @@
       "option_type": "PE",
       "tradingsymbol": "NIFTY2691521900PE",
       "expiry": "2026-09-15",
-      "latest_tick_at": "2026-09-11T15:51:55.328874+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -15305,7 +15305,7 @@
       "option_type": "CE",
       "tradingsymbol": "NIFTY2691521950CE",
       "expiry": "2026-09-15",
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -15363,7 +15363,7 @@
       "option_type": "CE",
       "tradingsymbol": "NIFTY2691522000CE",
       "expiry": "2026-09-15",
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -15457,7 +15457,7 @@
       "option_type": "CE",
       "tradingsymbol": "NIFTY2691521700CE",
       "expiry": "2026-09-15",
-      "latest_tick_at": "2026-09-11T15:51:55.326871+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -15505,7 +15505,7 @@
       "option_type": "CE",
       "tradingsymbol": "NIFTY2691521800CE",
       "expiry": "2026-09-15",
-      "latest_tick_at": "2026-09-11T15:51:55.328874+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -15566,7 +15566,7 @@
       "option_type": "PE",
       "tradingsymbol": "NIFTY2691521800PE",
       "expiry": "2026-09-15",
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -15661,7 +15661,7 @@
       "option_type": "PE",
       "tradingsymbol": "NIFTY2691521850PE",
       "expiry": "2026-09-15",
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -15756,7 +15756,7 @@
       "option_type": "PE",
       "tradingsymbol": "NIFTY2691521750PE",
       "expiry": "2026-09-15",
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -15851,7 +15851,7 @@
       "option_type": "CE",
       "tradingsymbol": "NIFTY2691521850CE",
       "expiry": "2026-09-15",
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -15909,7 +15909,7 @@
       "option_type": "PE",
       "tradingsymbol": "NIFTY2691521700PE",
       "expiry": "2026-09-15",
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -16004,7 +16004,7 @@
       "option_type": "CE",
       "tradingsymbol": "NIFTY2691521750CE",
       "expiry": "2026-09-15",
-      "latest_tick_at": "2026-09-11T15:51:55.331443+05:30",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
       "raw_sample": {
         "fullFeed": {
           "marketFF": {
@@ -16061,6 +16061,40 @@
         "requestMode": "full_d5"
       },
       "ltp": 2850.9
+    },
+    "NSE_FO|47116": {
+      "strike": 21650,
+      "option_type": "PE",
+      "tradingsymbol": "NIFTY2691521650PE",
+      "expiry": "2026-09-15",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
+      "raw_sample": {
+        "fullFeed": {
+          "marketFF": {
+            "ltpc": {},
+            "marketLevel": {},
+            "optionGreeks": {}
+          }
+        },
+        "requestMode": "full_d5"
+      }
+    },
+    "NSE_FO|47098": {
+      "strike": 21650,
+      "option_type": "CE",
+      "tradingsymbol": "NIFTY2691521650CE",
+      "expiry": "2026-09-15",
+      "latest_tick_at": "2026-09-12T18:37:41.781846+05:30",
+      "raw_sample": {
+        "fullFeed": {
+          "marketFF": {
+            "ltpc": {},
+            "marketLevel": {},
+            "optionGreeks": {}
+          }
+        },
+        "requestMode": "full_d5"
+      }
     }
   },
   "spot_instrument_key": "NSE_INDEX|Nifty 50",
@@ -16096,7 +16130,7 @@
     },
     "requestMode": "full_d5"
   },
-  "instrument_count": 183,
+  "instrument_count": 185,
   "foreign_expiry_instruments": 0,
-  "dumped_at": "2026-09-11T16:43:43.221096+05:30"
+  "dumped_at": "2026-09-14T10:42:42.567488+05:30"
 }

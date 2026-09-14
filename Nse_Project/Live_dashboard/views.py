@@ -1203,6 +1203,10 @@ def live_option_chain_api(request):
             "feed_status": "api_error",
             "stale": True,
             "seconds_since_last_tick": 0,
+            "delta_wt_impact": 0,
+            "gamma_boost_val": 0,
+            "iv_skew_est": 0,
+            "acceleration": 0,
             "strike_bounds": None,
             "option_chain": [],
             # Surfaced deliberately: the browser console/network tab then names the fault
@@ -1225,6 +1229,11 @@ def _build_live_option_chain_payload() -> dict:
         expiry_date=active_expiry,
     )
     chain = [_json_safe_row(row) for row in chain]
+
+    # Advanced-quant diagnostics, persisted by the feed worker's _refresh_market_state
+    # to the date-scoped Redis market_state key and read here so they refresh at the
+    # same 1 Hz cadence as the option chain itself.
+    market_state = _read_market_state_for_today()
 
     # Live index spot. This is what the dashboard polls for the SPOT readout, so it
     # MUST be part of this response — previously it was written to
@@ -1256,6 +1265,11 @@ def _build_live_option_chain_payload() -> dict:
         "feed_status": _json_safe_value(data.get("feed_status")),
         "stale": bool(data.get("stale", False)),
         "seconds_since_last_tick": _json_safe_value(data.get("seconds_since_last_tick")),
+        # Advanced-quant diagnostics (Step 2) — refreshed on every 1 Hz poll.
+        "delta_wt_impact": _json_safe_value(market_state.get("delta_wt_impact")),
+        "gamma_boost_val": _json_safe_value(market_state.get("gamma_boost_val")),
+        "iv_skew_est": _json_safe_value(market_state.get("iv_skew_est")),
+        "acceleration": _json_safe_value(market_state.get("acceleration")),
         "strike_bounds": list(strike_bounds) if strike_bounds else None,
         "option_chain": chain,
         "error": None,

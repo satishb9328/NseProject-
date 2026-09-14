@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}Master Trend & Setup Scanner{% endblock %}
+
+{% block content %}
+  <!-- Page header -->
+  <div class="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div>
+      <p class="text-[11px] font-semibold uppercase tracking-[0.25em] text-neon-green">Swing Pipeline · Stage 2</p>
+      <h1 class="mt-2 font-display text-3xl font-bold text-slate-100 lg:text-4xl">Master Trend &amp; Setup Scanner</h1>
+      <p class="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400">
+        Fundamentally cleared candidates grouped into eight high-probability swing
+        setups, sourced from <span class="font-mono text-slate-300">master_trend_setups.csv</span>.
+      </p>
+    </div>
+    <div class="shrink-0 sm:text-right">
+      <p class="text-[11px] uppercase tracking-wider text-slate-500">Total Setups</p>
+      <p class="font-display text-4xl font-bold text-slate-100">{{ total }}</p>
+    </div>
+  </div>
+
+  <!-- Summary stat cards -->
+  <section class="mb-10 grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
+    {% for card in summary_cards %}
+    <div class="glass rounded-2xl border border-ink-700/60 p-5 transition-colors hover:border-ink-600">
+      <div class="flex items-center justify-between">
+        <span class="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+          <span class="h-2 w-2 rounded-full {{ card.dot }}"></span>
+          {{ card.category }}
+        </span>
+        <span class="font-mono text-[10px] text-slate-600">{{ card.count }} stk</span>
+      </div>
+      <p class="mt-3 font-display text-4xl font-bold {{ card.count_color }}">{{ card.count }}</p>
+      <p class="mt-2 text-xs leading-relaxed text-slate-500">{{ card.description }}</p>
+    </div>
+    {% endfor %}
+  </section>
+  <!-- Grouped tables -->
+  {% for section in sections %}
+  <section class="mb-10">
+    <div class="mb-1 flex flex-wrap items-center gap-3">
+      <h2 class="font-display text-xl font-semibold text-slate-100">{{ section.category }}</h2>
+      <span class="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold {{ section.badge }}">{{ section.count }}</span>
+    </div>
+    <p class="mb-4 text-sm text-slate-500">{{ section.description }}</p>
+
+    <div class="glass overflow-hidden rounded-2xl border border-ink-700/60">
+      {% if section.rows %}
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-ink-700/70 text-left text-[11px] uppercase tracking-wider text-slate-500">
+              <th class="px-4 py-3 font-semibold">Symbol</th>
+              <th class="px-4 py-3 text-right font-semibold">Close</th>
+              <th class="px-4 py-3 text-right font-semibold">52W Position</th>
+              <th class="px-4 py-3 font-semibold">Weekly EMA Signal</th>
+              <th class="px-4 py-3 text-right font-semibold">Momentum</th>
+              <th class="px-4 py-3 text-right font-semibold">Volume Dry Ratio</th>
+              <th class="px-4 py-3 text-right font-semibold">Weekly Vol Dry</th>
+              <th class="px-4 py-3 text-center font-semibold">Trend Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in section.rows %}
+            <tr class="border-b border-ink-800/60 transition-colors hover:bg-ink-800/50">
+              <td class="whitespace-nowrap px-4 py-3 font-semibold text-slate-100">{{ row.symbol }}</td>
+              <td class="whitespace-nowrap px-4 py-3 text-right font-mono text-slate-200">{{ row.close }}</td>
+              <td class="whitespace-nowrap px-4 py-3 text-right font-mono text-slate-300">{{ row.pos_52w }}</td>
+              <td class="whitespace-nowrap px-4 py-3">
+                {% if row.signal %}
+                <span class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold {{ row.signal_badge }}">{{ row.signal }}</span>
+                {% else %}
+                <span class="text-slate-600">—</span>
+                {% endif %}
+              </td>
+              <td class="whitespace-nowrap px-4 py-3 text-right font-mono text-slate-300">{{ row.momentum }}</td>
+              <td class="whitespace-nowrap px-4 py-3 text-right font-mono {{ row.vol_class }}">{{ row.vol_display }}</td>
+              <td class="whitespace-nowrap px-4 py-3 text-right font-mono {{ row.wvol_class }}">{{ row.wvol_display }}</td>
+              <td class="whitespace-nowrap px-4 py-3 text-center">
+                {% if row.uptrend %}
+                <span class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-neon-green/15 text-neon-green" title="Uptrend (50 EMA > 200 EMA)">✓</span>
+                {% else %}
+                <span class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-neon-red/15 text-neon-red" title="No uptrend">✕</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="px-4 py-12 text-center">
+        <p class="text-sm text-slate-500">No stocks matched this setup in the latest scan.</p>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+  {% endfor %}
+{% endblock %}
+

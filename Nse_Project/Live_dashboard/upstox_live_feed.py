@@ -6,6 +6,7 @@ import gzip
 import io
 import json
 import logging
+import math
 import os
 import pathlib
 import re
@@ -208,6 +209,10 @@ market_state = {
     "peak_bias": 0.0,
     "peak_momentum": 0.0,
     "peak_score": 50.0,
+    "delta_wt_impact": 0.0,
+    "gamma_boost_val": 0.0,
+    "iv_skew_est": 0.0,
+    "acceleration": 0.0,
 }
 # Peak-hold extremes needed to derive the single "current-side" peak the dashboard
 # shows (mirrors the frontend's peakMax/peakMin logic). Score is centred on 50.
@@ -222,6 +227,16 @@ _sentiment_extremes = {
 # Latest cumulative CVD, fed by CVDEngine's on_candle callback (a separate worker
 # thread) and folded into the Redis market state on the next publish beat.
 _latest_cumulative_cvd = 0.0
+# Advanced-quant sentiment state. ``_previous_total_coi`` drives the momentum
+# ACCELERATION (rate of change of total |COI| vs the last tick). The advanced
+# diagnostics are persisted to the Redis ``market_state`` by _refresh_market_state
+# so views.py can serve them at the 1 Hz option-chain cadence.
+_previous_total_coi = None
+# Advanced-quant tuning (score points on the 0-100 scale).
+_GAMMA_BOOST_STRENGTH = 25.0   # score points per unit of the placeholder Net-GEX proxy
+_GAMMA_BOOST_CAP = 12.0        # clamp the gamma boost to ±12 score points
+_ACCEL_GAIN = 0.5              # scale COI acceleration into momentum points
+_ACCEL_CAP = 15.0              # clamp the acceleration boost to ±15 momentum points
 
 state_lock = asyncio.Lock()
 live_state = {
@@ -1366,39 +1381,129 @@ def snapshot_for_publish() -> tuple[dict, str | None]:
     return payload, active_expiry
 
 
-def _compute_live_sentiment(instrument_data=None) -> tuple[float, float, float]:
-    """Derive bias / momentum / score from the live option chain.
+def _compute_live_sentiment_full(instrument_data=None) -> dict:
+    """Derive bias / momentum / score plus the advanced-quant diagnostics.
 
-    Mirrors the frontend's intraday ``updateSentiment`` so the persisted peaks
-    describe the same live market signal the dashboard renders.
+    Distance/Delta weighting: ATM and near-ITM strikes carry full weight, decaying
+    with a Gaussian kernel over distance from spot so deep-OTM strikes barely move
+    the aggregate. Falls back to equal weighting when spot / strike data is absent.
+
+    Momentum acceleration: the rate of change of total |COI| vs the previous tick is
+    folded into momentum so a sudden COI spike registers aggressively.
+
+    Gamma boost: a placeholder Net-GEX proxy (ATM-weighted put-call OI skew) nudges
+    the score bearish when negative and bullish when positive. The real Black-Scholes
+    GEX lives in the Gamma engine and can be plumbed through later.
+
+    Returns a dict of raw floats so the dashboard MATH console can show the maths.
     """
+    global _previous_total_coi
+
     if instrument_data is None:
         instrument_data = live_state.get("instrument_data", {})
+
+    spot = live_state.get("spot_price")
+    spot = float(spot) if isinstance(spot, (int, float)) and spot > 0 else 0.0
+
     call_oi = put_oi = call_coi = put_coi = 0.0
+    w_call_oi = w_put_oi = 0.0
+    weighted = False
+    call_iv_sum = put_iv_sum = 0.0
+    call_iv_n = put_iv_n = 0
+
     for item in instrument_data.values():
         if not isinstance(item, dict):
             continue
         side = (item.get("option_type") or "").upper()
         oi = item.get("oi")
+        oi = float(oi) if isinstance(oi, (int, float)) else 0.0
         coi = item.get("coi")
+        coi = float(coi) if isinstance(coi, (int, float)) else 0.0
+        strike = item.get("strike")
+        strike = float(strike) if isinstance(strike, (int, float)) else 0.0
+        iv = item.get("iv")
+        iv = float(iv) if isinstance(iv, (int, float)) else 0.0
+
+        weight = 1.0
+        if spot > 0 and strike > 0:
+            sigma = max(spot * 0.01, 1.0)  # 1% moneyness band
+            weight = math.exp(-0.5 * ((strike - spot) / sigma) ** 2)
+            weighted = True
+
         if side == "CE":
-            call_oi += oi if isinstance(oi, (int, float)) else 0.0
-            call_coi += coi if isinstance(coi, (int, float)) else 0.0
+            call_oi += oi
+            call_coi += coi
+            w_call_oi += oi * weight
+            if iv > 0:
+                call_iv_sum += iv
+                call_iv_n += 1
         elif side == "PE":
-            put_oi += oi if isinstance(oi, (int, float)) else 0.0
-            put_coi += coi if isinstance(coi, (int, float)) else 0.0
+            put_oi += oi
+            put_coi += coi
+            w_put_oi += oi * weight
+            if iv > 0:
+                put_iv_sum += iv
+                put_iv_n += 1
 
     total_oi = call_oi + put_oi
-    # Neutral baseline: an empty OR half-initialised chain (only CE or only PE OI
-    # present yet) is NOT a directional signal. Treating a one-sided chain as a
-    # bias of ±100 would pin the score to 0/100 during warm-up, which the dashboard
-    # misreads as an extreme bearish/bullish verdict.
+    total_coi = call_coi + put_coi
+
+    # Acceleration = rate of change of total |COI| vs the last tick.
+    acceleration = 0.0 if _previous_total_coi is None else total_coi - _previous_total_coi
+    _previous_total_coi = total_coi
+
+    # Neutral fallback: an empty OR half-initialised chain is NOT directional.
     if total_oi <= 0 or call_oi <= 0 or put_oi <= 0:
-        return 0.0, 0.0, 50.0
-    bias = ((put_oi - call_oi) / total_oi) * 100.0
-    momentum = ((call_coi + put_coi) / total_oi) * 100.0
-    score = max(0.0, min(100.0, 50.0 + bias * 0.5 + momentum))
-    return bias, momentum, score
+        return {
+            "bias": 0.0, "momentum": 0.0, "score": 50.0,
+            "delta_wt_impact": 0.0, "gamma_boost_val": 0.0,
+            "iv_skew_est": 0.0, "acceleration": round(acceleration, 2),
+        }
+
+    unweighted_bias = ((put_oi - call_oi) / total_oi) * 100.0
+    base_momentum = (total_coi / total_oi) * 100.0
+
+    # Distance-weighted bias (equal-weight fallback when no strike/spot data).
+    if weighted and (w_call_oi + w_put_oi) > 0:
+        weighted_bias = ((w_put_oi - w_call_oi) / (w_call_oi + w_put_oi)) * 100.0
+    else:
+        weighted_bias = unweighted_bias
+
+    # How many score points the distance weighting moved the bias (bias -> score *0.5).
+    delta_wt_impact = (weighted_bias - unweighted_bias) * 0.5
+
+    # Acceleration boost: a COI spike spikes momentum, clamped to a sane scale.
+    accel_boost = max(-_ACCEL_CAP, min(_ACCEL_CAP, (acceleration / total_oi) * 100.0 * _ACCEL_GAIN))
+    momentum = base_momentum + accel_boost
+
+    # Gamma boost from a placeholder Net-GEX proxy in [-1, 1]. Negative => bearish,
+    # positive => bullish (mirrors the Gamma engine's regime convention).
+    net_gex_proxy = 0.0
+    if weighted and (w_call_oi + w_put_oi) > 0:
+        net_gex_proxy = (w_put_oi - w_call_oi) / (w_call_oi + w_put_oi)
+    gamma_boost_val = max(-_GAMMA_BOOST_CAP, min(_GAMMA_BOOST_CAP, net_gex_proxy * _GAMMA_BOOST_STRENGTH))
+
+    # IV skew estimate: mean(put IV) - mean(call IV) in IV percentage points.
+    iv_skew_est = 0.0
+    if call_iv_n and put_iv_n:
+        iv_skew_est = (put_iv_sum / put_iv_n) - (call_iv_sum / call_iv_n)
+
+    score = max(0.0, min(100.0, 50.0 + weighted_bias * 0.5 + momentum + gamma_boost_val))
+    return {
+        "bias": weighted_bias,
+        "momentum": momentum,
+        "score": score,
+        "delta_wt_impact": round(delta_wt_impact, 4),
+        "gamma_boost_val": round(gamma_boost_val, 4),
+        "iv_skew_est": round(iv_skew_est, 4),
+        "acceleration": round(acceleration, 2),
+    }
+
+
+def _compute_live_sentiment(instrument_data=None) -> tuple[float, float, float]:
+    """Backward-compatible ``(bias, momentum, score)`` view of the live sentiment."""
+    result = _compute_live_sentiment_full(instrument_data)
+    return result["bias"], result["momentum"], result["score"]
 
 
 def _on_cvd_candle(payload: dict) -> None:
@@ -1413,7 +1518,8 @@ def _on_cvd_candle(payload: dict) -> None:
 
 def _refresh_market_state(instrument_data=None) -> None:
     """Fold the latest CVD + live sentiment peaks into the in-memory market state."""
-    bias, momentum, score = _compute_live_sentiment(instrument_data)
+    sentiment = _compute_live_sentiment_full(instrument_data)
+    bias, momentum, score = sentiment["bias"], sentiment["momentum"], sentiment["score"]
 
     ex = _sentiment_extremes
     ex["bias_max"] = max(ex["bias_max"], bias)
@@ -1427,6 +1533,11 @@ def _refresh_market_state(instrument_data=None) -> None:
     market_state["peak_bias"] = ex["bias_max"] if bias >= 0 else ex["bias_min"]
     market_state["peak_momentum"] = ex["mom_max"] if momentum >= 0 else ex["mom_min"]
     market_state["peak_score"] = ex["score_max"] if score >= 50 else ex["score_min"]
+    # Advanced-quant diagnostics, persisted to Redis so views.py can serve them at 1 Hz.
+    market_state["delta_wt_impact"] = sentiment["delta_wt_impact"]
+    market_state["gamma_boost_val"] = sentiment["gamma_boost_val"]
+    market_state["iv_skew_est"] = sentiment["iv_skew_est"]
+    market_state["acceleration"] = sentiment["acceleration"]
 
 
 def _persist_market_state() -> None:

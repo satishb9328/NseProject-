@@ -51,9 +51,9 @@ CACHE_DIR      = "fundamentals_cache"
 CACHE_TTL_DAYS = 20                                   # fundamentals are quarterly
 
 # Screening gates (fail-safe defaults: missing data => reject, never accept)
-SALES_GROWTH_MIN  = 15.0
-PROFIT_GROWTH_MIN = 20.0
-ROE_MIN           = 15.0
+SALES_GROWTH_MIN  = 10.0
+PROFIT_GROWTH_MIN = 15.0
+ROE_MIN           = 10.0
 DE_MAX            = 1.0
 TURNAROUND_SENTINEL = 999.0                           # loss -> profit marker
 
@@ -284,6 +284,8 @@ class IndianStockScreener:
     # ── the screen ─────────────────────────────────────────────────────────────
     def passes(self, p: StockProfile) -> bool:
         """Sector-aware gates. Missing data fails safely (NaN D/E, 0 growth...)."""
+        if p.current_price >= 2000:                          # swing-friendly price cap
+            return False
         if p.qtr_profit_growth < PROFIT_GROWTH_MIN:          # sentinel 999 passes
             return False
         if p.roe < ROE_MIN:
