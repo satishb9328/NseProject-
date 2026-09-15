@@ -22,7 +22,8 @@
   <!-- Summary stat cards -->
   <section class="mb-10 grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
     {% for card in summary_cards %}
-    <div class="glass rounded-2xl border border-ink-700/60 p-5 transition-colors hover:border-ink-600">
+    <div role="button" tabindex="0" data-scroll-target="table-{{ card.category|slugify }}"
+         class="glass cursor-pointer rounded-2xl border border-ink-700/60 p-5 transition-all duration-200 hover:scale-[1.02] hover:border-ink-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neon-green/60">
       <div class="flex items-center justify-between">
         <span class="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
           <span class="h-2 w-2 rounded-full {{ card.dot }}"></span>
@@ -37,7 +38,7 @@
   </section>
   <!-- Grouped tables -->
   {% for section in sections %}
-  <section class="mb-10">
+  <section id="table-{{ section.category|slugify }}" class="mb-10 scroll-mt-24">
     <div class="mb-1 flex flex-wrap items-center gap-3">
       <h2 class="font-display text-xl font-semibold text-slate-100">{{ section.category }}</h2>
       <span class="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold {{ section.badge }}">{{ section.count }}</span>
@@ -96,5 +97,27 @@
     </div>
   </section>
   {% endfor %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (function () {
+    document.querySelectorAll('[data-scroll-target]').forEach(function (card) {
+      function scrollToTarget() {
+        var target = document.getElementById(card.getAttribute('data-scroll-target'));
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }
+      card.addEventListener('click', scrollToTarget);
+      card.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          scrollToTarget();
+        }
+      });
+    });
+  })();
+</script>
 {% endblock %}
 

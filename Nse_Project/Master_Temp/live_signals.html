@@ -7,8 +7,8 @@
   .option-chain-table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.25; text-align: center; }
   .option-chain-table th { white-space: nowrap; font-weight: 700; line-height: 1.25; text-transform: uppercase; }
   .option-chain-table td { white-space: nowrap; line-height: 1.25; }
-  .option-chain-table th.call-side, .option-chain-table td.call-side { background: rgba(248, 113, 113, .14); color: #fca5a5; }
-  .option-chain-table th.put-side, .option-chain-table td.put-side { background: rgba(34, 197, 94, .14); color: #86efac; }
+  .option-chain-table th.call-side, .option-chain-table td.call-side { background: rgba(56, 189, 248, .14); color: #7dd3fc; }
+  .option-chain-table th.put-side, .option-chain-table td.put-side { background: rgba(251, 146, 60, .14); color: #fdba74; }
   .option-chain-table th.strike-header, .option-chain-table td.strike-cell { background: rgba(148, 163, 184, .08); color: #cbd5e1; }
   .option-chain-table tr.atm-row td { background: rgba(56, 189, 248, .16); box-shadow: inset 0 0 0 1px rgba(56, 189, 248, .6); color: #e0f2fe; font-weight: 700; }
   .dominance-track { height: 3px; margin-top: 3px; overflow: hidden; border-radius: 999px; background: rgba(148, 163, 184, .18); }
@@ -90,10 +90,10 @@
   .gamma-alert-feed { scrollbar-width: thin; scrollbar-color: rgba(56, 189, 248, .45) rgba(7, 11, 20, .8); }
   /* ---- Volume Velocity (shares/sec) ---- */
   .option-chain-table td.vel-cell { font-variant-numeric: tabular-nums; color: #94a3b8; }
-  .option-chain-table td.vel-hot-call { color: #4ade80; font-weight: 800; background-color: rgba(34, 197, 94, .18); text-shadow: 0 0 6px rgba(74, 222, 128, .95), 0 0 12px rgba(74, 222, 128, .6); animation: vel-pulse-call 1s ease-in-out infinite; }
-  .option-chain-table td.vel-hot-put { color: #f87171; font-weight: 800; background-color: rgba(239, 68, 68, .18); text-shadow: 0 0 6px rgba(248, 113, 113, .95), 0 0 12px rgba(248, 113, 113, .6); animation: vel-pulse-put 1s ease-in-out infinite; }
-  @keyframes vel-pulse-call { 0%, 100% { box-shadow: inset 0 0 6px rgba(74, 222, 128, .35); } 50% { box-shadow: inset 0 0 16px rgba(74, 222, 128, .85); } }
-  @keyframes vel-pulse-put { 0%, 100% { box-shadow: inset 0 0 6px rgba(248, 113, 113, .35); } 50% { box-shadow: inset 0 0 16px rgba(248, 113, 113, .85); } }
+  .option-chain-table td.vel-hot-call { color: #22d3ee; font-weight: 800; background-color: rgba(34, 211, 238, .18); text-shadow: 0 0 6px rgba(34, 211, 238, .95), 0 0 12px rgba(34, 211, 238, .6); animation: vel-pulse-call 1s ease-in-out infinite; }
+  .option-chain-table td.vel-hot-put { color: #fb923c; font-weight: 800; background-color: rgba(251, 146, 60, .18); text-shadow: 0 0 6px rgba(251, 146, 60, .95), 0 0 12px rgba(251, 146, 60, .6); animation: vel-pulse-put 1s ease-in-out infinite; }
+  @keyframes vel-pulse-call { 0%, 100% { box-shadow: inset 0 0 6px rgba(34, 211, 238, .35); } 50% { box-shadow: inset 0 0 16px rgba(34, 211, 238, .85); } }
+  @keyframes vel-pulse-put { 0%, 100% { box-shadow: inset 0 0 6px rgba(251, 146, 60, .35); } 50% { box-shadow: inset 0 0 16px rgba(251, 146, 60, .85); } }
   @media (prefers-reduced-motion: reduce) { .option-chain-table td.vel-hot-call, .option-chain-table td.vel-hot-put { animation: none; } }
   /* ---- Gamma Flip scrolling warning (right-to-left ticker) ---- */
   .gamma-flip-warning { display: none; overflow: hidden; white-space: nowrap; }
@@ -111,10 +111,28 @@
   /* ---- Compact Options Chain (center column) ---- */
   .compact-chain-table { width: 100%; height: 100%; border-collapse: collapse; font-size: 10px; line-height: 1.25; text-align: center; }
   .compact-chain-table th, .compact-chain-table td { white-space: nowrap; padding: 4px 3px; }
-  .compact-chain-table th.call-side, .compact-chain-table td.call-side { color: #fca5a5; }
-  .compact-chain-table th.put-side, .compact-chain-table td.put-side { color: #86efac; }
+  .compact-chain-table th.call-side, .compact-chain-table td.call-side { color: #7dd3fc; }
+  .compact-chain-table th.put-side, .compact-chain-table td.put-side { color: #fdba74; }
   .compact-chain-table th.strike-header, .compact-chain-table td.strike-cell { color: #cbd5e1; }
   .compact-chain-table tr.atm-row td { background-color: rgba(6, 182, 212, 0.1); box-shadow: inset 0 0 0 1px rgba(56, 189, 248, .6); color: #e0f2fe; font-weight: 700; }
+
+  /* ---- High-Water Mark (peak-hold) COI% cell — pure CSS, zero-JS animation ---- */
+  .hwm-cell { position: relative; min-width: 60px; padding-bottom: 8px !important; }
+  .hwm-track { position: absolute; left: 0; right: 0; bottom: 1px; height: 4px; border-radius: 999px; background: rgba(148, 163, 184, .16); overflow: hidden; }
+  .hwm-fill { height: 100%; width: 0; border-radius: inherit; will-change: width; }
+  .hwm-fill.call { background: linear-gradient(90deg, rgba(34, 211, 238, .35), rgba(59, 130, 246, .9)); }
+  .hwm-fill.put  { background: linear-gradient(90deg, rgba(251, 191, 36, .35), rgba(249, 115, 22, .9)); }
+  .hwm-marker { position: absolute; bottom: 1px; height: 4px; width: 2px; transform: translateX(-50%); background: #fff; box-shadow: 0 0 4px #fff, 0 0 9px rgba(255, 255, 255, .85); z-index: 2; pointer-events: none; }
+  .hwm-text { position: relative; z-index: 3; text-shadow: 0 1px 2px rgba(2, 6, 23, .95), 0 0 6px rgba(2, 6, 23, .6); }
+
+  /* ---- Math Console: high-water mark mini-bars (neutral fill, neon-white peak) ---- */
+  .math-hwm { position: relative; display: inline-block; min-width: 56px; padding-bottom: 6px; text-align: right; }
+  .math-track { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; border-radius: 999px; background: rgba(148, 163, 184, .16); overflow: hidden; }
+  .math-fill { height: 100%; width: 0; border-radius: inherit; will-change: width; background: linear-gradient(90deg, rgba(148, 163, 184, .26), rgba(100, 116, 139, .62)); }
+  .math-fill.pos { background: linear-gradient(90deg, rgba(74, 222, 128, .35), rgba(34, 197, 94, .85)); }
+  .math-fill.neg { background: linear-gradient(90deg, rgba(248, 113, 113, .35), rgba(239, 68, 68, .85)); }
+  .math-marker { position: absolute; bottom: 0; height: 3px; width: 2px; transform: translateX(-50%); background: #fff; box-shadow: 0 0 4px #fff, 0 0 8px rgba(255, 255, 255, .8); z-index: 2; pointer-events: none; }
+  .math-text { position: relative; z-index: 3; text-shadow: 0 1px 2px rgba(2, 6, 23, .9); }
 </style>
 {% endblock %}
 
@@ -280,23 +298,23 @@
             </div>
           </div>
         </div>
-        <div id="math-console" class="hidden mt-3 rounded-lg border border-cyan-800/50 bg-black/50 p-2 font-mono text-[11px] leading-5">
+        <div id="math-console" class="hidden mt-3 min-h-[180px] rounded-lg border border-cyan-800/50 bg-black/50 p-3 font-mono text-[11px] leading-5">
           <div class="mb-1 flex items-center justify-between border-b border-slate-800 pb-1">
             <span class="uppercase tracking-wider text-cyan-400">⚙ Math Console</span>
             <span class="text-slate-600">live debug</span>
           </div>
-          <div class="space-y-0.5">
+          <div class="space-y-2">
             <div class="flex items-center justify-between"><span class="text-slate-500">Current Score</span><span id="math-score" class="text-cyan-300">--</span></div>
-            <div class="flex items-center justify-between"><span class="text-slate-500">Bias</span><span id="math-bias" class="text-emerald-300">--</span></div>
-            <div class="flex items-center justify-between"><span class="text-slate-500">Momentum</span><span id="math-momentum" class="text-emerald-300">--</span></div>
-            <div class="flex items-center justify-between"><span class="text-slate-500">[Delta Wt]</span><span id="math-delta-wt" class="text-cyan-300">--</span></div>
-            <div class="flex items-center justify-between"><span class="text-slate-500">[IV Skew]</span><span id="math-iv-skew" class="text-cyan-300">--</span></div>
-            <div class="flex items-center justify-between"><span class="text-slate-500">[Gamma Boost]</span><span id="math-gamma-boost" class="text-emerald-300">--</span></div>
+            <div class="flex items-center justify-between"><span class="text-slate-500">Bias</span><span id="math-bias" class="math-hwm text-emerald-300"><span class="math-track"><span class="math-fill"></span></span><span class="math-marker"></span><span class="math-text">--</span></span></div>
+            <div class="flex items-center justify-between"><span class="text-slate-500">Momentum</span><span id="math-momentum" class="math-hwm text-emerald-300"><span class="math-track"><span class="math-fill"></span></span><span class="math-marker"></span><span class="math-text">--</span></span></div>
+            <div class="flex items-center justify-between"><span class="text-slate-500">[Delta Wt]</span><span id="math-delta-wt" class="math-hwm text-cyan-300"><span class="math-track"><span class="math-fill"></span></span><span class="math-marker"></span><span class="math-text">--</span></span></div>
+            <div class="flex items-center justify-between"><span class="text-slate-500">[IV Skew]</span><span id="math-iv-skew" class="math-hwm text-cyan-300"><span class="math-track"><span class="math-fill"></span></span><span class="math-marker"></span><span class="math-text">--</span></span></div>
+            <div class="flex items-center justify-between"><span class="text-slate-500">[Gamma Boost]</span><span id="math-gamma-boost" class="math-hwm text-emerald-300"><span class="math-track"><span class="math-fill"></span></span><span class="math-marker"></span><span class="math-text">--</span></span></div>
           </div>
         </div>
-        <div class="mt-auto flex w-full justify-end gap-2 pt-3">
-          <button id="full-table-toggle" type="button" class="rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2 text-sm font-bold uppercase tracking-[.2em] text-cyan-300 transition hover:bg-slate-700/60" aria-controls="full-option-chain-wrap" aria-expanded="false">TABLE</button>
-          <button id="math-toggle" type="button" class="rounded-lg border border-slate-700 bg-slate-800/60 px-4 py-2 text-sm font-bold uppercase tracking-[.2em] text-emerald-300 transition hover:bg-slate-700/60" aria-controls="math-console" aria-expanded="false">MATH</button>
+        <div class="mt-auto flex w-full justify-end gap-1.5 pt-2">
+          <button id="full-table-toggle" type="button" class="rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1 text-xs font-bold uppercase tracking-[.12em] text-cyan-300 transition hover:bg-slate-700/60" aria-controls="full-option-chain-wrap" aria-expanded="false">TABLE</button>
+          <button id="math-toggle" type="button" class="rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1 text-xs font-bold uppercase tracking-[.12em] text-emerald-300 transition hover:bg-slate-700/60" aria-controls="math-console" aria-expanded="false">MATH</button>
         </div>
 
       </section>
@@ -317,7 +335,7 @@
       <div class="rounded-2xl glass">
         <table id="option-chain-table" class="option-chain-table min-w-[1000px] text-xs leading-snug">
           <thead><tr>
-            <th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL OI%</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL OI</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL VOL</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300" title="Call volume velocity in shares/sec over a rolling 3s window">CALL VEL</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL LTP</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL COI</th><th class="call-side border border-red-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-red-300">CALL COI%</th><th class="strike-header border border-slate-700 border-b-2 px-2 py-1 text-xs text-slate-300">STRIKE</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT COI%</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT COI</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT LTP</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300" title="Put volume velocity in shares/sec over a rolling 3s window">PUT VEL</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT VOL</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT OI</th><th class="put-side border border-emerald-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-emerald-300">PUT OI%</th>
+            <th class="call-side border border-sky-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-sky-300">CALL OI%</th><th class="call-side border border-sky-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-sky-300">CALL OI</th><th class="call-side border border-sky-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-sky-300">CALL VOL</th><th class="call-side border border-sky-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-sky-300" title="Call volume velocity in shares/sec over a rolling 3s window">CALL VEL</th><th class="call-side border border-sky-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-sky-300">CALL LTP</th><th class="call-side border border-sky-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-sky-300">CALL COI</th><th class="call-side border border-sky-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-sky-300">CALL COI%</th><th class="strike-header border border-slate-700 border-b-2 px-2 py-1 text-xs text-slate-300">STRIKE</th><th class="put-side border border-orange-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-orange-300">PUT COI%</th><th class="put-side border border-orange-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-orange-300">PUT COI</th><th class="put-side border border-orange-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-orange-300">PUT LTP</th><th class="put-side border border-orange-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-orange-300" title="Put volume velocity in shares/sec over a rolling 3s window">PUT VEL</th><th class="put-side border border-orange-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-orange-300">PUT VOL</th><th class="put-side border border-orange-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-orange-300">PUT OI</th><th class="put-side border border-orange-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-orange-300">PUT OI%</th>
           </tr></thead>
           <tbody id="live-options-tbody"><tr><td colspan="15" class="px-2 py-2 text-xs leading-snug text-slate-500">Loading live option chain...</td></tr></tbody>
         </table>
@@ -359,9 +377,9 @@
       <button id="scalper-playground-close" type="button" class="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-300 transition hover:border-slate-500 hover:text-white" aria-label="Close Scalper's Playground">Close [X]</button>
     </div>
     <div class="scalper-playground-track relative mt-5 h-56 rounded-xl border border-slate-800 px-3 py-4">
-      <div class="absolute inset-x-3 top-3 flex items-center justify-between rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs font-semibold text-red-300"><span>CALL WALL</span><span id="scalper-call-wall">24400</span></div>
+      <div class="absolute inset-x-3 top-3 flex items-center justify-between rounded-lg border border-sky-400/30 bg-sky-400/10 px-3 py-2 text-xs font-semibold text-sky-300"><span>CALL WALL</span><span id="scalper-call-wall">24400</span></div>
       <div class="scalper-playground-ball absolute left-1/2 h-4 w-4 -translate-x-1/2 rounded-full bg-cyan-300 shadow-[0_0_16px_rgba(103,232,249,.9)]" style="--scalper-ball-travel: 120px;" aria-label="NIFTY spot"></div>
-      <div class="absolute inset-x-3 bottom-3 flex items-center justify-between rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-xs font-semibold text-emerald-300"><span>PUT WALL</span><span id="scalper-put-wall">24200</span></div>
+      <div class="absolute inset-x-3 bottom-3 flex items-center justify-between rounded-lg border border-orange-400/30 bg-orange-400/10 px-3 py-2 text-xs font-semibold text-orange-300"><span>PUT WALL</span><span id="scalper-put-wall">24200</span></div>
       <span class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[10px] uppercase tracking-[.18em] text-slate-600">NIFTY <span id="scalper-spot">--</span></span>
     </div>
     <div class="mt-4 rounded-xl border border-rose-400/25 bg-rose-400/5 p-3">
@@ -589,18 +607,16 @@
       let classes = 'border border-slate-700 px-2 py-1 text-xs leading-snug font-medium text-slate-200 whitespace-nowrap';
       if ([4, 5, 9, 10].includes(index)) classes += ' font-semibold';
       if (index === STRIKE) classes += ' strike-cell font-bold';
-      if (index === 0 && number(row.call_oi_pct) > 55) classes += ' bg-red-900/40 text-red-300 font-bold';
-      if (index === PUT_OI_PCT && number(row.put_oi_pct) > 55) classes += ' bg-green-900/40 text-green-300 font-bold';
-      if ([5, 6].includes(index) && number(row.call_coi) > 0) classes += ' text-green-300';
-      if ([5, 6].includes(index) && number(row.call_coi) < 0) classes += ' text-red-300';
-      if ([8, 9].includes(index) && number(row.put_coi) > 0) classes += ' text-green-300';
-      if ([8, 9].includes(index) && number(row.put_coi) < 0) classes += ' text-red-300';
+      if (index === 0 && number(row.call_oi_pct) > 55) classes += ' bg-sky-900/40 text-sky-300 font-bold';
+      if (index === PUT_OI_PCT && number(row.put_oi_pct) > 55) classes += ' bg-orange-900/40 text-orange-300 font-bold';
+      if ([5, 6].includes(index)) classes += ' text-sky-300';
+      if ([8, 9].includes(index)) classes += ' text-orange-300';
       if (index === CALL_VEL) classes += ' vel-cell' + (velHot(row.call_velocity) ? ' vel-hot-call' : '');
       if (index === PUT_VEL) classes += ' vel-cell' + (velHot(row.put_velocity) ? ' vel-hot-put' : '');
       const td = cell(value, classes);
       if (index === CALL_VEL || index === PUT_VEL) { const exact = Number(index === CALL_VEL ? row.call_velocity : row.put_velocity); td.title = Number.isFinite(exact) && exact > 0 ? `${exact.toLocaleString('en-IN')} shares/sec` : 'No volume in the last 3s'; }
-      if (index === 0) addDominanceBar(td, row.call_oi_pct, '#f87171');
-      if (index === PUT_OI_PCT) addDominanceBar(td, row.put_oi_pct, '#4ade80');
+      if (index === 0) addDominanceBar(td, row.call_oi_pct, '#38bdf8');
+      if (index === PUT_OI_PCT) addDominanceBar(td, row.put_oi_pct, '#fb923c');
       tr.appendChild(td);
     });
     return tr;
@@ -699,26 +715,57 @@
   }
   // Transparency: push the live score / bias / momentum into the AI card's
   // hidden math console so the BUY CE / BUY PE logic is auditable in real time.
+  // ---- Math Console high-water marks (session peak per metric) ----
+  // Fixed 0–100% reference scales so the white marker never sticks at 100%.
+  const MATH_SCALES = { 'math-bias': 100, 'math-momentum': 100, 'math-delta-wt': 50, 'math-iv-skew': 20, 'math-gamma-boost': 10 };
+  const mathPeaks = {}; // element id -> peak magnitude (absolute strength from 0)
+
+  function renderMathHwm(id, rawValue, displayText) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const scale = MATH_SCALES[id] || 100;
+    const n = Number(rawValue);
+    const magnitude = Number.isFinite(n) ? Math.abs(n) : 0;
+    const peak = Math.max(mathPeaks[id] || 0, magnitude);
+    mathPeaks[id] = peak;
+
+    const text = el.querySelector('.math-text');
+    if (text) text.textContent = displayText;
+
+    const fill = el.querySelector('.math-fill');
+    if (fill) {
+      fill.style.width = `${(Math.min(magnitude, scale) / scale) * 100}%`;
+      fill.classList.toggle('pos', Number.isFinite(n) && n > 0);
+      fill.classList.toggle('neg', Number.isFinite(n) && n < 0);
+    }
+
+    const marker = el.querySelector('.math-marker');
+    if (marker) {
+      const markerPct = (Math.min(peak, scale) / scale) * 100;
+      marker.style.left = `${Math.min(99.5, Math.max(0.5, markerPct))}%`;
+      marker.style.opacity = peak > 0 ? '1' : '0';
+    }
+  }
+
   function updateMathConsole() {
     const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
     const signed = value => (Number.isFinite(value) ? `${value >= 0 ? '+' : ''}${value.toFixed(1)}%` : '--');
     setText('math-score', Number.isFinite(currentLiveScore) ? `${Math.round(currentLiveScore)}` : '--');
-    setText('math-bias', signed(currentBias));
-    setText('math-momentum', signed(currentMomentum));
+    renderMathHwm('math-bias', currentBias, signed(currentBias));
+    renderMathHwm('math-momentum', currentMomentum, signed(currentMomentum));
   }
 
   function renderAdvancedMetrics(data) {
     if (!data || typeof data !== 'object') return;
-    const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
     const signed = (value, suffix = '') => {
       const n = Number(value);
       if (!Number.isFinite(n)) return '--';
       return `${n >= 0 ? '+' : ''}${n.toFixed(1)}${suffix}`;
     };
     // Raw advanced-quant diagnostics pushed by the backend at the 1 Hz cadence.
-    setText('math-delta-wt', signed(data.delta_wt_impact));
-    setText('math-iv-skew', signed(data.iv_skew_est, '%'));
-    setText('math-gamma-boost', signed(data.gamma_boost_val));
+    renderMathHwm('math-delta-wt', data.delta_wt_impact, signed(data.delta_wt_impact));
+    renderMathHwm('math-iv-skew', data.iv_skew_est, signed(data.iv_skew_est, '%'));
+    renderMathHwm('math-gamma-boost', data.gamma_boost_val, signed(data.gamma_boost_val));
   }
   function updateAITrades() {
     const spot = Number.isFinite(currentSpot) ? currentSpot : 0;
@@ -1021,6 +1068,41 @@
       return `${n > 0 ? '+' : ''}${n.toFixed(1)}%`;
     };
 
+    // Session high-water mark (peak) per strike per side, keyed by strike price.
+    // Peaks persist across the 1 Hz re-renders so a dropping COI% leaves its marker behind.
+    const peakMap = new Map(); // strike -> { call, put }
+
+    // Clamp a magnitude ratio into a safe percentage for CSS width/left.
+    const pctWidth = (value, max) => {
+      if (!Number.isFinite(value) || !Number.isFinite(max) || value <= 0 || max <= 0) return 0;
+      return Math.min(100, (value / max) * 100);
+    };
+
+    // Bias-neutral COI% cell: background fill = current magnitude, 2px neon-white
+    // marker = session high-water mark (peak). Pure CSS; no JS animation in the loop.
+    function coiCell(text, side, current, peak, max) {
+      const td = document.createElement('td');
+      td.className = `${side}-side font-mono font-semibold hwm-cell text-[11px]`;
+      const track = document.createElement('div');
+      track.className = 'hwm-track';
+      const fill = document.createElement('div');
+      fill.className = `hwm-fill ${side}`;
+      fill.style.width = `${pctWidth(current, max)}%`;
+      const marker = document.createElement('div');
+      marker.className = 'hwm-marker';
+      const peakPct = pctWidth(peak, max);
+      marker.style.left = `${Math.min(99.5, Math.max(0.5, peakPct))}%`;
+      marker.style.opacity = peak > 0 ? '1' : '0';
+      const label = document.createElement('span');
+      label.className = 'hwm-text';
+      label.textContent = text;
+      track.appendChild(fill);
+      td.appendChild(track);
+      td.appendChild(marker);
+      td.appendChild(label);
+      return td;
+    }
+
     function compactCell(text, cls) {
       const td = document.createElement('td');
       td.className = `${cls} text-[11px]`;
@@ -1034,6 +1116,19 @@
         return;
       }
       const sorted = rows.slice().sort((a, b) => toNumber(a.strike) - toNumber(b.strike));
+
+      // Fold this tick into the session high-water marks and derive a stable,
+      // monotonic side scale (max peak magnitude) so the marker never jumps around.
+      let callMax = 0, putMax = 0;
+      sorted.forEach((row) => {
+        const strike = toNumber(row.strike);
+        const entry = peakMap.get(strike) || { call: 0, put: 0 };
+        entry.call = Math.max(entry.call, Math.abs(toNumber(row.call_coi_pct)));
+        entry.put = Math.max(entry.put, Math.abs(toNumber(row.put_coi_pct)));
+        peakMap.set(strike, entry);
+        if (entry.call > callMax) callMax = entry.call;
+        if (entry.put > putMax) putMax = entry.put;
+      });
       let atmIndex = Math.floor(sorted.length / 2);
       if (Number.isFinite(spot) && spot > 0) {
         atmIndex = sorted.reduce((best, row, i) =>
@@ -1046,13 +1141,15 @@
 
       const fragment = document.createDocumentFragment();
       windowRows.forEach((row) => {
+        const strike = toNumber(row.strike);
+        const peak = peakMap.get(strike) || { call: 0, put: 0 };
         const tr = document.createElement('tr');
-        if (toNumber(row.strike) === atmStrike) tr.className = 'atm-row';
-        tr.appendChild(compactCell(fmtCoi(row.call_coi_pct), 'call-side font-mono font-semibold'));
+        if (strike === atmStrike) tr.className = 'atm-row';
+        tr.appendChild(coiCell(fmtCoi(row.call_coi_pct), 'call', Math.abs(toNumber(row.call_coi_pct)), peak.call, callMax));
         tr.appendChild(compactCell(fmtLtp(row.call_ltp), 'call-side font-mono'));
         tr.appendChild(compactCell(fmtStrike(row.strike), 'strike-cell font-mono font-bold'));
         tr.appendChild(compactCell(fmtLtp(row.put_ltp), 'put-side font-mono'));
-        tr.appendChild(compactCell(fmtCoi(row.put_coi_pct), 'put-side font-mono font-semibold'));
+        tr.appendChild(coiCell(fmtCoi(row.put_coi_pct), 'put', Math.abs(toNumber(row.put_coi_pct)), peak.put, putMax));
         fragment.appendChild(tr);
       });
       compactBody.replaceChildren(fragment);
