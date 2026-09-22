@@ -350,11 +350,19 @@ def test_redis_publish_throttle() -> None:
 
     first_pub, first_set, second_pub, forced_pub = asyncio.run(scenario())
     check("50 rapid ticks -> 1 publish", first_pub, 1)
-    check("SET throttled with PUBLISH", first_set, 1)
+    # One publish writes BOTH the live option-chain key and the date-scoped market-state
+    # key, so the SET is throttled alongside the PUBLISH: 2 SETs for the single publish,
+    # not the 50 that per-tick writes would have produced.
+    check("SET throttled with PUBLISH", first_set, 2)
     check("after the interval -> 2 publishes", second_pub, 2)
     check("force bypasses the throttle -> 3", forced_pub, 3)
     check("channel used", fake_redis.publish.call_args[0][0], feed.REDIS_CHANNEL)
-    check("data key used", fake_redis.set.call_args[0][0], feed.REDIS_DATA_KEY)
+
+    # Both consumers are written on every publish: the option chain (live_options_data)
+    # and the persisted market-state snapshot (market_state:YYYY-MM-DD, the second SET).
+    set_keys = [call.args[0] for call in fake_redis.set.call_args_list]
+    check("live option chain key written", feed.REDIS_DATA_KEY in set_keys, True)
+    check("market-state key written", feed.market_state_key() in set_keys, True)
 
     # A Redis outage must not raise out of publish_live_state.
     async def failing():

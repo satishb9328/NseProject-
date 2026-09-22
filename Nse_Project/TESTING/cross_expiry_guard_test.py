@@ -300,12 +300,19 @@ def test_publish_only_active_expiry() -> None:
         return [call.args[0] for call in fake.set.call_args_list], fake.publish.call_args[0]
 
     keys, published = asyncio.run(publish_with(False))
-    check("default: exactly one SET", keys, [feed.REDIS_DATA_KEY])
+    # The primary key is written first; no namespaced mirror when the opt-in is off; then
+    # the date-scoped market-state snapshot (the second SET of every publish).
+    check("default: primary key written first", keys[0], feed.REDIS_DATA_KEY)
+    check("default: no namespaced mirror", f"{feed.REDIS_DATA_KEY}:{ACTIVE}" in keys, False)
+    check("default: market-state key written", feed.market_state_key() in keys, True)
     check("channel notified", published, (feed.REDIS_CHANNEL, "updated"))
 
     keys, _ = asyncio.run(publish_with(True))
-    check("namespaced mirror written first", keys,
-          [f"{feed.REDIS_DATA_KEY}:{ACTIVE}", feed.REDIS_DATA_KEY])
+    # The opt-in namespaced mirror is written FIRST, then the primary key, then the
+    # market-state snapshot.
+    check("namespaced mirror written first", keys[0], f"{feed.REDIS_DATA_KEY}:{ACTIVE}")
+    check("namespaced primary key follows", keys[1], feed.REDIS_DATA_KEY)
+    check("namespaced market-state key written", feed.market_state_key() in keys, True)
     feed._last_redis_publish_ts = 0.0
 
 

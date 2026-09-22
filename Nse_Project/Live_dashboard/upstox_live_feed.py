@@ -45,6 +45,9 @@ from Nse_Project.Live_dashboard.market_state import (
     market_state_key,
     save_market_state,
 )
+# Real Black-Scholes Gamma engine, reused read-only so the live score's gamma boost is
+# driven by the SAME Net GEX that powers the Day Gamma card (not the old OI-skew proxy).
+from Nse_Project.GAMMA import gamma_blast_engine as gamma_engine
 
 import pandas as pd
 import redis
@@ -209,10 +212,17 @@ market_state = {
     "peak_bias": 0.0,
     "peak_momentum": 0.0,
     "peak_score": 50.0,
+    # Authoritative current sentiment — the single source of truth the dashboard renders.
+    "bias": 0.0,
+    "momentum": 0.0,
+    "score": 50.0,
     "delta_wt_impact": 0.0,
     "gamma_boost_val": 0.0,
     "iv_skew_est": 0.0,
     "acceleration": 0.0,
+    # Real Black-Scholes Net GEX + its bounded conviction ratio (net_gex / gross_gex).
+    "net_gex": 0.0,
+    "net_gex_ratio": 0.0,
 }
 # Peak-hold extremes needed to derive the single "current-side" peak the dashboard
 # shows (mirrors the frontend's peakMax/peakMin logic). Score is centred on 50.
@@ -233,8 +243,13 @@ _latest_cumulative_cvd = 0.0
 # so views.py can serve them at the 1 Hz option-chain cadence.
 _previous_total_coi = None
 # Advanced-quant tuning (score points on the 0-100 scale).
-_GAMMA_BOOST_STRENGTH = 25.0   # score points per unit of the placeholder Net-GEX proxy
-_GAMMA_BOOST_CAP = 12.0        # clamp the gamma boost to ±12 score points
+# The gamma boost is now driven by the REAL Black-Scholes Net GEX from the downstream
+# Gamma engine (net_gex / gross_gex, bounded [-1, 1]) instead of the old OI-skew proxy.
+# STRENGTH scales that normalized ratio into score points; CAP bounds its influence so an
+# extreme negative-gamma structure can meaningfully counter momentum without killing an
+# explosive intraday scalp outright.
+_GAMMA_BOOST_STRENGTH = 20.0   # score points per unit of net_gex_ratio ([-1, 1])
+_GAMMA_BOOST_CAP = 20.0        # clamp the gamma boost to ±20 score points
 _ACCEL_GAIN = 0.5              # scale COI acceleration into momentum points
 _ACCEL_CAP = 15.0              # clamp the acceleration boost to ±15 momentum points
 
@@ -1381,6 +1396,53 @@ def snapshot_for_publish() -> tuple[dict, str | None]:
     return payload, active_expiry
 
 
+_gamma_processor_instance = None
+
+
+def _gamma_processor() -> gamma_engine.GammaProcessor:
+    """Return a shared GammaProcessor for the real-GEX computation."""
+    global _gamma_processor_instance
+    if _gamma_processor_instance is None:
+        _gamma_processor_instance = gamma_engine.GammaProcessor(gamma_engine.CONFIG["symbol"])
+    return _gamma_processor_instance
+
+
+def _real_net_gex(instrument_data=None, spot: float = 0.0) -> tuple[float, float]:
+    """Return the real ``(day_net_gex, net_gex_ratio)`` from the Black-Scholes Gamma engine.
+
+    Reuses the SAME ``normalize_live_payload`` + ``GammaProcessor.process_payload`` path the
+    downstream Gamma bot runs, so the value matches the Day Gamma card exactly (the
+    ``-54.06 Cr`` figure). ``net_gex_ratio`` is ``net_gex / gross_gex`` bounded in [-1, 1] —
+    a scale-invariant conviction measure safe to fold into the score.
+
+    Returns ``(0.0, 0.0)`` on any failure (no spot/expiry, empty chain, engine error) so the
+    score's neutral fallback is never disturbed by a GEX leg that cannot be priced.
+    """
+    if spot <= 0:
+        return 0.0, 0.0
+    expiry = active_expiry_iso()
+    if not expiry:
+        return 0.0, 0.0
+    try:
+        payload = {
+            "instrument_data": instrument_data or {},
+            "spot_price": spot,
+            "expiry_date": expiry,
+        }
+        normalized = gamma_engine.normalize_live_payload(payload)
+        if not normalized:
+            return 0.0, 0.0
+        profile = _gamma_processor().process_payload(normalized)
+        if not profile:
+            return 0.0, 0.0
+        day = profile.day_gamma
+        ratio = day.net_gex_ratio if math.isfinite(day.net_gex_ratio) else 0.0
+        return float(day.net_gex), max(-1.0, min(1.0, ratio))
+    except Exception:
+        logger.warning("Real GEX computation failed; gamma boost disabled.", exc_info=True)
+        return 0.0, 0.0
+
+
 def _compute_live_sentiment_full(instrument_data=None) -> dict:
     """Derive bias / momentum / score plus the advanced-quant diagnostics.
 
@@ -1391,9 +1453,10 @@ def _compute_live_sentiment_full(instrument_data=None) -> dict:
     Momentum acceleration: the rate of change of total |COI| vs the previous tick is
     folded into momentum so a sudden COI spike registers aggressively.
 
-    Gamma boost: a placeholder Net-GEX proxy (ATM-weighted put-call OI skew) nudges
-    the score bearish when negative and bullish when positive. The real Black-Scholes
-    GEX lives in the Gamma engine and can be plumbed through later.
+    Gamma boost: the REAL Black-Scholes Net GEX from the downstream Gamma engine
+    (net_gex / gross_gex, bounded [-1, 1]) nudges the score bearish when negative and
+    bullish when positive, clamped to ±_GAMMA_BOOST_CAP so heavy structure counters
+    momentum without killing explosive scalps.
 
     Returns a dict of raw floats so the dashboard MATH console can show the maths.
     """
@@ -1458,6 +1521,7 @@ def _compute_live_sentiment_full(instrument_data=None) -> dict:
             "bias": 0.0, "momentum": 0.0, "score": 50.0,
             "delta_wt_impact": 0.0, "gamma_boost_val": 0.0,
             "iv_skew_est": 0.0, "acceleration": round(acceleration, 2),
+            "net_gex": 0.0, "net_gex_ratio": 0.0,
         }
 
     unweighted_bias = ((put_oi - call_oi) / total_oi) * 100.0
@@ -1476,12 +1540,11 @@ def _compute_live_sentiment_full(instrument_data=None) -> dict:
     accel_boost = max(-_ACCEL_CAP, min(_ACCEL_CAP, (acceleration / total_oi) * 100.0 * _ACCEL_GAIN))
     momentum = base_momentum + accel_boost
 
-    # Gamma boost from a placeholder Net-GEX proxy in [-1, 1]. Negative => bearish,
-    # positive => bullish (mirrors the Gamma engine's regime convention).
-    net_gex_proxy = 0.0
-    if weighted and (w_call_oi + w_put_oi) > 0:
-        net_gex_proxy = (w_put_oi - w_call_oi) / (w_call_oi + w_put_oi)
-    gamma_boost_val = max(-_GAMMA_BOOST_CAP, min(_GAMMA_BOOST_CAP, net_gex_proxy * _GAMMA_BOOST_STRENGTH))
+    # Gamma boost from the REAL Black-Scholes Net GEX computed by the downstream Gamma
+    # engine (the same value driving the Day Gamma card). net_gex_ratio is bounded
+    # [-1, 1]: negative => bearish, positive => bullish.
+    net_gex, net_gex_ratio = _real_net_gex(instrument_data, spot)
+    gamma_boost_val = max(-_GAMMA_BOOST_CAP, min(_GAMMA_BOOST_CAP, net_gex_ratio * _GAMMA_BOOST_STRENGTH))
 
     # IV skew estimate: mean(put IV) - mean(call IV) in IV percentage points.
     iv_skew_est = 0.0
@@ -1497,6 +1560,8 @@ def _compute_live_sentiment_full(instrument_data=None) -> dict:
         "gamma_boost_val": round(gamma_boost_val, 4),
         "iv_skew_est": round(iv_skew_est, 4),
         "acceleration": round(acceleration, 2),
+        "net_gex": net_gex,
+        "net_gex_ratio": net_gex_ratio,
     }
 
 
@@ -1538,6 +1603,12 @@ def _refresh_market_state(instrument_data=None) -> None:
     market_state["gamma_boost_val"] = sentiment["gamma_boost_val"]
     market_state["iv_skew_est"] = sentiment["iv_skew_est"]
     market_state["acceleration"] = sentiment["acceleration"]
+    # Authoritative current sentiment — the single source of truth the dashboard renders.
+    market_state["bias"] = bias
+    market_state["momentum"] = momentum
+    market_state["score"] = score
+    market_state["net_gex"] = sentiment["net_gex"]
+    market_state["net_gex_ratio"] = sentiment["net_gex_ratio"]
 
 
 def _persist_market_state() -> None:

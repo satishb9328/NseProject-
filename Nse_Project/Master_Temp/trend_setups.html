@@ -64,7 +64,15 @@
           <tbody>
             {% for row in section.rows %}
             <tr class="border-b border-ink-800/60 transition-colors hover:bg-ink-800/50">
-              <td class="whitespace-nowrap px-4 py-3 font-semibold text-slate-100">{{ row.symbol }}</td>
+              <td class="whitespace-nowrap px-4 py-3 font-semibold text-slate-100">
+                {{ row.symbol }}
+                {% if row.is_hot %}
+                <span class="ml-2 text-[10px] font-bold text-orange-400 bg-orange-500/10 border border-orange-500/30 px-1.5 py-0.5 rounded shadow-sm">🔥 HOT</span>
+                {% endif %}
+                {% for signal in row.signals %}
+                <span class="ml-2 text-[10px] font-bold text-blue-600 bg-blue-100 border border-blue-300 px-1.5 py-0.5 rounded shadow-sm">{{ signal }}</span>
+                {% endfor %}
+              </td>
               <td class="whitespace-nowrap px-4 py-3 text-right font-mono text-slate-200">{{ row.close }}</td>
               <td class="whitespace-nowrap px-4 py-3 text-right font-mono text-slate-300">{{ row.pos_52w }}</td>
               <td class="whitespace-nowrap px-4 py-3">

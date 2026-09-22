@@ -33,12 +33,19 @@ DEFAULT_MARKET_STATE = {
     "peak_bias": 0.0,
     "peak_momentum": 0.0,
     "peak_score": 50.0,
+    # Authoritative current sentiment — the single source of truth the dashboard renders.
+    "bias": 0.0,
+    "momentum": 0.0,
+    "score": 50.0,
     # Advanced-quant diagnostics (Step 2): raw engine math surfaced to the MATH
     # console so it refreshes at the 1 Hz option-chain cadence, not the 2m CVD one.
     "delta_wt_impact": 0.0,
     "gamma_boost_val": 0.0,
     "iv_skew_est": 0.0,
     "acceleration": 0.0,
+    # Real Black-Scholes Net GEX + its bounded conviction ratio (net_gex / gross_gex).
+    "net_gex": 0.0,
+    "net_gex_ratio": 0.0,
 }
 
 

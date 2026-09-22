@@ -8,10 +8,24 @@ Tailwind-styled dashboard of the eight swing setups.
 from pathlib import Path
 
 import pandas as pd
+from django.core.cache import cache
 from django.shortcuts import render
+
+# MTF signal integration (data_engine + candlestick_scanner + chart_patterns all
+# live at the project root). Imported defensively so a missing dependency never
+# crashes the page — signal detection simply becomes a no-op.
+try:
+    from candlestick_scanner import scan_mtf_patterns
+    from data_engine import build_mtf_dataframe
+    from chart_patterns import detect_double_bottom
+except Exception:  # noqa: BLE001
+    scan_mtf_patterns = None
+    build_mtf_dataframe = None
+    detect_double_bottom = None
 
 BASE_DIR = Path(__file__).resolve().parent
 SETUPS_CSV = BASE_DIR / "master_trend_setups.csv"
+UNIVERSE_CSV = BASE_DIR.parent / "ind_nifty500list.csv"
 
 CATEGORY_ORDER = [
     "Bottom Fishing",
@@ -78,9 +92,15 @@ CATEGORY_META = {
 
 
 def _to_float(value):
-    """Coerce a CSV cell to float; None for missing/NaN values."""
+    """Coerce a CSV cell to float; None for missing/NaN values.
+
+    Tolerates percentage / formatted strings (``"75.0%"``, ``"1,234.5"``) so
+    thresholds like the 52W-position screen stay robust across CSV exports.
+    """
     if value is None:
         return None
+    if isinstance(value, str):
+        value = value.strip().replace(",", "").replace("%", "")
     try:
         f = float(value)
     except (TypeError, ValueError):
@@ -114,7 +134,108 @@ def _fmt(value, nd=2):
         return "—"
 
 
+# 🔥 HOT breakout-candidate thresholds — all three must hold for the badge.
+HOT_52W_POSITION_MIN = 75.0   # "52W Position" column (pct_above_52w_low) > 75%
+HOT_MOMENTUM_MIN = 50.0       # Momentum_Score > 50
+HOT_VOL_DRY_MAX = 0.75        # Volume_Dry_Ratio < 0.75
+
+
+# Frontend string mapping for the latest MTF candlestick signals.
+SIGNAL_LABELS = {
+    "hammer": "🔨 D-Hammer",
+    "bullish_engulfing": "📈 D-Engulf",
+    "fresh_golden_cross": "✨ Golden Cross",
+    "weekly_hammer": "🔨 W-Hammer",
+    "weekly_bullish_engulfing": "📈 W-Engulf",
+    "weekly_bearish_engulfing": "📉 W-Bear Engulf",
+    "double_bottom": "✌️ W-Pattern",
+}
+
+
+def _load_isin_map():
+    """Build {SYMBOL_UPPER: ISIN} from the Nifty 500 universe CSV."""
+    mapping = {}
+    if not UNIVERSE_CSV.exists():
+        return mapping
+    try:
+        uni = pd.read_csv(UNIVERSE_CSV)
+        uni.columns = [str(c).strip() for c in uni.columns]
+        sym_col = next((c for c in uni.columns if c.lower() == "symbol"), None)
+        isin_col = next((c for c in uni.columns if "isin" in c.lower()), None)
+        if sym_col is None or isin_col is None:
+            return mapping
+        for sym, isin in zip(uni[sym_col], uni[isin_col]):
+            key = str(sym).strip().upper()
+            if key and pd.notna(isin):
+                mapping[key] = str(isin).strip()
+    except Exception:
+        pass
+    return mapping
+
+
+ISIN_MAP = _load_isin_map()
+
+# EOD data — signals are stable intraday, so cache the badge list for 12 hours.
+SIGNAL_CACHE_TIMEOUT = 43200  # seconds
+
+
+def _detect_signals(symbol: str, isin) -> list:
+    """Return the cached MTF signal badges for one stock.
+
+    The first request runs the parquet + scanner pipeline (candlestick patterns
+    plus the double-bottom chart pattern) and stores the badge list in Django's
+    cache for 12 hours; every subsequent request returns it instantly. Failures
+    (missing parquet, unreadable file, scanner unavailable) are never cached —
+    they simply render as "no signals" and are retried next request.
+    """
+    if (
+        build_mtf_dataframe is None
+        or scan_mtf_patterns is None
+        or detect_double_bottom is None
+    ):
+        return []
+
+    cache_key = f"signals_{symbol.upper()}"
+
+    try:
+        cached = cache.get(cache_key)
+    except Exception:  # noqa: BLE001 — a cache outage must never break the page
+        cached = None
+    if cached is not None:
+        return cached
+
+    try:
+        df = build_mtf_dataframe(symbol, isin=isin)
+        signals_df = scan_mtf_patterns(df)
+        w_pattern = detect_double_bottom(df)
+    except Exception:
+        return []  # transient failure — don't cache, so it retries next time
+
+    signals = []
+
+    # Candlestick (1-3 bar) signals from the latest scanner row.
+    if signals_df is not None and not signals_df.empty:
+        latest = signals_df.iloc[-1]
+        signals = [
+            label
+            for col, label in SIGNAL_LABELS.items()
+            if col != "double_bottom" and bool(latest.get(col, False))
+        ]
+
+    # Macroscopic chart pattern — flag if the latest bar is a double-bottom trigger.
+    if w_pattern is not None and len(w_pattern) and bool(w_pattern.iloc[-1]):
+        signals.append(SIGNAL_LABELS["double_bottom"])
+
+    try:
+        cache.set(cache_key, signals, SIGNAL_CACHE_TIMEOUT)
+    except Exception:  # noqa: BLE001
+        pass
+
+    return signals
+
+
 def _build_row(raw):
+    symbol = _to_str(raw.get("symbol"))
     signal = _to_str(raw.get("weekly_ema20_signal"))
     vol = _to_float(raw.get("Volume_Dry_Ratio"))
     wvol = _to_float(raw.get("Weekly_Vol_Ratio"))
@@ -146,8 +267,19 @@ def _build_row(raw):
     else:
         wvol_cls = "text-slate-300"
 
+    # 🔥 HOT breakout candidate: top-quartile 52W position, still-bullish
+    # momentum, and dried-up volume (all three must hold).
+    is_hot = (
+        pos is not None and pos > HOT_52W_POSITION_MIN
+        and momentum is not None and momentum > HOT_MOMENTUM_MIN
+        and vol is not None and vol < HOT_VOL_DRY_MAX
+    )
+
+    # Latest MTF candlestick signals from the data_engine + scanner pipeline.
+    signals = _detect_signals(symbol, ISIN_MAP.get(symbol.upper()))
+
     return {
-        "symbol": _to_str(raw.get("symbol")),
+        "symbol": symbol,
         "close": _fmt(_to_float(raw.get("last_close")), 2),
         "pos_52w": (_fmt(pos, 1) + "%") if pos is not None else "—",
         "signal": signal,
@@ -159,6 +291,8 @@ def _build_row(raw):
         "wvol_display": _fmt(wvol, 2),
         "wvol_class": wvol_cls,
         "uptrend": _to_bool(raw.get("uptrend_50_200")),
+        "is_hot": is_hot,
+        "signals": signals,
     }
 
 
@@ -181,7 +315,9 @@ def trend_setups_view(request):
         if cat_col and not df.empty:
             sub = df[df[cat_col].astype(str).str.strip() == cat]
             rows = [_build_row(r) for _, r in sub.iterrows()]
-            rows.sort(key=lambda r: r["momentum_sort"], reverse=True)
+            # Group 🔥 HOT candidates at the very top; within each group, sort by
+            # momentum descending so the fastest-moving hot stocks lead the list.
+            rows.sort(key=lambda r: (not r["is_hot"], -r["momentum_sort"]))
         cards.append({"category": cat, "count": len(rows), "dot": dot,
                       "count_color": count_color, "description": desc})
         sections.append({"category": cat, "count": len(rows), "badge": badge,
