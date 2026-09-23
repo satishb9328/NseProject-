@@ -169,7 +169,7 @@
             <div><span class="block uppercase tracking-wider text-slate-500">GAMMA FLIP</span><span id="day-gamma-flip" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span><div id="day-gamma-flip-warning" class="gamma-flip-warning mt-1"><span class="gamma-flip-warning-track text-xs font-semibold text-orange-400">⚠️ NO FLIP DETECTED: Strong one-sided trend. Safety guard active.</span></div></div>
             <div><span class="block uppercase tracking-wider text-slate-500">NET GEX</span><span id="day-net-gex" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
             <div class="col-span-3 mt-1 grid grid-cols-2 gap-2 border-t border-amber-500/20 pt-2 text-[11px]"><span class="font-medium text-orange-300">CALL WALL (Res): <span id="day-call-wall" class="font-mono">--</span></span><span class="text-right font-medium text-emerald-300">PUT WALL (Sup): <span id="day-put-wall" class="font-mono">--</span></span></div>
-            <div class="col-span-3 grid grid-cols-2 gap-2 text-[11px]"><span class="font-medium text-slate-400">NET CHARM: <span id="day-net-charm" class="font-mono text-slate-200">--</span></span><span class="text-right font-medium text-slate-400">NET VANNA: <span id="day-net-vanna" class="font-mono text-slate-200">--</span></span></div>
+            <div class="col-span-3 grid grid-cols-3 gap-2 text-[11px]"><span class="font-medium text-slate-400">NET CHARM: <span id="day-net-charm" class="font-mono text-slate-200">--</span></span><span class="text-center font-medium text-slate-400">NET VANNA: <span id="day-net-vanna" class="font-mono text-slate-200">--</span></span><span class="text-right font-medium text-slate-400">ATM DECAY/HR: <span id="day-atm-decay" class="font-mono text-slate-200">--</span></span></div>
           </div>
           <p id="day-net-gex-summary" class="mt-auto pt-2 text-[11px] font-medium text-slate-400">--</p>
         </div>
@@ -286,6 +286,7 @@
               <span class="uppercase tracking-wider text-slate-500">Entry Price</span><span id="ai-mom-entry" class="text-right font-mono font-semibold text-slate-50">--</span>
               <span class="uppercase tracking-wider text-slate-500">SL</span><span id="ai-mom-sl" class="text-right font-mono font-semibold text-rose-300">--</span>
               <span class="uppercase tracking-wider text-slate-500">Target</span><span id="ai-mom-target" class="text-right font-mono font-semibold text-emerald-300">--</span>
+              <div class="col-span-2 border-t border-orange-500/20 pt-1.5 text-[13px]"><span class="uppercase tracking-wider text-slate-400">🕒 Time Decay:</span> <span id="ai-mom-decay" class="font-mono font-semibold text-amber-300">--</span></div>
             </div>
           </div>
           <div class="rounded-lg border border-sky-500/30 bg-sky-950/20 p-3">
@@ -405,6 +406,8 @@
   let allRows = [], loadedExpiry = null, currentSpot = null, previousSignature = '', expiryInitialized = false, currentSentiment = 'neutral', currentScore = 50, currentTheme = 'neutral', currentTrapSignal = '', currentLiveScore = 50;
   // Live option-chain bias / momentum, exposed for the AI card's math console.
   let currentBias = 0, currentMomentum = 0;
+  // Real-time ATM time decay (₹/hr), streamed from the backend via the live options payload.
+  let currentThetaDecay = 0;
   // Voice-alert state. Audio defaults OFF (browser autoplay policies require a user
   // gesture before speech). previousTradeState dedupes announcements so we speak exactly
   // once per CE/PE/NO_TRADE transition, never on every 1 Hz poll.
@@ -526,6 +529,19 @@
     bar.style.setProperty('--bar-color', value >= center ? '#4ade80' : '#f87171');
   }
 
+  function renderThetaDecay() {
+    // Time decay is signed negative on the backend (long options lose value). Display
+    // the magnitude with a leading "-₹" so the readout always reads as decay. Only the
+    // two target nodes' textContent changes — no replaceChildren() / grid rebuild — so
+    // the 1 Hz refresh never flickers the surrounding cards.
+    const magnitude = Math.abs(Number.isFinite(currentThetaDecay) ? currentThetaDecay : 0);
+    const decayText = `-₹${magnitude.toFixed(2)}`;
+    const momEl = document.getElementById('ai-mom-decay');
+    if (momEl) momEl.textContent = `${decayText} / hr`;
+    const atmEl = document.getElementById('day-atm-decay');
+    if (atmEl) atmEl.textContent = `${decayText}/hr`;
+  }
+
   function updateSentiment(data) {
     // Authoritative God-Mode sentiment, computed on the backend (weighted bias,
     // COI-acceleration momentum, real Black-Scholes gamma boost). The AI card no longer
@@ -537,6 +553,10 @@
     currentBias = Number.isFinite(Number(data.bias)) ? Number(data.bias) : 0;
     currentMomentum = Number.isFinite(Number(data.momentum)) ? Number(data.momentum) : 0;
     currentLiveScore = Number.isFinite(Number(data.score)) ? Number(data.score) : 50;
+    // Capture the real-time ATM theta (₹/hr) broadcast by the backend and refresh the
+    // "Time Decay" (Momentum Pullback card) + "ATM DECAY/HR" (Day Gamma card) readouts.
+    currentThetaDecay = Number.isFinite(Number(data.theta_decay_per_hour)) ? Number(data.theta_decay_per_hour) : 0;
+    renderThetaDecay();
   }
 
   function renderPreopenSentiment(data) {

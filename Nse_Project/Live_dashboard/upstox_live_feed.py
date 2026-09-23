@@ -1443,6 +1443,115 @@ def _real_net_gex(instrument_data=None, spot: float = 0.0) -> tuple[float, float
         return 0.0, 0.0
 
 
+# ---------------------------------------------------------------------------
+# Real-time Theta (time decay) — Black-Scholes via py_vollib
+# ---------------------------------------------------------------------------
+SECONDS_PER_YEAR = 31_536_000  # 365 * 24 * 60 * 60 (matches the dashboard day-count convention)
+THETA_EXPIRY_HOUR = 15
+THETA_EXPIRY_MINUTE = 30
+THETA_MIN_SECONDS = 1_800  # 30-minute safety floor to avoid division-by-zero near expiry
+THETA_RISK_FREE_RATE = 0.065  # matches the Gamma engine's risk_free_rate
+
+
+def calculate_hourly_theta(spot_price, strike_price, option_ltp, expiry_date) -> float:
+    """Return the real-time hourly theta (₹/hour), rounded to 2 decimal places.
+
+    The contract requested by the dashboard:
+
+    * ``T`` is computed dynamically as the seconds remaining until 15:30:00 IST on
+      ``expiry_date``, divided by 31,536,000 (the seconds in a 365-day year).
+    * If fewer than 1,800 seconds (30 minutes) remain, 0.0 is returned to avoid the
+      division-by-zero / sqrt(T) instability right at the close.
+    * Implied Volatility is reverse-solved from the LTP first, then fed back into the
+      Black-Scholes theta to obtain the Annual Theta, which is finally converted to an
+      hourly figure by dividing by 365 and then 24.
+
+    ``option_ltp`` is the ATM premium; the call convention ("c") is used because ATM
+    call and put theta converge by put-call parity.
+    """
+    try:
+        spot = float(spot_price)
+        strike = float(strike_price)
+        ltp = float(option_ltp)
+    except (TypeError, ValueError):
+        return 0.0
+
+    if spot <= 0 or strike <= 0 or ltp <= 0:
+        return 0.0
+
+    expiry_iso = normalize_expiry(expiry_date)
+    if not expiry_iso:
+        return 0.0
+
+    try:
+        expiry_dt = datetime.strptime(expiry_iso, "%Y-%m-%d")
+    except ValueError:
+        return 0.0
+
+    ist = timezone(timedelta(hours=5, minutes=30))
+    expiry_dt = expiry_dt.replace(
+        hour=THETA_EXPIRY_HOUR,
+        minute=THETA_EXPIRY_MINUTE,
+        second=0,
+        microsecond=0,
+        tzinfo=ist,
+    )
+    seconds_remaining = (expiry_dt - datetime.now(ist)).total_seconds()
+
+    # Safety guard: under 30 minutes to expiry the time value is numerically unstable.
+    if seconds_remaining < THETA_MIN_SECONDS:
+        return 0.0
+
+    T = seconds_remaining / SECONDS_PER_YEAR
+    if T <= 0:
+        return 0.0
+
+    try:
+        from py_vollib.black_scholes.implied_volatility import implied_volatility
+        from py_vollib.black_scholes.greeks.analytical import theta as bs_theta
+
+        # Reverse-solve IV from the live LTP, then use it for the theta calc.
+        iv = implied_volatility(ltp, spot, strike, T, THETA_RISK_FREE_RATE, "c")
+        annual_theta = bs_theta("c", spot, strike, T, THETA_RISK_FREE_RATE, iv)
+    except Exception:
+        # IV solver can fail when the LTP sits outside no-arbitrage bounds or T is
+        # tiny; degrade to a neutral reading instead of crashing the publish loop.
+        return 0.0
+
+    hourly_theta = annual_theta / 365.0 / 24.0
+    if not math.isfinite(hourly_theta):
+        return 0.0
+    return round(hourly_theta, 2)
+
+
+def _compute_atm_theta_decay(instrument_data, spot, expiry_date) -> float:
+    """Return the ATM hourly theta (₹/hr) for the live chain, or 0.0 when undeterminable."""
+    if not isinstance(instrument_data, dict) or not spot or spot <= 0:
+        return 0.0
+
+    best = None
+    for item in instrument_data.values():
+        if not isinstance(item, dict):
+            continue
+        strike = item.get("strike")
+        strike = float(strike) if isinstance(strike, (int, float)) else 0.0
+        if strike <= 0:
+            continue
+        ltp = item.get("ltp")
+        ltp = float(ltp) if isinstance(ltp, (int, float)) else 0.0
+        if ltp <= 0:
+            continue
+        distance = abs(strike - spot)
+        if best is None or distance < best[0]:
+            best = (distance, strike, ltp)
+
+    if best is None:
+        return 0.0
+
+    _, atm_strike, atm_ltp = best
+    return calculate_hourly_theta(spot, atm_strike, atm_ltp, expiry_date)
+
+
 def _compute_live_sentiment_full(instrument_data=None) -> dict:
     """Derive bias / momentum / score plus the advanced-quant diagnostics.
 
@@ -1522,6 +1631,7 @@ def _compute_live_sentiment_full(instrument_data=None) -> dict:
             "delta_wt_impact": 0.0, "gamma_boost_val": 0.0,
             "iv_skew_est": 0.0, "acceleration": round(acceleration, 2),
             "net_gex": 0.0, "net_gex_ratio": 0.0,
+            "theta_decay_per_hour": 0.0,
         }
 
     unweighted_bias = ((put_oi - call_oi) / total_oi) * 100.0
@@ -1552,6 +1662,10 @@ def _compute_live_sentiment_full(instrument_data=None) -> dict:
         iv_skew_est = (put_iv_sum / put_iv_n) - (call_iv_sum / call_iv_n)
 
     score = max(0.0, min(100.0, 50.0 + weighted_bias * 0.5 + momentum + gamma_boost_val))
+    # ATM time decay (₹/hr): reverse-solved IV -> annual theta -> hourly theta.
+    theta_decay_per_hour = _compute_atm_theta_decay(
+        instrument_data, spot, active_expiry_iso()
+    )
     return {
         "bias": weighted_bias,
         "momentum": momentum,
@@ -1562,6 +1676,7 @@ def _compute_live_sentiment_full(instrument_data=None) -> dict:
         "acceleration": round(acceleration, 2),
         "net_gex": net_gex,
         "net_gex_ratio": net_gex_ratio,
+        "theta_decay_per_hour": theta_decay_per_hour,
     }
 
 
@@ -1609,6 +1724,10 @@ def _refresh_market_state(instrument_data=None) -> None:
     market_state["score"] = score
     market_state["net_gex"] = sentiment["net_gex"]
     market_state["net_gex_ratio"] = sentiment["net_gex_ratio"]
+    # Real-time ATM time decay, also mirrored onto live_state so it rides the same
+    # Redis snapshot (live_options_data) that the Gamma engine and dashboard consume.
+    market_state["theta_decay_per_hour"] = sentiment["theta_decay_per_hour"]
+    live_state["theta_decay_per_hour"] = sentiment["theta_decay_per_hour"]
 
 
 def _persist_market_state() -> None:

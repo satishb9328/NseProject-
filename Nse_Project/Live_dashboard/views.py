@@ -1212,6 +1212,7 @@ def live_option_chain_api(request):
             "acceleration": 0,
             "net_gex": 0,
             "net_gex_ratio": 0,
+            "theta_decay_per_hour": 0,
             "strike_bounds": None,
             "option_chain": [],
             # Surfaced deliberately: the browser console/network tab then names the fault
@@ -1282,6 +1283,7 @@ def _build_live_option_chain_payload() -> dict:
         "score": _json_safe_value(market_state.get("score")),
         "net_gex": _json_safe_value(market_state.get("net_gex")),
         "net_gex_ratio": _json_safe_value(market_state.get("net_gex_ratio")),
+        "theta_decay_per_hour": _json_safe_value(market_state.get("theta_decay_per_hour")),
         "strike_bounds": list(strike_bounds) if strike_bounds else None,
         "option_chain": chain,
         "error": None,

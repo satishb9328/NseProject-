@@ -46,6 +46,8 @@ DEFAULT_MARKET_STATE = {
     # Real Black-Scholes Net GEX + its bounded conviction ratio (net_gex / gross_gex).
     "net_gex": 0.0,
     "net_gex_ratio": 0.0,
+    # Real-time ATM time decay (₹/hr), reverse-solved from the live LTP via py_vollib.
+    "theta_decay_per_hour": 0.0,
 }
 
 

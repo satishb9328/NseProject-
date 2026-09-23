@@ -105,6 +105,7 @@ pyOpenSSL==26.4.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
 pytz==2026.3.post1
+py-vollib==1.0.12
 pyzmq==27.1.0
 redis==8.1.0
 referencing==0.37.0
