@@ -17,11 +17,19 @@ from django.shortcuts import render
 try:
     from candlestick_scanner import scan_mtf_patterns
     from data_engine import build_mtf_dataframe
-    from chart_patterns import detect_double_bottom
+    from chart_patterns import detect_double_bottom, detect_trendline_breakout
 except Exception:  # noqa: BLE001
     scan_mtf_patterns = None
     build_mtf_dataframe = None
     detect_double_bottom = None
+    detect_trendline_breakout = None
+
+# Live 2H "Sniper" bridge (live_ml_scanner.py in this same app). Imported
+# defensively so the dashboard never crashes if the scanner is missing.
+try:
+    from .live_ml_scanner import main as run_live_scanner
+except Exception:  # noqa: BLE001
+    run_live_scanner = None
 
 BASE_DIR = Path(__file__).resolve().parent
 SETUPS_CSV = BASE_DIR / "master_trend_setups.csv"
@@ -149,6 +157,22 @@ SIGNAL_LABELS = {
     "weekly_bullish_engulfing": "📈 W-Engulf",
     "weekly_bearish_engulfing": "📉 W-Bear Engulf",
     "double_bottom": "✌️ W-Pattern",
+    "daily_tl": "🚀 D-TL Breakout",
+    "weekly_tl": "🚀 W-TL Breakout",
+}
+
+# "Recent" lookback windows (trading days) for signal extraction.
+STRUCTURAL_LOOKBACK = 3  # Golden Cross, Double Bottom, Trendline breakouts
+CANDLE_LOOKBACK = 2      # Hammer / Engulfing candle shapes
+
+# Signal keys grouped by their lookback window.
+STRUCTURAL_SIGNAL_KEYS = {"fresh_golden_cross", "double_bottom", "daily_tl", "weekly_tl"}
+CANDLE_SIGNAL_KEYS = {
+    "hammer",
+    "bullish_engulfing",
+    "weekly_hammer",
+    "weekly_bullish_engulfing",
+    "weekly_bearish_engulfing",
 }
 
 
@@ -183,15 +207,23 @@ def _detect_signals(symbol: str, isin) -> list:
     """Return the cached MTF signal badges for one stock.
 
     The first request runs the parquet + scanner pipeline (candlestick patterns
-    plus the double-bottom chart pattern) and stores the badge list in Django's
-    cache for 12 hours; every subsequent request returns it instantly. Failures
-    (missing parquet, unreadable file, scanner unavailable) are never cached —
-    they simply render as "no signals" and are retried next request.
+    plus the double-bottom and trendline-breakout chart patterns) and stores the
+    badge list in Django's cache for 12 hours; every subsequent request returns
+    it instantly. Failures (missing parquet, unreadable file, scanner
+    unavailable) are never cached — they simply render as "no signals" and are
+    retried next request.
+
+    Signals use a "recent" lookback rather than the strict latest bar:
+    structural patterns (Golden Cross, Double Bottom, trendline breakouts) are
+    flagged if True on any of the last 3 bars; candle shapes (hammer / engulfing)
+    are flagged if True on any of the last 2 bars. ``iloc[-n:]`` clamps safely
+    when a series is shorter than its window.
     """
     if (
         build_mtf_dataframe is None
         or scan_mtf_patterns is None
         or detect_double_bottom is None
+        or detect_trendline_breakout is None
     ):
         return []
 
@@ -208,23 +240,35 @@ def _detect_signals(symbol: str, isin) -> list:
         df = build_mtf_dataframe(symbol, isin=isin)
         signals_df = scan_mtf_patterns(df)
         w_pattern = detect_double_bottom(df)
+        d_tl = detect_trendline_breakout(df, high_col="High", close_col="Close")
+        w_tl = detect_trendline_breakout(
+            df, high_col="Weekly_High", close_col="Weekly_Close"
+        )
     except Exception:
         return []  # transient failure — don't cache, so it retries next time
 
-    signals = []
-
-    # Candlestick (1-3 bar) signals from the latest scanner row.
+    # Collect every signal series keyed by its SIGNAL_LABELS key.
+    series_map: dict = {}
     if signals_df is not None and not signals_df.empty:
-        latest = signals_df.iloc[-1]
-        signals = [
-            label
-            for col, label in SIGNAL_LABELS.items()
-            if col != "double_bottom" and bool(latest.get(col, False))
-        ]
+        for col in signals_df.columns:
+            if col in SIGNAL_LABELS:
+                series_map[col] = signals_df[col]
+    if w_pattern is not None and len(w_pattern):
+        series_map["double_bottom"] = w_pattern
+    if d_tl is not None and len(d_tl):
+        series_map["daily_tl"] = d_tl
+    if w_tl is not None and len(w_tl):
+        series_map["weekly_tl"] = w_tl
 
-    # Macroscopic chart pattern — flag if the latest bar is a double-bottom trigger.
-    if w_pattern is not None and len(w_pattern) and bool(w_pattern.iloc[-1]):
-        signals.append(SIGNAL_LABELS["double_bottom"])
+    # Apply the per-category "recent" lookback window.
+    signals = []
+    for key, label in SIGNAL_LABELS.items():
+        series = series_map.get(key)
+        if series is None:
+            continue
+        window = CANDLE_LOOKBACK if key in CANDLE_SIGNAL_KEYS else STRUCTURAL_LOOKBACK
+        if bool(series.iloc[-window:].any()):
+            signals.append(label)
 
     try:
         cache.set(cache_key, signals, SIGNAL_CACHE_TIMEOUT)
@@ -234,7 +278,7 @@ def _detect_signals(symbol: str, isin) -> list:
     return signals
 
 
-def _build_row(raw):
+def _build_row(raw, live_alerts=None):
     symbol = _to_str(raw.get("symbol"))
     signal = _to_str(raw.get("weekly_ema20_signal"))
     vol = _to_float(raw.get("Volume_Dry_Ratio"))
@@ -278,6 +322,12 @@ def _build_row(raw):
     # Latest MTF candlestick signals from the data_engine + scanner pipeline.
     signals = _detect_signals(symbol, ISIN_MAP.get(symbol.upper()))
 
+    # Live 2H sniper pattern (from the cached live scanner bridge), if any.
+    if live_alerts:
+        live_pattern = live_alerts.get(symbol.upper())
+        if live_pattern:
+            signals.append(live_pattern)
+
     return {
         "symbol": symbol,
         "close": _fmt(_to_float(raw.get("last_close")), 2),
@@ -296,6 +346,45 @@ def _build_row(raw):
     }
 
 
+LIVE_SNIPER_CACHE_KEY = "live_sniper_alerts"
+LIVE_SNIPER_CACHE_TIMEOUT = 300  # 5 minutes
+
+
+def get_live_sniper_alerts() -> dict:
+    """Return a cached ``{SYMBOL: pattern_label}`` map from the 2H live sniper bot.
+
+    ``run_live_scanner()`` is expensive (per-symbol Upstox fetches), so its result
+    is cached for 5 minutes (300 seconds) and served to every dashboard render.
+    """
+    if run_live_scanner is None:
+        return {}
+
+    try:
+        cached = cache.get(LIVE_SNIPER_CACHE_KEY)
+    except Exception:  # noqa: BLE001
+        cached = None
+    if cached is not None:
+        return cached
+
+    try:
+        result = run_live_scanner()
+        signals = result.get("signals", []) if isinstance(result, dict) else []
+        mapping = {
+            str(a.get("symbol", "")).strip().upper(): a.get("pattern")
+            for a in signals
+            if a.get("symbol") and a.get("pattern")
+        }
+    except Exception:  # noqa: BLE001
+        mapping = {}
+
+    try:
+        cache.set(LIVE_SNIPER_CACHE_KEY, mapping, LIVE_SNIPER_CACHE_TIMEOUT)
+    except Exception:  # noqa: BLE001
+        pass
+
+    return mapping
+
+
 def trend_setups_view(request):
     """Render the grouped Master Trend & Setup Scanner dashboard."""
     df = pd.DataFrame()
@@ -308,13 +397,16 @@ def trend_setups_view(request):
     cat_col = next((c for c in df.columns if c.strip().lower() == "setup_category"), None)
     total = len(df) if (not df.empty and cat_col) else 0
 
+    # Live 2H sniper alerts (symbol -> pattern label), cached for 5 minutes.
+    live_alerts = get_live_sniper_alerts()
+
     sections, cards = [], []
     for cat in CATEGORY_ORDER:
         badge, dot, count_color, desc = CATEGORY_META[cat]
         rows = []
         if cat_col and not df.empty:
             sub = df[df[cat_col].astype(str).str.strip() == cat]
-            rows = [_build_row(r) for _, r in sub.iterrows()]
+            rows = [_build_row(r, live_alerts) for _, r in sub.iterrows()]
             # Group 🔥 HOT candidates at the very top; within each group, sort by
             # momentum descending so the fastest-moving hot stocks lead the list.
             rows.sort(key=lambda r: (not r["is_hot"], -r["momentum_sort"]))

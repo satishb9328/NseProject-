@@ -6,8 +6,8 @@ Isolated module for multi-bar chart formations (e.g. the Double Bottom / "W"
 pattern) that require swing/pivot analysis rather than the 1-3 candle shapes
 handled by candlestick_scanner.py.
 
-Everything is vectorized with NumPy/SciPy; there are no per-row Python loops.
-The public API mirrors the candlestick scanner: each detector returns a
+Pivot detection is vectorized with NumPy/SciPy; the trendline detector tracks
+its first-cross state with a single O(n) forward pass. Every detector returns a
 ``pandas.Series`` of booleans aligned to the input DataFrame index.
 
 Pivot convention
@@ -17,9 +17,10 @@ BOTH sides (``order=5`` -> a 5-bar strict neighbourhood on each side).
 
 Usage
 -----
-    from chart_patterns import detect_double_bottom
+    from chart_patterns import detect_double_bottom, detect_trendline_breakout
 
-    df["double_bottom"] = detect_double_bottom(df)   # bool Series, len == df
+    df["double_bottom"] = detect_double_bottom(df)     # bool Series, len == df
+    df["tl_breakout"] = detect_trendline_breakout(df)  # bool Series, len == df
 """
 
 from __future__ import annotations
@@ -27,7 +28,12 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-__all__ = ["detect_double_bottom", "find_swing_lows", "find_swing_highs"]
+__all__ = [
+    "detect_double_bottom",
+    "detect_trendline_breakout",
+    "find_swing_lows",
+    "find_swing_highs",
+]
 
 # ────────────────────────────────────────────────────────────────────────────────
 # DEFAULTS
@@ -199,6 +205,124 @@ def detect_double_bottom(
 
 
 # ────────────────────────────────────────────────────────────────────────────────
+# TRENDLINE BREAKOUT (descending resistance line)
+# ────────────────────────────────────────────────────────────────────────────────
+
+def _run_end_indices(values: np.ndarray) -> np.ndarray:
+    """Return the index of the LAST element of each run of equal values.
+
+    Forward-filled weekly data repeats each weekly value over several daily rows;
+    collapsing those runs before pivot detection makes the pivots plateau-aware.
+    """
+    n = values.shape[0]
+    if n == 0:
+        return np.array([], dtype=np.int64)
+    ends = np.empty(n, dtype=bool)
+    ends[:-1] = values[1:] != values[:-1]
+    ends[-1] = True
+    return np.flatnonzero(ends)
+
+
+def _trendline_first_cross(
+    swing_idx: np.ndarray,
+    high: np.ndarray,
+    close: np.ndarray,
+    min_gap: int,
+    out: np.ndarray,
+) -> None:
+    """Mark the FIRST close above each descending trendline (first-cross only).
+
+    Single forward pass over the bars. ``p2`` tracks the newest swing high and
+    ``fired`` tracks whether the current (P1, P2) line has already broken out, so
+    a given pair fires at most once.
+    """
+    m = swing_idx.shape[0]
+    n = close.shape[0]
+
+    p2 = -1        # index into swing_idx of the newest swing high seen so far
+    fired = False  # has the current (P1, P2) line already produced a breakout?
+
+    for i in range(n):
+        # Advance P2 to the most recent swing high strictly before bar i. A new
+        # high forms a new (P1, P2) pair -> reset the first-cross state.
+        while p2 + 1 < m and swing_idx[p2 + 1] < i:
+            p2 += 1
+            fired = False
+
+        if p2 < 1:  # need both P2 and P1 to draw a line
+            continue
+
+        idx1 = int(swing_idx[p2 - 1])
+        idx2 = int(swing_idx[p2])
+        px1 = float(high[idx1])
+        px2 = float(high[idx2])
+
+        # Valid descending resistance line.
+        if not (px1 > px2 and idx2 - idx1 >= min_gap):
+            continue
+
+        slope = (px2 - px1) / (idx2 - idx1)
+        line_price = px2 + slope * (i - idx2)
+
+        if not fired and close[i] > line_price:
+            out[i] = True
+            fired = True
+
+
+def detect_trendline_breakout(
+    df: pd.DataFrame,
+    high_col: str = "High",
+    close_col: str = "Close",
+    order: int = DEFAULT_ORDER,
+    min_gap: int = DEFAULT_MIN_GAP,
+) -> pd.Series:
+    """Return a boolean Series marking descending-trendline breakouts.
+
+    For every bar, the two most recent swing highs (P1 older, P2 newer) define a
+    descending resistance line when ``Price(P1) > Price(P2)`` and
+    ``Index(P2) - Index(P1) >= min_gap``. The line
+    ``Price(P2) + m * (i - Index(P2))`` (with slope ``m``) is projected forward,
+    and a breakout fires on the FIRST bar whose close closes strictly above it
+    (first-cross only — a given P1/P2 pair never fires twice).
+
+    Swing highs are detected plateau-aware (consecutive duplicates collapsed to
+    their last bar) so forward-filled weekly data is handled smoothly.
+
+    Works on any timeframe — pass the relevant high/close columns (e.g.
+    ``High``/``Close`` for daily, ``Weekly_High``/``Weekly_Close`` for weekly).
+
+    Returns a boolean Series aligned to ``df.index``.
+    """
+    for col in (high_col, close_col):
+        if col not in df.columns:
+            raise ValueError(
+                f"chart_patterns.detect_trendline_breakout: missing column {col!r}"
+            )
+
+    n = len(df)
+    high = df[high_col].astype(float).to_numpy()
+    close = df[close_col].astype(float).to_numpy()
+
+    out = np.zeros(n, dtype=bool)
+    order = int(order)
+    if n < 2 * order + 1:
+        return pd.Series(out, index=df.index, name="trendline_breakout")
+
+    # Plateau-aware swing highs: collapse forward-filled runs to their last bar,
+    # then run strict pivot detection on the collapsed series.
+    rep_idx = _run_end_indices(high)
+    piv = _pivot_indices(high[rep_idx], order, is_low=False)
+    swing_idx = rep_idx[piv]
+
+    if swing_idx.shape[0] < 2:
+        return pd.Series(out, index=df.index, name="trendline_breakout")
+
+    _trendline_first_cross(swing_idx, high, close, int(min_gap), out)
+
+    return pd.Series(out, index=df.index, name="trendline_breakout")
+
+
+# ────────────────────────────────────────────────────────────────────────────────
 # SELF-TEST (run:  python chart_patterns.py)
 # ────────────────────────────────────────────────────────────────────────────────
 
@@ -227,5 +351,14 @@ if __name__ == "__main__":
     print("swing highs:", find_swing_highs(df["High"]).tolist())
     print("double_bottom True days:", hit_days.tolist())
     print("dtype:", sig.dtype, "| no NaN:", bool(sig.notna().all()))
+
+    # ── Trendline breakout test: descending resistance, single first-cross ──
+    tl_hx = np.array([0, 15, 20, 25, 35, 40, 45, 55, 60, 65, 99])
+    tl_hy = np.array([50.0, 50.0, 100.0, 50.0, 50.0, 90.0, 50.0, 50.0, 80.0, 50.0, 50.0])
+    tl_high = np.interp(np.arange(100), tl_hx, tl_hy)
+    tl_close = np.full(100, 70.0)
+    tl_df = pd.DataFrame({"High": tl_high, "Close": tl_close})
+    tl_sig = detect_trendline_breakout(tl_df, high_col="High", close_col="Close")
+    print("trendline True days:", np.flatnonzero(tl_sig.to_numpy()).tolist())
 
 

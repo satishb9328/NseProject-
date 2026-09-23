@@ -2,6 +2,11 @@
 
 {% block title %}Master Trend & Setup Scanner{% endblock %}
 
+{% block extra_head %}
+  <!-- Auto-refresh the dashboard every 15 minutes (900 seconds). -->
+  <meta http-equiv="refresh" content="900">
+{% endblock %}
+
 {% block content %}
   <!-- Page header -->
   <div class="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
