@@ -547,36 +547,41 @@ def get_gamma_walls(reference_price: float | None = None) -> tuple[int | None, i
 
 
 def _build_preopen_context() -> dict:
-    """Build the full PRE-OPEN GAMMA TRAP context (values + sentiment + trap signal).
+    """Build the PRE-OPEN card context (MAX / MIN / Final IEP + projected open).
 
-    Shared by the server-rendered page, the JSON poll endpoint and the Redis
-    publisher so the three can never drift apart.
+    Options do not trade during the 09:00-09:08 pre-open session, so any Call/Put OI
+    or wall read here would be built on stale, invalid data. The card is therefore
+    reduced to the auction's own spot levels plus the projected open versus
+    yesterday's close. Shared by the server-rendered page, the JSON poll endpoint
+    and the Redis publisher so the three can never drift apart.
     """
     trap_data = fetch_real_preopen_trap_data()
     ist_now = datetime.now(timezone(timedelta(hours=5, minutes=30))).isoformat()
 
-    # Dynamic walls. Prefer the real previous close; fall back to the Final IEP when
-    # the previous close is not available in this scope.
-    final_iep_hint = trap_data.get('Final_IEP') if trap_data else None
-    call_wall, put_wall = get_gamma_walls(reference_price=final_iep_hint)
+    # Yesterday's close comes from the live feed's index snapshot (cp field), and is
+    # only trusted when it is from today; otherwise it stays None and the projected
+    # open percentage is shown as unavailable.
+    previous_close = _read_previous_close()
 
-    # No real TBT data for today yet -> graceful waiting state, no dummy signals.
+    def _projected_open(pct):
+        if pct is None:
+            return "flat", "—"
+        if pct > 0:
+            return "up", f"+{pct:.2f}%"
+        if pct < 0:
+            return "down", f"{pct:.2f}%"
+        return "flat", "0.00%"
+
     if trap_data is None:
         return {
             'preopen_max': None,
             'preopen_min': None,
             'preopen_final': None,
             'preopen_open': None,
-            'pre_call': call_wall,
-            'pre_put': put_wall,
-            # Legacy keys kept so the existing template/widget never breaks.
-            'call_wall': call_wall,
-            'put_wall': put_wall,
-            'bias': 0.0,
-            'momentum': 0.0,
-            'score': 50,
-            'theme': 'neutral',
-            'trap_signal': 'WAITING FOR TBT DATA',
+            'previous_close': previous_close,
+            'projected_open_pct': None,
+            'projected_open_display': '—',
+            'projected_open_tone': 'flat',
             'updated_at': ist_now,
         }
 
@@ -585,84 +590,21 @@ def _build_preopen_context() -> dict:
     final_iep = trap_data['Final_IEP']
     open_iep = trap_data.get('Open_IEP', min_iep)
 
-    range_iep = max_iep - min_iep
+    projected_open_pct = None
+    if previous_close and previous_close > 0:
+        projected_open_pct = round(((final_iep - previous_close) / previous_close) * 100.0, 2)
 
-    # BIAS — where the FINAL settlement sits inside the auction range.
-    # +100 = settled at the top (bullish), -100 = settled at the bottom (bearish),
-    # 0 = settled exactly at the midpoint (balanced).
-    if range_iep > 0:
-        final_pos = (final_iep - min_iep) / range_iep  # 0..1
-        bias = (final_pos - 0.5) * 200.0               # -100..+100
-    else:
-        bias = 0.0
-
-    # MOMENTUM — the auction's open->final % move scaled to a -100..+100 band so it
-    # maps onto the existing frontend tone thresholds (0.1% move == 10 momentum pts).
-    if open_iep and open_iep > 0:
-        momentum = _clamp(((final_iep - open_iep) / open_iep) * 10000.0, -100.0, 100.0)
-    else:
-        momentum = 0.0
-
-    score = int(round(_clamp(50.0 + bias * 0.5 + momentum, 0.0, 100.0)))
-    theme = 'bullish' if score >= 65 else 'bearish' if score <= 34 else 'neutral'
-
-    # Directional confluence guards. The trap headline must agree with the score and
-    # momentum shown in the same card, otherwise the card would show a bullish "BUY CE"
-    # next to a bearish score (the original contradiction).
-    buy_ce_confirmed = score >= 60 and momentum > 0
-    buy_pe_confirmed = score <= 40 and momentum < 0
-
-    # Trap patterns: a bull trap fades off the highs (bearish -> BUY PE); a bear trap
-    # reclaims off the lows (bullish -> BUY CE).
-    bull_trap = (max_iep - final_iep) > PREOPEN_TRAP_THRESHOLD
-    bear_trap = (final_iep - min_iep) > PREOPEN_TRAP_THRESHOLD
-
-    walls_available = call_wall is not None and put_wall is not None
-    high_prob_buy_pe = (
-        bull_trap
-        and walls_available
-        and final_iep > call_wall
-        and buy_pe_confirmed
-    )
-    high_prob_buy_ce = (
-        bear_trap
-        and walls_available
-        and final_iep < put_wall
-        and buy_ce_confirmed
-    )
-
-    if high_prob_buy_pe:
-        trap_signal = "HIGH PROBABILITY BUY PE"
-    elif high_prob_buy_ce:
-        trap_signal = "HIGH PROBABILITY BUY CE"
-    elif bull_trap or bear_trap:
-        trap_signal = "NEUTRAL - CONFLICTING DATA"
-    else:
-        trap_signal = "NEUTRAL - NO TRAP DETECTED"
-
-    # A conflicting pre-open (trap pattern without momentum confirmation) must never
-    # ship an extreme directional score. A settle at the very bottom with zero
-    # open->final move collapses to bias=-100 + momentum=0 -> score=0, which reads as
-    # "extreme bearish" next to a "NEUTRAL - CONFLICTING DATA" headline. Collapse the
-    # conflicting state back to the neutral baseline (50 / neutral) instead.
-    if trap_signal == "NEUTRAL - CONFLICTING DATA":
-        score = 50
-        theme = 'neutral'
+    projected_open_tone, projected_open_display = _projected_open(projected_open_pct)
 
     return {
         'preopen_max': max_iep,
         'preopen_min': min_iep,
         'preopen_final': final_iep,
         'preopen_open': open_iep,
-        'pre_call': call_wall,
-        'pre_put': put_wall,
-        'call_wall': call_wall,
-        'put_wall': put_wall,
-        'bias': round(bias, 2),
-        'momentum': round(momentum, 2),
-        'score': score,
-        'theme': theme,
-        'trap_signal': trap_signal,
+        'previous_close': previous_close,
+        'projected_open_pct': projected_open_pct,
+        'projected_open_display': projected_open_display,
+        'projected_open_tone': projected_open_tone,
         'updated_at': ist_now,
     }
 

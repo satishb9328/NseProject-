@@ -8,9 +8,8 @@ Covers:
   1. upstox_live_feed._compute_live_sentiment() returns the neutral baseline (50)
      for an empty OR half-initialised option chain, while real directional data
      still maps to bearish/bullish scores.
-  2. views._build_preopen_context() never ships an extreme score next to a
-     "NEUTRAL - CONFLICTING DATA" headline, but keeps confirmed HIGH-PROBABILITY
-     BUY PE / BUY CE signals intact.
+  2. views._build_preopen_context() strips option/trap data and returns only the
+     auction MAX/MIN/Final IEP plus the projected open versus yesterday's close.
 """
 import math
 import os
@@ -111,71 +110,59 @@ def test_compute_live_sentiment() -> None:
     check("bullish score", score, 200 / 3)
 
 
-def _build_context(trap_data, call_wall=23400.0, put_wall=23200.0) -> dict:
-    """Call _build_preopen_context() with the TBT fetch + walls fully mocked."""
+def _build_context(trap_data, previous_close=23000.0) -> dict:
+    """Call _build_preopen_context() with the TBT fetch + previous close mocked."""
     with mock.patch.object(views, "fetch_real_preopen_trap_data", return_value=trap_data), \
-            mock.patch.object(views, "get_gamma_walls", return_value=(call_wall, put_wall)):
+            mock.patch.object(views, "_read_previous_close", return_value=previous_close):
         return views._build_preopen_context()
 
 
 def test_build_preopen_context() -> None:
-    """Lock the pre-open score/theme/trap_signal fallback states."""
+    """Lock the stripped pre-open card contract (MAX/MIN/Final IEP + projected open)."""
     print("\n3) _build_preopen_context() WAITING state")
     ctx = _build_context(None)
-    check("waiting score", ctx["score"], 50)
-    check("waiting theme", ctx["theme"], "neutral")
-    check("waiting trap_signal", ctx["trap_signal"], "WAITING FOR TBT DATA")
+    check("waiting preopen_max", ctx["preopen_max"], None)
+    check("waiting projected_open_pct", ctx["projected_open_pct"], None)
+    check("waiting projected_open_display", ctx["projected_open_display"], "—")
+    check("waiting projected_open_tone", ctx["projected_open_tone"], "flat")
+    check("no call_wall key", "call_wall" in ctx, False)
+    check("no trap_signal key", "trap_signal" in ctx, False)
 
-    print("\n4) _build_preopen_context() conflicting settle collapses to neutral")
-    # Final settles at the very bottom with zero open->final move: the exact case
-    # that used to produce score=0 next to a "NEUTRAL - CONFLICTING DATA" headline.
-    conflicting = {
-        "Open_IEP": 23000.0,
-        "Max_IEP": 23100.0,
-        "Min_IEP": 23000.0,
-        "Final_IEP": 23000.0,
-    }
-    ctx = _build_context(conflicting)
-    check("conflicting score", ctx["score"], 50)
-    check("conflicting theme", ctx["theme"], "neutral")
-    check("conflicting trap_signal", ctx["trap_signal"], "NEUTRAL - CONFLICTING DATA")
-
-    print("\n5) _build_preopen_context() confirmed HIGH-PROBABILITY signals are preserved")
-    # Confirmed bearish (settle at bottom + down momentum + below-the-wall price).
-    buy_pe = {
-        "Open_IEP": 23100.0,
-        "Max_IEP": 23100.0,
-        "Min_IEP": 23000.0,
-        "Final_IEP": 23000.0,
-    }
-    ctx = _build_context(buy_pe, call_wall=22900.0, put_wall=22800.0)
-    check("BUY PE score", ctx["score"], 0)
-    check("BUY PE theme", ctx["theme"], "bearish")
-    check("BUY PE trap_signal", ctx["trap_signal"], "HIGH PROBABILITY BUY PE")
-
-    # Confirmed bullish (settle at top + up momentum + above-the-wall price).
-    buy_ce = {
-        "Open_IEP": 23000.0,
-        "Max_IEP": 23100.0,
-        "Min_IEP": 23000.0,
-        "Final_IEP": 23100.0,
-    }
-    ctx = _build_context(buy_ce, call_wall=23300.0, put_wall=23200.0)
-    check("BUY CE score", ctx["score"], 100)
-    check("BUY CE theme", ctx["theme"], "bullish")
-    check("BUY CE trap_signal", ctx["trap_signal"], "HIGH PROBABILITY BUY CE")
-
-    print("\n6) _build_preopen_context() flat auction stays neutral (no trap)")
+    print("\n4) _build_preopen_context() projected open vs previous close")
     flat = {
         "Open_IEP": 23000.0,
         "Max_IEP": 23050.0,
         "Min_IEP": 22950.0,
         "Final_IEP": 23000.0,
     }
-    ctx = _build_context(flat)
-    check("flat score", ctx["score"], 50)
-    check("flat theme", ctx["theme"], "neutral")
-    check("flat trap_signal", ctx["trap_signal"], "NEUTRAL - NO TRAP DETECTED")
+    ctx = _build_context(flat, previous_close=23000.0)
+    check("flat projected_open_pct", ctx["projected_open_pct"], 0.0)
+    check("flat projected_open_display", ctx["projected_open_display"], "0.00%")
+    check("flat projected_open_tone", ctx["projected_open_tone"], "flat")
+
+    up = {
+        "Open_IEP": 23000.0,
+        "Max_IEP": 23200.0,
+        "Min_IEP": 23000.0,
+        "Final_IEP": 23200.0,
+    }
+    ctx = _build_context(up, previous_close=23000.0)
+    up_pct = round((23200.0 - 23000.0) / 23000.0 * 100.0, 2)
+    check("up projected_open_pct", ctx["projected_open_pct"], up_pct)
+    check("up projected_open_tone", ctx["projected_open_tone"], "up")
+    check("up projected_open_display", ctx["projected_open_display"], f"+{up_pct:.2f}%")
+
+    down = {
+        "Open_IEP": 23000.0,
+        "Max_IEP": 23000.0,
+        "Min_IEP": 22800.0,
+        "Final_IEP": 22800.0,
+    }
+    ctx = _build_context(down, previous_close=23000.0)
+    down_pct = round((22800.0 - 23000.0) / 23000.0 * 100.0, 2)
+    check("down projected_open_pct", ctx["projected_open_pct"], down_pct)
+    check("down projected_open_tone", ctx["projected_open_tone"], "down")
+    check("down projected_open_display", ctx["projected_open_display"], f"{down_pct:.2f}%")
 
 
 if __name__ == "__main__":

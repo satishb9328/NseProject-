@@ -206,9 +206,9 @@
           <span class="font-medium text-slate-400">FINAL IEP <span id="preopen-final" class="font-mono font-semibold text-amber-400">{{ preopen_final|default_if_none:"—" }}</span></span>
         </div>
         <div class="mb-2 flex items-center justify-between gap-3 border-b border-slate-700/50 pb-2 text-sm">
-          <span class="font-medium text-orange-300">PRE CALL <span id="preopen-call-wall" class="font-mono">{{ call_wall|default_if_none:"—" }}</span></span>
-          <span id="preopen-trap-signal" class="flex-1 text-center text-sm font-bold uppercase tracking-wider {% if 'HIGH PROBABILITY' in trap_signal %}text-neon-green{% else %}text-slate-500{% endif %}">{{ trap_signal }}</span>
-          <span class="font-medium text-emerald-300">PRE PUT <span id="preopen-put-wall" class="font-mono">{{ put_wall|default_if_none:"—" }}</span></span>
+          <span class="font-medium text-slate-400">PREV CLOSE <span id="preopen-prev-close" class="font-mono font-semibold text-slate-200">{{ previous_close|default_if_none:"—" }}</span></span>
+          <span class="flex-1 text-center text-xs font-semibold uppercase tracking-wider text-slate-500">Projected Open vs Prev Close</span>
+          <span id="preopen-projected-pct" class="font-mono text-sm font-bold {% if projected_open_tone == 'up' %}text-green-400{% elif projected_open_tone == 'down' %}text-red-400{% else %}text-slate-500{% endif %}">{{ projected_open_display }}</span>
         </div>
         <div class="flex flex-col gap-2">
           <div id="sentiment-bias-chip" class="sentiment-metric metric-neutral flex w-full items-center justify-between gap-3">
@@ -403,7 +403,7 @@
   const expiryFilter = document.getElementById('expiry-filter');
   const signalStreams = { weekly: document.getElementById('weekly-signals-stream'), daily: document.getElementById('daily-signals-stream') };
   const seenSignals = new Set();
-  let allRows = [], loadedExpiry = null, currentSpot = null, previousSignature = '', expiryInitialized = false, currentSentiment = 'neutral', currentScore = 50, currentTheme = 'neutral', currentTrapSignal = '', currentLiveScore = 50;
+  let allRows = [], loadedExpiry = null, currentSpot = null, previousSignature = '', expiryInitialized = false, currentLiveScore = 50;
   // Live option-chain bias / momentum, exposed for the AI card's math console.
   let currentBias = 0, currentMomentum = 0;
   // Real-time ATM time decay (₹/hr), streamed from the backend via the live options payload.
@@ -543,12 +543,12 @@
   }
 
   function updateSentiment(data) {
-    // Authoritative God-Mode sentiment, computed on the backend (weighted bias,
+    // Authoritative God-Mode sentiment, computed on the backend (weighted OI bias,
     // COI-acceleration momentum, real Black-Scholes gamma boost). The AI card no longer
-    // recomputes its own score: it blindly renders whatever the backend dictates. Kept in
-    // SEPARATE variables (currentLiveScore / currentBias / currentMomentum) so the 1 Hz
-    // option-chain poll drives the AI card without overwriting the Pre-Open card's
-    // currentScore / currentTheme / currentTrapSignal (owned by renderPreopenSentiment).
+    // recomputes its own score: it blindly renders whatever the backend dictates. The
+    // same live payload now also drives the visible Score / Bias / Momentum meters and
+    // the Smart Insight strip, so the progress bar moves with the 1 Hz option-chain poll
+    // instead of freezing on the static Pre-Open snapshot.
     if (!data || typeof data !== 'object') return;
     currentBias = Number.isFinite(Number(data.bias)) ? Number(data.bias) : 0;
     currentMomentum = Number.isFinite(Number(data.momentum)) ? Number(data.momentum) : 0;
@@ -557,27 +557,32 @@
     // "Time Decay" (Momentum Pullback card) + "ATM DECAY/HR" (Day Gamma card) readouts.
     currentThetaDecay = Number.isFinite(Number(data.theta_decay_per_hour)) ? Number(data.theta_decay_per_hour) : 0;
     renderThetaDecay();
+    renderSentiment(data);
   }
 
-  function renderPreopenSentiment(data) {
+  function renderScoreBar(bar, score) {
+    if (!bar) return;
+    const clamped = Math.max(0, Math.min(100, score));
+    const tone = toneScore(clamped);
+    const color = tone === 'bull' ? '#4ade80' : tone === 'bear' ? '#f87171' : '#94a3b8';
+    bar.style.setProperty('--bar-color', color);
+    const active = bar.querySelector('.active-bar');
+    if (active) {
+      active.style.left = '0%';
+      active.style.width = `${clamped}%`;
+    }
+    const shadow = bar.querySelector('.shadow-bar');
+    if (shadow) {
+      shadow.style.left = '0%';
+      shadow.style.width = '0%';
+    }
+  }
+
+  function renderSentiment(data) {
     const bias = Number.isFinite(Number(data.bias)) ? Number(data.bias) : 0;
     const momentum = Number.isFinite(Number(data.momentum)) ? Number(data.momentum) : 0;
-    let score = Number.isFinite(Number(data.score)) ? Math.round(Number(data.score)) : 50;
-    let theme = data.theme === 'bullish' || data.theme === 'bearish' ? data.theme
-      : (score >= 65 ? 'bullish' : score <= 34 ? 'bearish' : 'neutral');
-    // The trap headline is the final arbiter of "stand aside": a CONFLICTING or
-    // WAITING pre-open must never display an extreme score (0/100) nor feed the AI
-    // card a directional theme. Collapse it to the neutral baseline (50 / neutral).
-    const trapSignal = String(data.trap_signal || '').toUpperCase();
-    const standAside = trapSignal.includes('CONFLICTING') || trapSignal.includes('WAITING');
-    if (standAside) {
-      score = 50;
-      theme = 'neutral';
-    }
-    currentScore = score;
-    currentTheme = theme;
-    currentTrapSignal = data.trap_signal || '';
-    currentSentiment = theme;
+    const score = Number.isFinite(Number(data.score)) ? Math.round(Number(data.score)) : 50;
+    const theme = score >= 60 ? 'bullish' : score <= 40 ? 'bearish' : 'neutral';
 
     const explosive = Math.abs(momentum) > 10;
     const label = Math.abs(momentum) < 5 ? 'Quiet' : Math.abs(momentum) <= 10 ? 'Healthy Trend' : 'EXPLOSIVE!';
@@ -593,7 +598,7 @@
     document.getElementById('sentiment-momentum').textContent = `${signedPct(momentum)} (Peak: ${signedPct(peakMom)})`;
     renderElasticBar(document.getElementById('sentiment-bias-bar'), bias, 0, 100, peakMaxBias, peakMinBias);
     renderElasticBar(document.getElementById('sentiment-momentum-bar'), momentum, 0, 100, peakMaxMom, peakMinMom);
-    renderElasticBar(document.getElementById('sentiment-score-bar'), score, 50, 50, peakMaxScore, peakMinScore);
+    renderScoreBar(document.getElementById('sentiment-score-bar'), score);
 
     applyTone('sentiment-bias-chip', tonePct(bias), METRIC_TONES);
     applyTone('sentiment-momentum-chip', tonePct(momentum), METRIC_TONES);
@@ -819,8 +824,8 @@
     // ---- AGGRESSIVE SCALPING tri-state: Bullish / Bearish / NO_TRADE ----
     // Driven SOLELY by the live option-chain score (currentLiveScore, updated at 1 Hz)
     // plus the live COI-acceleration momentum tie-breaker (currentMomentum, also 1 Hz).
-    // The 09:15 Pre-Open auction (trap_signal / theme) is deliberately ignored for
-    // intraday scalps. The slow 2-minute CVD feed has been removed entirely.
+    // The 09:15 Pre-Open auction's IEP readout is deliberately ignored for intraday
+    // scalps. The slow 2-minute CVD feed has been removed entirely.
     const score = currentLiveScore;
 
     // Chop band is 45-55 (inclusive). Outside it, the live score wins outright.
@@ -895,17 +900,20 @@
     setText('preopen-max', fmtIep(data.preopen_max));
     setText('preopen-min', fmtIep(data.preopen_min));
     setText('preopen-final', fmtIep(data.preopen_final));
-    setText('preopen-call-wall', fmt(data.pre_call ?? data.call_wall));
-    setText('preopen-put-wall', fmt(data.pre_put ?? data.put_wall));
-    const signalEl = document.getElementById('preopen-trap-signal');
-    if (signalEl) {
-      const signal = data.trap_signal || 'WAITING FOR TBT DATA';
-      signalEl.textContent = signal;
-      const hot = String(signal).includes('HIGH PROBABILITY');
-      signalEl.classList.toggle('text-neon-green', hot);
-      signalEl.classList.toggle('text-slate-500', !hot);
+    setText('preopen-prev-close', fmtIep(data.previous_close));
+
+    const pctEl = document.getElementById('preopen-projected-pct');
+    if (pctEl) {
+      const pct = Number(data.projected_open_pct);
+      pctEl.classList.remove('text-green-400', 'text-red-400', 'text-slate-500');
+      if (Number.isFinite(pct)) {
+        pctEl.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+        pctEl.classList.add(pct > 0 ? 'text-green-400' : pct < 0 ? 'text-red-400' : 'text-slate-500');
+      } else {
+        pctEl.textContent = '—';
+        pctEl.classList.add('text-slate-500');
+      }
     }
-    renderPreopenSentiment(data);
   }
   async function refreshPreopen() { try { const response = await fetch('{% url "live_dashboard:preopen_trap_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); updatePreopen(await response.json()); } catch (error) { console.warn('Pre-open fetch failed:', error); } }
 
@@ -930,7 +938,7 @@
   // Render the restored peak extremes immediately (using neutral current values)
   // so the "Peak: …" readouts and ghost bars show the persisted session peaks
   // before the first pre-open snapshot / WebSocket tick arrives.
-  renderPreopenSentiment({ bias: 0, momentum: 0, score: 50, theme: 'neutral' });
+  renderSentiment({ bias: 0, momentum: 0, score: 50 });
   refreshOptions(); refreshGamma(); refreshPreopen(); setInterval(refreshOptions, 1000); setInterval(refreshGamma, 2000); setInterval(refreshPreopen, 5000);
 
   // ---- 🔊 Voice-alert toggle (defaults OFF; browsers require a user gesture) ----
