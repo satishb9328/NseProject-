@@ -1451,9 +1451,12 @@ THETA_EXPIRY_HOUR = 15
 THETA_EXPIRY_MINUTE = 30
 THETA_MIN_SECONDS = 1_800  # 30-minute safety floor to avoid division-by-zero near expiry
 THETA_RISK_FREE_RATE = 0.065  # matches the Gamma engine's risk_free_rate
+# De-dupes the warning log so a persistently failing IV solve (e.g. py_vollib missing)
+# is logged once instead of once per publish beat (1 Hz).
+_last_theta_error = None
 
 
-def calculate_hourly_theta(spot_price, strike_price, option_ltp, expiry_date) -> float:
+def calculate_hourly_theta(spot_price, strike_price, option_ltp, expiry_date, option_type="c") -> float:
     """Return the real-time hourly theta (₹/hour), rounded to 2 decimal places.
 
     The contract requested by the dashboard:
@@ -1463,12 +1466,18 @@ def calculate_hourly_theta(spot_price, strike_price, option_ltp, expiry_date) ->
     * If fewer than 1,800 seconds (30 minutes) remain, 0.0 is returned to avoid the
       division-by-zero / sqrt(T) instability right at the close.
     * Implied Volatility is reverse-solved from the LTP first, then fed back into the
-      Black-Scholes theta to obtain the Annual Theta, which is finally converted to an
-      hourly figure by dividing by 365 and then 24.
+      Black-Scholes theta. NOTE: py_vollib's ``theta()`` already divides by 365
+      internally (it returns a PER-DAY figure), so the hourly decay is that daily
+      theta divided by 24 — dividing by 365 again would shrink the result ~1000x and
+      round it to 0.00.
 
-    ``option_ltp`` is the ATM premium; the call convention ("c") is used because ATM
-    call and put theta converge by put-call parity.
+    ``option_type`` is ``"c"`` (call) or ``"p"`` (put) and defaults to ``"c"``.
     """
+    # py_vollib is strict about numeric types: coerce everything to plain Python
+    # floats up-front so a str / Decimal / numpy scalar can never reach the solver.
+    # Reject bool explicitly (a bool IS an int subclass, so float(True) == 1.0).
+    if isinstance(spot_price, bool) or isinstance(strike_price, bool) or isinstance(option_ltp, bool):
+        return 0.0
     try:
         spot = float(spot_price)
         strike = float(strike_price)
@@ -1476,8 +1485,14 @@ def calculate_hourly_theta(spot_price, strike_price, option_ltp, expiry_date) ->
     except (TypeError, ValueError):
         return 0.0
 
+    if not (math.isfinite(spot) and math.isfinite(strike) and math.isfinite(ltp)):
+        return 0.0
     if spot <= 0 or strike <= 0 or ltp <= 0:
         return 0.0
+
+    flag = option_type.lower() if isinstance(option_type, str) else "c"
+    if flag not in ("c", "p"):
+        flag = "c"
 
     expiry_iso = normalize_expiry(expiry_date)
     if not expiry_iso:
@@ -1486,6 +1501,7 @@ def calculate_hourly_theta(spot_price, strike_price, option_ltp, expiry_date) ->
     try:
         expiry_dt = datetime.strptime(expiry_iso, "%Y-%m-%d")
     except ValueError:
+        logger.debug("Hourly theta skipped: unrecognised expiry %r.", expiry_date)
         return 0.0
 
     ist = timezone(timedelta(hours=5, minutes=30))
@@ -1511,17 +1527,45 @@ def calculate_hourly_theta(spot_price, strike_price, option_ltp, expiry_date) ->
         from py_vollib.black_scholes.greeks.analytical import theta as bs_theta
 
         # Reverse-solve IV from the live LTP, then use it for the theta calc.
-        iv = implied_volatility(ltp, spot, strike, T, THETA_RISK_FREE_RATE, "c")
-        annual_theta = bs_theta("c", spot, strike, T, THETA_RISK_FREE_RATE, iv)
-    except Exception:
-        # IV solver can fail when the LTP sits outside no-arbitrage bounds or T is
-        # tiny; degrade to a neutral reading instead of crashing the publish loop.
+        iv = implied_volatility(ltp, spot, strike, T, THETA_RISK_FREE_RATE, flag)
+        # py_vollib's theta() divides by 365 internally and returns a PER-DAY figure
+        # (see its docstring). We must NOT divide by 365 again.
+        daily_theta = bs_theta(flag, spot, strike, T, THETA_RISK_FREE_RATE, iv)
+    except Exception as exc:
+        # Log the SPECIFIC py_vollib error (e.g. PriceIsBelowIntrinsic /
+        # VolatilityNotCalculable) once per distinct message so the failure is
+        # diagnosable instead of being silently swallowed into a 0.0.
+        global _last_theta_error
+        error = f"{type(exc).__name__}: {exc}"
+        if error != _last_theta_error:
+            logger.warning(
+                "Hourly theta calculation failed (%s) for spot=%s strike=%s ltp=%s T=%.6f.",
+                error, spot, strike, ltp, T,
+            )
+            _last_theta_error = error
         return 0.0
 
-    hourly_theta = annual_theta / 365.0 / 24.0
+    # Hourly decay = daily theta / 24 (the daily figure is already annual/365).
+    hourly_theta = daily_theta / 24.0
     if not math.isfinite(hourly_theta):
         return 0.0
     return round(hourly_theta, 2)
+
+
+def _find_leg_ltp(instrument_data, strike, option_type) -> float | None:
+    """Return the first valid LTP for the given (strike, option_type) leg, else None."""
+    for item in instrument_data.values():
+        if not isinstance(item, dict):
+            continue
+        if (item.get("option_type") or "").upper() != option_type:
+            continue
+        item_strike = _coerce_float(item.get("strike"))
+        if item_strike is None or abs(item_strike - strike) > 1e-6:
+            continue
+        ltp = _coerce_float(item.get("ltp"))
+        if ltp is not None and ltp > 0:
+            return ltp
+    return None
 
 
 def _compute_atm_theta_decay(instrument_data, spot, expiry_date) -> float:
@@ -1529,27 +1573,31 @@ def _compute_atm_theta_decay(instrument_data, spot, expiry_date) -> float:
     if not isinstance(instrument_data, dict) or not spot or spot <= 0:
         return 0.0
 
-    best = None
+    nearest_strike = None
     for item in instrument_data.values():
         if not isinstance(item, dict):
             continue
-        strike = item.get("strike")
-        strike = float(strike) if isinstance(strike, (int, float)) else 0.0
-        if strike <= 0:
+        strike = _coerce_float(item.get("strike"))
+        if strike is None or strike <= 0:
             continue
-        ltp = item.get("ltp")
-        ltp = float(ltp) if isinstance(ltp, (int, float)) else 0.0
-        if ltp <= 0:
-            continue
-        distance = abs(strike - spot)
-        if best is None or distance < best[0]:
-            best = (distance, strike, ltp)
+        if nearest_strike is None or abs(strike - spot) < abs(nearest_strike - spot):
+            nearest_strike = strike
 
-    if best is None:
+    if nearest_strike is None:
         return 0.0
 
-    _, atm_strike, atm_ltp = best
-    return calculate_hourly_theta(spot, atm_strike, atm_ltp, expiry_date)
+    # Prefer the CE (call) leg so the "c" flag is applied to a genuine call price
+    # (never a put's LTP, which could sit below a call's intrinsic and make the IV
+    # solver raise PriceIsBelowIntrinsic). Fall back to PE with the "p" flag.
+    ce_ltp = _find_leg_ltp(instrument_data, nearest_strike, "CE")
+    if ce_ltp is not None:
+        return calculate_hourly_theta(spot, nearest_strike, ce_ltp, expiry_date, "c")
+
+    pe_ltp = _find_leg_ltp(instrument_data, nearest_strike, "PE")
+    if pe_ltp is not None:
+        return calculate_hourly_theta(spot, nearest_strike, pe_ltp, expiry_date, "p")
+
+    return 0.0
 
 
 def _compute_live_sentiment_full(instrument_data=None) -> dict:
