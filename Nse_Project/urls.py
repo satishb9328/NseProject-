@@ -34,6 +34,7 @@ urlpatterns = [
     path('live-dashboard/', include('Nse_Project.Live_dashboard.urls')),
     path('gamma/', include('Nse_Project.GAMMA.urls')),
     path('trend-setups/', include('Nse_Project.funda_fetch.urls')),
+    path('', include('Nse_Project.FNO.urls')),
 
     # 52-Week-Low SMC queue ticks. Included with an empty prefix so the URL
     # resolves to /queue-ticks/ and the sidebar can use ``{% url 'queue_ticks' %}``
