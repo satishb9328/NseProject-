@@ -2,6 +2,7 @@ import argparse
 import datetime as dt
 import io
 import os
+import re
 import time
 
 import pandas as pd
@@ -24,6 +25,9 @@ HEADERS = {
 
 SESSION_PRIME_URL = 'https://www.nseindia.com/'
 
+# Add or update NSE trading holidays for the current year here.
+NSE_HOLIDAYS = set()
+
 
 def format_ddmmyyyy(date_obj: dt.date) -> str:
     return date_obj.strftime('%d%m%Y')
@@ -35,6 +39,42 @@ def format_yyyymmdd(date_obj: dt.date) -> str:
 
 def parse_date(value: str) -> dt.date:
     return dt.datetime.strptime(value, '%Y-%m-%d').date()
+
+
+def get_last_downloaded_date(directory: str) -> dt.date | None:
+    """Find the latest valid participant OI date already saved locally."""
+    latest_date = None
+    try:
+        filenames = os.listdir(directory)
+    except FileNotFoundError:
+        return None
+
+    for filename in filenames:
+        match = re.fullmatch(r'participant_oi_(\d{8})\.csv', filename, flags=re.IGNORECASE)
+        if not match:
+            continue
+        try:
+            file_date = dt.datetime.strptime(match.group(1), '%Y%m%d').date()
+        except ValueError:
+            continue
+        if latest_date is None or file_date > latest_date:
+            latest_date = file_date
+    return latest_date
+
+
+def get_missing_trading_dates(today: dt.date | None = None) -> list[dt.date]:
+    """Return weekdays after the latest OI file, or the last 7 days if empty."""
+    today = today or dt.date.today()
+    last_downloaded = get_last_downloaded_date(OUTPUT_DIR_OI)
+    start_date = last_downloaded + dt.timedelta(days=1) if last_downloaded else today - dt.timedelta(days=7)
+
+    valid_dates = []
+    current_date = start_date
+    while current_date <= today:
+        if current_date.weekday() < 5 and current_date not in NSE_HOLIDAYS:
+            valid_dates.append(current_date)
+        current_date += dt.timedelta(days=1)
+    return valid_dates
 
 
 # ఈ ఫంక్షన్ OI మరియు Volume ఫైల్స్ రెండింటికీ పనిచేస్తుంది
@@ -49,8 +89,12 @@ def download_report(date_obj: dt.date, url_template: str, output_dir: str, file_
 
     url = url_template.format(ddmmyyyy=format_ddmmyyyy(date_obj))
     print(f"డౌన్‌లోడ్ అవుతోంది: {url}")
-    
-    response = session.get(url, timeout=30)
+
+    try:
+        response = session.get(url, timeout=30)
+    except requests.RequestException as exc:
+        print(f"డౌన్‌లోడ్ అభ్యర్థన విఫలమైంది: {exc}")
+        return
     if response.status_code != 200:
         print(f"డౌన్‌లోడ్ విఫలమైంది (Status: {response.status_code}) - బహుశా ఆ రోజు డేటా ఇంకా రాలేదు.")
         return
@@ -64,23 +108,26 @@ def download_report(date_obj: dt.date, url_template: str, output_dir: str, file_
     try:
         df = pd.read_csv(io.BytesIO(content))
     except Exception as e:
-        print(f"CSV పార్సింగ్ ఎర్రర్: {e}")
+        print(f"CSV parsing error: {e}")
         return
 
     df.to_csv(output_path, index=False)
-    print(f"సక్సెస్‌ఫుల్‌గా సేవ్ చేయబడింది: {output_path}")
-    time.sleep(1)
+    print(f"Saved successfully: {output_path}")
 
 
-def fetch_participant_data(date_obj: dt.date) -> None:
+def create_session() -> requests.Session:
     session = requests.Session()
     session.headers.update(HEADERS)
-    
+
     # కుకీస్ (Cookies) జనరేట్ చేయడం కోసం ముందుగా ప్రధాన పేజీని లోడ్ చేయడం
     try:
         session.get(SESSION_PRIME_URL, timeout=20)
     except Exception:
         pass
+    return session
+
+
+def fetch_participant_data(date_obj: dt.date, session: requests.Session) -> None:
 
     print(f"\n--- {date_obj} తేదీకి సంబంధించిన ఫైల్స్ కోసం వెతుకుతోంది ---")
     
@@ -93,9 +140,16 @@ def fetch_participant_data(date_obj: dt.date) -> None:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Download NSE participant OI and Volume CSVs for a given date')
-    parser.add_argument('--date', type=str, default=dt.date.today().strftime('%Y-%m-%d'),
-                        help='Date to download in YYYY-MM-DD format')
+    parser.add_argument('--date', type=str, default=None,
+                        help='Download one date (YYYY-MM-DD); omit to backfill missing trading days')
     args = parser.parse_args()
-    date_obj = parse_date(args.date)
-    
-    fetch_participant_data(date_obj)
+    session = create_session()
+    dates = [parse_date(args.date)] if args.date else get_missing_trading_dates()
+
+    if not dates:
+        print('No missing trading dates to download.')
+    for index, date_obj in enumerate(dates):
+        fetch_participant_data(date_obj, session)
+        if index < len(dates) - 1:
+            time.sleep(2)
+    session.close()
