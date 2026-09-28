@@ -126,23 +126,29 @@ def test_dashboard_html() -> None:
 
 
 def test_live_signals_html() -> None:
-    print("\n3) live_signals.html column wiring")
+    print("\n3) live_signals.html compact option chain wiring")
     html = io.open(LIVE_SIGNALS, encoding="utf-8").read()
-    check("header count", len(_headers(html)), 15)
-    check("header order", _headers(html), EXPECTED_HEADERS)
 
-    start = html.index("const values = [")
-    values_block = html[start:html.index("];", start)]
-    keys = re.findall(r"row\.([a-z_]+)", values_block)
-    check("JS values[] count", len(keys), 15)
-    check("JS values[] order matches headers", keys, EXPECTED_JS_KEYS)
+    # The legacy 15-column full option-chain table was removed from the Live
+    # Signals dashboard; only the central Compact Options Chain remains.
+    check("legacy full table removed", 'id="option-chain-table"' in html, False)
+    check("legacy full tbody removed", 'id="live-options-tbody"' in html, False)
+    check("legacy 15-col colspan removed", 'colspan="15"' in html, False)
+    check("legacy renderRows removed", "function renderRows" in html, False)
+    check("legacy buildRow removed", "function buildRow" in html, False)
 
-    check("no stale colspan=13", 'colspan="13"' in html, False)
-    check("no stale colSpan = 13", "colSpan = 13" in html, False)
-    check("ATM highlighter reads children[7]", "row.children[7]?.textContent" in html, True)
-    check("glow threshold is 50000", "const VELOCITY_GLOW_THRESHOLD = 50000;" in html, True)
-    check("call glow class defined", ".option-chain-table td.vel-hot-call" in html, True)
-    check("put glow class defined", ".option-chain-table td.vel-hot-put" in html, True)
+    check("compact table present", 'id="compact-options-table"' in html, True)
+    check("compact table class present", 'class="compact-chain-table"' in html, True)
+
+    # The compact chain renders exactly 5 columns.
+    for header in (">CALL COI%</th>", ">CALL LTP</th>", ">STRIKE</th>",
+                   ">PUT LTP</th>", ">PUT COI%</th>"):
+        check(f"compact header {header!r}", header in html, True)
+
+    # renderCompactChain reads only the 5 compact fields.
+    check("compact renderer present", "function renderCompactChain" in html, True)
+    for key in ("call_coi_pct", "call_ltp", "strike", "put_ltp", "put_coi_pct"):
+        check(f"compact renderer reads row.{key}", f"row.{key}" in html, True)
 
 
 def test_api_contract() -> None:

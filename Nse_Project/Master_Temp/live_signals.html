@@ -4,16 +4,6 @@
 
 {% block extra_css %}
 <style>
-  .option-chain-table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.25; text-align: center; }
-  .option-chain-table th { white-space: nowrap; font-weight: 700; line-height: 1.25; text-transform: uppercase; }
-  .option-chain-table td { white-space: nowrap; line-height: 1.25; }
-  .option-chain-table th.call-side, .option-chain-table td.call-side { background: rgba(56, 189, 248, .14); color: #7dd3fc; }
-  .option-chain-table th.put-side, .option-chain-table td.put-side { background: rgba(251, 146, 60, .14); color: #fdba74; }
-  .option-chain-table th.strike-header, .option-chain-table td.strike-cell { background: rgba(148, 163, 184, .08); color: #cbd5e1; }
-  .option-chain-table tr.atm-row td { background: rgba(56, 189, 248, .16); box-shadow: inset 0 0 0 1px rgba(56, 189, 248, .6); color: #e0f2fe; font-weight: 700; }
-  .dominance-track { height: 3px; margin-top: 3px; overflow: hidden; border-radius: 999px; background: rgba(148, 163, 184, .18); }
-  .dominance-fill { height: 100%; border-radius: inherit; transition: width .35s ease; }
-  .sentiment-bar { transition: background-color .7s ease, color .7s ease, border-color .7s ease; }
   /* ---- Dynamic metric color coding (Bias / Momentum / Score) ---- */
   .sentiment-metric {
     font-variant-numeric: tabular-nums;
@@ -88,13 +78,6 @@
   .insight-bear { color: #fecaca; background-color: rgba(239,68,68,.10); border-left-color: #ef4444; }
   .insight-neutral { color: #e2e8f0; background-color: rgba(148,163,184,.10); border-left-color: #eab308; }
   .gamma-alert-feed { scrollbar-width: thin; scrollbar-color: rgba(56, 189, 248, .45) rgba(7, 11, 20, .8); }
-  /* ---- Volume Velocity (shares/sec) ---- */
-  .option-chain-table td.vel-cell { font-variant-numeric: tabular-nums; color: #94a3b8; }
-  .option-chain-table td.vel-hot-call { color: #22d3ee; font-weight: 800; background-color: rgba(34, 211, 238, .18); text-shadow: 0 0 6px rgba(34, 211, 238, .95), 0 0 12px rgba(34, 211, 238, .6); animation: vel-pulse-call 1s ease-in-out infinite; }
-  .option-chain-table td.vel-hot-put { color: #fb923c; font-weight: 800; background-color: rgba(251, 146, 60, .18); text-shadow: 0 0 6px rgba(251, 146, 60, .95), 0 0 12px rgba(251, 146, 60, .6); animation: vel-pulse-put 1s ease-in-out infinite; }
-  @keyframes vel-pulse-call { 0%, 100% { box-shadow: inset 0 0 6px rgba(34, 211, 238, .35); } 50% { box-shadow: inset 0 0 16px rgba(34, 211, 238, .85); } }
-  @keyframes vel-pulse-put { 0%, 100% { box-shadow: inset 0 0 6px rgba(251, 146, 60, .35); } 50% { box-shadow: inset 0 0 16px rgba(251, 146, 60, .85); } }
-  @media (prefers-reduced-motion: reduce) { .option-chain-table td.vel-hot-call, .option-chain-table td.vel-hot-put { animation: none; } }
   /* ---- Gamma Flip scrolling warning (right-to-left ticker) ---- */
   .gamma-flip-warning { display: none; overflow: hidden; white-space: nowrap; }
   .gamma-flip-warning.is-visible { display: block; }
@@ -315,7 +298,6 @@
           </div>
         </div>
         <div class="mt-auto flex w-full justify-end gap-1.5 pt-2">
-          <button id="full-table-toggle" type="button" class="rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1 text-xs font-bold uppercase tracking-[.12em] text-cyan-300 transition hover:bg-slate-700/60" aria-controls="full-option-chain-wrap" aria-expanded="false">TABLE</button>
           <button id="math-toggle" type="button" class="rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1 text-xs font-bold uppercase tracking-[.12em] text-emerald-300 transition hover:bg-slate-700/60" aria-controls="math-console" aria-expanded="false">MATH</button>
           <button id="audio-toggle" type="button" class="rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1 text-xs font-bold uppercase tracking-[.12em] text-slate-300 transition hover:bg-slate-700/60" aria-pressed="false">🔇 ALERTS OFF</button>
         </div>
@@ -324,29 +306,8 @@
     </div>
     </section>
 
-    <div class="mt-4">
-      <div id="full-option-chain-wrap" class="hidden">
-        <div class="min-w-0 overflow-x-auto">
-    <section id="option-chain" class="mt-0">
-      <div id="sentiment-bar" class="sentiment-bar mb-2 flex items-center justify-end gap-2 rounded-lg px-2 py-1">
-        <div class="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-800 bg-slate-900/60 p-1">
-          <label class="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-400">Expiry<select id="expiry-filter" class="rounded-md border border-slate-700 bg-slate-900/80 px-1.5 py-0.5 text-xs normal-case tracking-normal text-slate-200"><option value="all">Loading expiries...</option></select></label>
-          <button id="scalper-playground-open" type="button" class="scalper-playground-trigger shrink-0 rounded-md border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 transition hover:bg-slate-700/60" aria-haspopup="dialog" aria-controls="scalper-playground-modal">🎮 Scalper's Playground</button>
-        </div>
-      </div>
-
-      <div class="rounded-2xl glass">
-        <table id="option-chain-table" class="option-chain-table min-w-[1000px] text-xs leading-snug">
-          <thead><tr>
-            <th class="call-side border border-sky-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-sky-300">CALL OI%</th><th class="call-side border border-sky-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-sky-300">CALL OI</th><th class="call-side border border-sky-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-sky-300">CALL VOL</th><th class="call-side border border-sky-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-sky-300" title="Call volume velocity in shares/sec over a rolling 3s window">CALL VEL</th><th class="call-side border border-sky-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-sky-300">CALL LTP</th><th class="call-side border border-sky-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-sky-300">CALL COI</th><th class="call-side border border-sky-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-sky-300">CALL COI%</th><th class="strike-header border border-slate-700 border-b-2 px-2 py-1 text-xs text-slate-300">STRIKE</th><th class="put-side border border-orange-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-orange-300">PUT COI%</th><th class="put-side border border-orange-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-orange-300">PUT COI</th><th class="put-side border border-orange-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-orange-300">PUT LTP</th><th class="put-side border border-orange-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-orange-300" title="Put volume velocity in shares/sec over a rolling 3s window">PUT VEL</th><th class="put-side border border-orange-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-orange-300">PUT VOL</th><th class="put-side border border-orange-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-orange-300">PUT OI</th><th class="put-side border border-orange-700 border-b-2 border-slate-600 px-2 py-1 text-xs text-orange-300">PUT OI%</th>
-          </tr></thead>
-          <tbody id="live-options-tbody"><tr><td colspan="15" class="px-2 py-2 text-xs leading-snug text-slate-500">Loading live option chain...</td></tr></tbody>
-        </table>
-      </div>
-      <div class="mt-2 flex justify-between text-xs text-slate-500"><span>ATM strike is highlighted in blue.</span><span id="live-synced">Waiting for data...</span></div>
-    </section>
-        </div>
-      </div>
+    <div class="mt-4 flex items-center justify-end">
+      <button id="scalper-playground-open" type="button" class="scalper-playground-trigger shrink-0 rounded-md border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-cyan-300 transition hover:bg-slate-700/60" aria-haspopup="dialog" aria-controls="scalper-playground-modal">🎮 Scalper's Playground</button>
     </div>
 
     <div class="mt-4">
@@ -398,12 +359,9 @@
 {% block extra_js %}
 <script>
 (() => {
-  const body = document.getElementById('live-options-tbody');
-  const synced = document.getElementById('live-synced');
-  const expiryFilter = document.getElementById('expiry-filter');
   const signalStreams = { weekly: document.getElementById('weekly-signals-stream'), daily: document.getElementById('daily-signals-stream') };
   const seenSignals = new Set();
-  let allRows = [], loadedExpiry = null, currentSpot = null, previousSignature = '', expiryInitialized = false, currentLiveScore = 50;
+  let allRows = [], currentSpot = null, currentLiveScore = 50;
   // Live option-chain bias / momentum, exposed for the AI card's math console.
   let currentBias = 0, currentMomentum = 0;
   // Real-time ATM time decay (₹/hr), streamed from the backend via the live options payload.
@@ -619,84 +577,13 @@
     document.getElementById('sentiment-insight-text').textContent = insight.text;
   }
 
-  function cell(text, classes) { const td = document.createElement('td'); td.className = classes; td.textContent = text; return td; }
-  function addDominanceBar(td, value, color) { const track = document.createElement('div'); track.className = 'dominance-track'; const fill = document.createElement('div'); fill.className = 'dominance-fill'; fill.style.width = `${Math.max(0, Math.min(100, number(value)))}%`; fill.style.background = color; track.appendChild(fill); td.appendChild(track); }
-
-  // Volume Velocity: shares/sec above this is an explosive breakout and gets a glow.
-  const VELOCITY_GLOW_THRESHOLD = 50000;
-  function vel(value) { const n = Number(value); if (!Number.isFinite(n) || n <= 0) return '-'; if (n >= 1000000) return `${(n / 1000000).toFixed(2)}M`; if (n >= 1000) return `${(n / 1000).toFixed(1)}k`; return String(Math.round(n)); }
-  function velHot(value) { const n = Number(value); return Number.isFinite(n) && n > VELOCITY_GLOW_THRESHOLD; }
-
-  function buildRow(row) {
-    const tr = document.createElement('tr'); tr.className = 'border-t border-slate-700/70 hover:bg-slate-800/40 transition-colors';
-    //  0 CALL OI%  1 CALL OI  2 CALL VOL  3 CALL VEL  4 CALL LTP  5 CALL COI  6 CALL COI%
-    //  7 STRIKE    8 PUT COI% 9 PUT COI  10 PUT LTP  11 PUT VEL  12 PUT VOL  13 PUT OI  14 PUT OI%
-    const CALL_VEL = 3, PUT_VEL = 11, STRIKE = 7, PUT_OI_PCT = 14;
-    const values = [pct(row.call_oi_pct), fmt(row.call_oi), fmt(row.call_volume), vel(row.call_velocity), fmt(row.call_ltp), fmt(row.call_coi), pct(row.call_coi_pct), fmt(row.strike), pct(row.put_coi_pct), fmt(row.put_coi), fmt(row.put_ltp), vel(row.put_velocity), fmt(row.put_volume), fmt(row.put_oi), pct(row.put_oi_pct)];
-    values.forEach((value, index) => {
-      let classes = 'border border-slate-700 px-2 py-1 text-xs leading-snug font-medium text-slate-200 whitespace-nowrap';
-      if ([4, 5, 9, 10].includes(index)) classes += ' font-semibold';
-      if (index === STRIKE) classes += ' strike-cell font-bold';
-      if (index === 0 && number(row.call_oi_pct) > 55) classes += ' bg-sky-900/40 text-sky-300 font-bold';
-      if (index === PUT_OI_PCT && number(row.put_oi_pct) > 55) classes += ' bg-orange-900/40 text-orange-300 font-bold';
-      if ([5, 6].includes(index)) classes += ' text-sky-300';
-      if ([8, 9].includes(index)) classes += ' text-orange-300';
-      if (index === CALL_VEL) classes += ' vel-cell' + (velHot(row.call_velocity) ? ' vel-hot-call' : '');
-      if (index === PUT_VEL) classes += ' vel-cell' + (velHot(row.put_velocity) ? ' vel-hot-put' : '');
-      const td = cell(value, classes);
-      if (index === CALL_VEL || index === PUT_VEL) { const exact = Number(index === CALL_VEL ? row.call_velocity : row.put_velocity); td.title = Number.isFinite(exact) && exact > 0 ? `${exact.toLocaleString('en-IN')} shares/sec` : 'No volume in the last 3s'; }
-      if (index === 0) addDominanceBar(td, row.call_oi_pct, '#38bdf8');
-      if (index === PUT_OI_PCT) addDominanceBar(td, row.put_oi_pct, '#fb923c');
-      tr.appendChild(td);
-    });
-    return tr;
-  }
-
-  function renderRows() {
-    const selectedExpiry = expiryFilter.value;
-    const available = allRows
-      .filter(row => {
-        const rowExpiry = row.expiry || row.expiry_date;
-        return selectedExpiry === 'all' || !rowExpiry || rowExpiry === selectedExpiry;
-      })
-      .sort((left, right) => number(left.strike) - number(right.strike));
-
-    if (!available.length) {
-      body.replaceChildren();
-      const emptyRow = document.createElement('tr');
-      const emptyCell = cell('No strikes match the selected expiry.', 'px-2 py-2 text-xs leading-snug text-slate-500');
-      emptyCell.colSpan = 15;
-      emptyRow.appendChild(emptyCell);
-      body.appendChild(emptyRow);
-      return;
-    }
-
-    let atmIndex = Math.floor(available.length / 2);
-    if (Number.isFinite(currentSpot)) {
-      atmIndex = available.reduce((closestIndex, row, index) => {
-        const closestDistance = Math.abs(number(available[closestIndex].strike) - currentSpot);
-        const distance = Math.abs(number(row.strike) - currentSpot);
-        return distance < closestDistance ? index : closestIndex;
-      }, 0);
-    }
-
-    const start = Math.max(0, Math.min(atmIndex - 15, available.length - 31));
-    const filtered = available.slice(start, start + 31);
-    const signature = JSON.stringify(filtered);
-    if (signature === previousSignature) { highlightAtm(); return; }
-    previousSignature = signature; body.replaceChildren();
-    if (!filtered.length) { const tr = document.createElement('tr'); const td = cell('No strikes match the current filters.', 'px-2 py-2 text-xs leading-snug text-slate-500'); td.colSpan = 15; tr.appendChild(td); body.appendChild(tr); return; }
-    const fragment = document.createDocumentFragment(); filtered.forEach(row => fragment.appendChild(buildRow(row))); body.appendChild(fragment); highlightAtm();
-  }
-
-  function highlightAtm() { if (!Number.isFinite(currentSpot)) return; let closest = null, distance = Infinity; body.querySelectorAll('tr').forEach(row => { const strike = number(row.children[7]?.textContent); const diff = Math.abs(strike - currentSpot); if (Number.isFinite(strike) && diff < distance) { distance = diff; closest = row; } row.classList.remove('atm-row'); }); if (closest) closest.classList.add('atm-row'); }
   function exposureColor(element, value) { const amount = Number(value); element.classList.remove('text-green-400', 'text-red-400', 'text-slate-200'); element.classList.add(Number.isFinite(amount) && amount > 0 ? 'text-green-400' : Number.isFinite(amount) && amount < 0 ? 'text-red-400' : 'text-slate-200'); }
   // ---- PCR dynamic color coding (standard options thresholds) ----
   // PCR >= 1.2 => Bullish (green), PCR <= 0.8 => Bearish (red), otherwise Neutral (amber).
   function pcrColorClass(value) { const pcr = Number(value); if (!Number.isFinite(pcr)) return 'text-slate-50'; if (pcr >= 1.2) return 'text-green-400'; if (pcr <= 0.8) return 'text-red-400'; return 'text-yellow-400'; }
   // ---- Gamma Flip missing-value guard (None/null renders as "--") ----
   function isFlipMissing(value) { if (value === null || value === undefined) return true; const text = String(value).trim(); if (!text || text === '--' || /^(none|null)$/i.test(text)) return true; return !Number.isFinite(Number(value)); }
-  function renderProfile(profile) { if (!profile || typeof profile !== 'object') return; const spot = profileValue(profile, 'spot', 'Spot', 'spot_price'); const weekly = profile.weekly_gamma || profile; const day = profile.day_gamma || {}; if (!haveIndexSpot) { currentSpot = Number(spot); const el = document.getElementById('live-spot-price'); if (el) el.textContent = fmt(spot); } document.getElementById('live-spot').textContent = fmt(spot); document.getElementById('live-expiry').textContent = profile.expiry || '--'; [['weekly', weekly], ['day', day]].forEach(([prefix, metrics]) => { const netGex = profileValue(metrics, 'net_gex', 'netGEX', 'net_gex_value'); const pcr = profileValue(metrics, 'pcr', 'PCR'); const gexTier = metrics.signal ? signalTier(metrics.signal) : netGexTier(netGex, pcr); const pcrElement = document.getElementById(`${prefix}-pcr`); pcrElement.textContent = fmt(pcr); pcrElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); pcrElement.classList.add(pcrColorClass(pcr)); const gammaFlipRaw = profileValue(metrics, 'gamma_flip_level', 'gamma_flip', 'gammaFlip', 'gamma_flip_value'); document.getElementById(`${prefix}-gamma-flip`).textContent = fmtFlip(gammaFlipRaw); const gammaFlipWarning = document.getElementById(`${prefix}-gamma-flip-warning`); if (gammaFlipWarning) gammaFlipWarning.classList.toggle('is-visible', isFlipMissing(gammaFlipRaw)); document.getElementById(`${prefix}-call-wall`).textContent = fmt(metrics.call_wall ?? metrics.call_wall_strike); document.getElementById(`${prefix}-put-wall`).textContent = fmt(metrics.put_wall ?? metrics.put_wall_strike); const charmElement = document.getElementById(`${prefix}-net-charm`); const vannaElement = document.getElementById(`${prefix}-net-vanna`); charmElement.textContent = fmtExposure(metrics.net_charm_display, metrics.net_charm); vannaElement.textContent = fmtExposure(metrics.net_vanna_display, metrics.net_vanna); charmElement.title = exactTitle(metrics.net_charm); vannaElement.title = exactTitle(metrics.net_vanna); exposureColor(charmElement, metrics.net_charm); exposureColor(vannaElement, metrics.net_vanna); const gexElement = document.getElementById(`${prefix}-net-gex`); const summaryElement = document.getElementById(`${prefix}-net-gex-summary`); gexElement.textContent = fmtExposure(metrics.net_gex_display, netGex); gexElement.title = exactTitle(netGex); gexElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); gexElement.classList.add(gexTier.colorClass); summaryElement.textContent = gexTier.summary; summaryElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-400'); summaryElement.classList.add(gexTier.colorClass); }); renderRows(); }
+  function renderProfile(profile) { if (!profile || typeof profile !== 'object') return; const spot = profileValue(profile, 'spot', 'Spot', 'spot_price'); const weekly = profile.weekly_gamma || profile; const day = profile.day_gamma || {}; if (!haveIndexSpot) { currentSpot = Number(spot); const el = document.getElementById('live-spot-price'); if (el) el.textContent = fmt(spot); } document.getElementById('live-spot').textContent = fmt(spot); document.getElementById('live-expiry').textContent = profile.expiry || '--'; [['weekly', weekly], ['day', day]].forEach(([prefix, metrics]) => { const netGex = profileValue(metrics, 'net_gex', 'netGEX', 'net_gex_value'); const pcr = profileValue(metrics, 'pcr', 'PCR'); const gexTier = metrics.signal ? signalTier(metrics.signal) : netGexTier(netGex, pcr); const pcrElement = document.getElementById(`${prefix}-pcr`); pcrElement.textContent = fmt(pcr); pcrElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); pcrElement.classList.add(pcrColorClass(pcr)); const gammaFlipRaw = profileValue(metrics, 'gamma_flip_level', 'gamma_flip', 'gammaFlip', 'gamma_flip_value'); document.getElementById(`${prefix}-gamma-flip`).textContent = fmtFlip(gammaFlipRaw); const gammaFlipWarning = document.getElementById(`${prefix}-gamma-flip-warning`); if (gammaFlipWarning) gammaFlipWarning.classList.toggle('is-visible', isFlipMissing(gammaFlipRaw)); document.getElementById(`${prefix}-call-wall`).textContent = fmt(metrics.call_wall ?? metrics.call_wall_strike); document.getElementById(`${prefix}-put-wall`).textContent = fmt(metrics.put_wall ?? metrics.put_wall_strike); const charmElement = document.getElementById(`${prefix}-net-charm`); const vannaElement = document.getElementById(`${prefix}-net-vanna`); charmElement.textContent = fmtExposure(metrics.net_charm_display, metrics.net_charm); vannaElement.textContent = fmtExposure(metrics.net_vanna_display, metrics.net_vanna); charmElement.title = exactTitle(metrics.net_charm); vannaElement.title = exactTitle(metrics.net_vanna); exposureColor(charmElement, metrics.net_charm); exposureColor(vannaElement, metrics.net_vanna); const gexElement = document.getElementById(`${prefix}-net-gex`); const summaryElement = document.getElementById(`${prefix}-net-gex-summary`); gexElement.textContent = fmtExposure(metrics.net_gex_display, netGex); gexElement.title = exactTitle(netGex); gexElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); gexElement.classList.add(gexTier.colorClass); summaryElement.textContent = gexTier.summary; summaryElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-400'); summaryElement.classList.add(gexTier.colorClass); }); }
   function renderSignal(signal) { if (signal == null) return; const text = typeof signal === 'string' ? signal : signal.message || JSON.stringify(signal); if (seenSignals.has(text)) return; seenSignals.add(text); const stream = /weekly|macro/i.test(text) ? signalStreams.weekly : signalStreams.daily; if (!stream) return; if (stream.querySelector('p')) stream.replaceChildren(); const item = document.createElement('div'); item.className = 'rounded-lg border border-slate-700/80 bg-ink-800/80 p-2'; const timestamp = typeof signal === 'object' && signal.timestamp ? new Date(signal.timestamp).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }) : new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }); item.textContent = `${timestamp}  ${text}`; stream.prepend(item); while (stream.children.length > 8) stream.lastChild.remove(); }
 
   // ---- Live index SPOT ----
@@ -724,7 +611,6 @@
     const legacy = document.getElementById('live-spot');
     if (legacy && legacy.textContent !== text) legacy.textContent = text;
     lastSpotValue = n;
-    highlightAtm();
   }
 
   // ---- 🤖 AI TRADE SETUPS (LIVE TEST) — A/B entry models ----
@@ -891,7 +777,7 @@
     updateMathConsole(currentTradeState);
   }
 
-  async function refreshOptions() { try { const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); loadedExpiry = data.expiry_date || null; updateSpotPrice(data); allRows = Array.isArray(data.option_chain) ? data.option_chain.sort((a, b) => number(a.strike) - number(b.strike)) : []; populateExpiry(); updateSentiment(data); renderRows(); updateScalperPlayground(); updateAITrades(); renderAdvancedMetrics(data); synced.textContent = `Synced ${new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })}`; } catch (error) { console.warn('Option-chain fetch failed:', error); } }
+  async function refreshOptions() { try { const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); updateSpotPrice(data); allRows = Array.isArray(data.option_chain) ? data.option_chain.sort((a, b) => number(a.strike) - number(b.strike)) : []; updateSentiment(data); updateScalperPlayground(); updateAITrades(); renderAdvancedMetrics(data); } catch (error) { console.warn('Option-chain fetch failed:', error); } }
   async function refreshGamma() { try { const response = await fetch('/gamma/status/', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); const status = data?.status || data; if (status?.last_profile) renderProfile(status.last_profile); if (Array.isArray(status?.gamma_alerts)) status.gamma_alerts.forEach(renderSignal); if (status?.last_signal != null) renderSignal(status.last_signal); } catch (error) { console.warn('Gamma status fetch failed:', error); } }
 
   function updatePreopen(data) {
@@ -917,24 +803,6 @@
   }
   async function refreshPreopen() { try { const response = await fetch('{% url "live_dashboard:preopen_trap_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); updatePreopen(await response.json()); } catch (error) { console.warn('Pre-open fetch failed:', error); } }
 
-  function populateExpiry() {
-    const selected = expiryFilter.value;
-    const expiries = [...new Set([
-      loadedExpiry,
-      ...allRows.map(row => row.expiry || row.expiry_date),
-    ].filter(Boolean).map(String))].sort();
-
-    expiryFilter.replaceChildren(new Option('All loaded expiries', 'all'));
-    expiries.forEach(expiry => expiryFilter.appendChild(new Option(expiry, expiry)));
-
-    const preferredExpiry = !expiryInitialized && expiries.includes(String(loadedExpiry))
-      ? String(loadedExpiry)
-      : selected;
-    expiryFilter.value = expiries.includes(preferredExpiry) ? preferredExpiry : 'all';
-    expiryInitialized = true;
-  }
-  function refreshFilters() { renderRows(); }
-  expiryFilter.addEventListener('change', refreshFilters);
   // Render the restored peak extremes immediately (using neutral current values)
   // so the "Peak: …" readouts and ghost bars show the persisted session peaks
   // before the first pre-open snapshot / WebSocket tick arrives.
@@ -1113,7 +981,7 @@
 <script>
 (() => {
   // ====================================================================
-  // NEW (isolated) — Compact Options Chain + full-table "TABLE" toggle.
+  // (isolated) — Compact Options Chain (center column).
   // Reuses the existing live option-chain API payload. Nothing here
   // touches the existing WebSocket / option-chain rendering scripts.
   // ====================================================================
@@ -1236,17 +1104,6 @@
 
     refreshCompactChain();
     setInterval(refreshCompactChain, 1000);
-  }
-
-  // ---- "TABLE" toggle for the full Scalper's Playground table ----
-  const toggleBtn = document.getElementById('full-table-toggle');
-  const wrap = document.getElementById('full-option-chain-wrap');
-  if (toggleBtn && wrap) {
-    toggleBtn.addEventListener('click', () => {
-      const willShow = wrap.classList.contains('hidden');
-      wrap.classList.toggle('hidden', !willShow);
-      toggleBtn.setAttribute('aria-expanded', String(willShow));
-    });
   }
 
   // ---- "MATH" toggle for the AI card's raw-calculation debug console ----
