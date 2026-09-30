@@ -9,7 +9,7 @@
   "spot_source": "index_tick_ltp",
   "spot_updated_at": "2026-09-30T18:35:15.164848+05:30",
   "poi_source": "upstox_option_chain_prev_oi",
-  "poi_updated_at": "2026-09-30T19:05:15.705845+05:30",
+  "poi_updated_at": "2026-09-30T19:50:21.473670+05:30",
   "poi_instruments": 214,
   "restored_from_disk": true,
   "restored_instruments": 215,
@@ -17,7 +17,7 @@
   "feed_connected": true,
   "feed_status": "stale_no_ticks",
   "last_tick_at": "2026-09-30T18:35:15.159850+05:30",
-  "seconds_since_last_tick": 2065.44,
+  "seconds_since_last_tick": 4643.92,
   "stale": true,
   "instrument_data": {
     "NSE_FO|40827": {
@@ -19481,5 +19481,5 @@
   },
   "instrument_count": 215,
   "foreign_expiry_instruments": 0,
-  "dumped_at": "2026-09-30T19:09:40.591954+05:30"
+  "dumped_at": "2026-09-30T19:52:39.081960+05:30"
 }

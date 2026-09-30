@@ -108,14 +108,27 @@
   .hwm-marker { position: absolute; bottom: 1px; height: 4px; width: 2px; transform: translateX(-50%); background: #fff; box-shadow: 0 0 4px #fff, 0 0 9px rgba(255, 255, 255, .85); z-index: 2; pointer-events: none; }
   .hwm-text { position: relative; z-index: 3; text-shadow: 0 1px 2px rgba(2, 6, 23, .95), 0 0 6px rgba(2, 6, 23, .6); }
 
-  /* ---- Math Console: high-water mark mini-bars (neutral fill, neon-white peak) ---- */
-  .math-hwm { position: relative; display: inline-block; min-width: 56px; padding-bottom: 6px; text-align: right; }
-  .math-track { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; border-radius: 999px; background: rgba(148, 163, 184, .16); overflow: hidden; }
-  .math-fill { height: 100%; width: 0; border-radius: inherit; will-change: width; background: linear-gradient(90deg, rgba(148, 163, 184, .26), rgba(100, 116, 139, .62)); }
-  .math-fill.pos { background: linear-gradient(90deg, rgba(74, 222, 128, .35), rgba(34, 197, 94, .85)); }
-  .math-fill.neg { background: linear-gradient(90deg, rgba(248, 113, 113, .35), rgba(239, 68, 68, .85)); }
-  .math-marker { position: absolute; bottom: 0; height: 3px; width: 2px; transform: translateX(-50%); background: #fff; box-shadow: 0 0 4px #fff, 0 0 8px rgba(255, 255, 255, .8); z-index: 2; pointer-events: none; }
-  .math-text { position: relative; z-index: 3; text-shadow: 0 1px 2px rgba(2, 6, 23, .9); }
+  /* ---- Math Console: horizontal metric cards ---- */
+  .math-console-metrics { display: grid; gap: .75rem; }
+  .math-metric-row { display: grid; grid-template-columns: minmax(150px, .8fr) minmax(0, 2fr); gap: 1rem; align-items: center; padding: .7rem .75rem; border: 1px solid rgba(51, 65, 85, .8); border-radius: .65rem; background: rgba(15, 23, 42, .58); }
+  .math-metric-copy { min-width: 0; }
+  .math-metric-label { display: block; color: #94a3b8; font-size: 10px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; }
+  .math-metric-value { display: block; margin-top: .2rem; color: #f8fafc; font-size: 12px; font-weight: 700; line-height: 1.35; }
+  .math-metric-value.red { color: #f87171; }
+  .math-metric-value.green { color: #4ade80; }
+  .math-metric-badge { display: inline-block; margin-left: .35rem; color: #f87171; font-size: 9px; font-weight: 800; letter-spacing: .08em; }
+  .math-progress { min-width: 0; }
+  .math-progress-track { position: relative; height: 10px; overflow: visible; border: 1px solid rgba(100, 116, 139, .5); border-radius: 999px; background: rgba(30, 41, 59, .9); box-shadow: inset 0 1px 4px rgba(2, 6, 23, .8); }
+  .math-progress-track.hatched { background: repeating-linear-gradient(135deg, rgba(74, 222, 128, .12) 0 4px, rgba(15, 23, 42, .9) 4px 8px); }
+  .math-progress-track .math-fill { position: absolute; left: 0; top: 0; height: 100%; width: 0; border-radius: inherit; transition: width .4s ease-out; will-change: width; }
+  .math-progress-track .math-fill.pos { background: linear-gradient(90deg, #facc15, #4ade80); }
+  .math-progress-track .math-fill.neg { background: linear-gradient(90deg, #ef4444, #facc15); }
+  .math-progress-track .math-fill.delta { background: #22c55e; }
+  .math-progress-track .math-marker { position: absolute; top: -3px; bottom: -3px; left: 0; width: 1px; background: rgba(248, 250, 252, .75); box-shadow: 0 0 4px rgba(255, 255, 255, .55); z-index: 2; pointer-events: none; }
+  .math-progress-track .math-text { position: absolute; right: 0; top: 14px; color: #cbd5e1; font-size: 9px; line-height: 1; white-space: nowrap; }
+  .math-scale { display: flex; justify-content: space-between; margin-top: .45rem; color: #64748b; font-size: 9px; font-variant-numeric: tabular-nums; }
+  @media (max-width: 640px) { .math-metric-row { grid-template-columns: 1fr; gap: .65rem; } }
+  @media (prefers-reduced-motion: reduce) { .math-progress-track .math-fill { transition: none; } }
 
   @keyframes pulse-green {
     0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.75); border-color: rgba(34, 197, 94, 0.9); }
@@ -306,16 +319,90 @@
         </div>
         <div id="math-console" class="mt-3 min-h-[180px] rounded-lg border border-cyan-800/50 bg-black/50 p-3 font-mono text-[11px] leading-5">
           <div class="mb-1 flex items-center justify-between border-b border-slate-800 pb-1">
-            <span class="uppercase tracking-wider text-cyan-400">⚙ Math Console</span>
+            <span class="uppercase tracking-wider text-cyan-400">⚙ MATH CONSOLE</span>
             <span class="text-slate-600">live debug</span>
           </div>
+          <div class="math-console-metrics" role="group" aria-label="Math Console metrics">
+            <div class="math-metric-row">
+              <div class="math-metric-copy">
+                <span class="math-metric-label">Bias</span>
+                <span id="math-bias" class="math-metric-value red"><span class="math-text">{{ math_bias|default:'-8.2%' }} (Peak: {{ math_bias_peak|default:'-18%' }})</span></span>
+              </div>
+              <div class="math-progress">
+                <div class="math-progress-track">
+                  <span class="math-fill neg" style="width: 59%;"></span>
+                  <span class="math-marker"></span>
+                </div>
+                <div class="math-scale"><span>-20</span><span>-10</span><span>0</span><span>10</span><span>18</span></div>
+              </div>
+            </div>
+            <div class="math-metric-row">
+              <div class="math-metric-copy">
+                <span class="math-metric-label">Momentum</span>
+                <span id="math-momentum" class="math-metric-value"><span class="math-text">{{ math_momentum|default:'+34.8%' }} (Peak: {{ math_momentum_peak|default:'+42%' }})</span><span class="math-metric-badge">(EXPLOSIVE!)</span></span>
+              </div>
+              <div class="math-progress">
+                <div class="math-progress-track">
+                  <span class="math-fill pos" style="width: 69.6%;"></span>
+                  <span class="math-marker"></span>
+                </div>
+                <div class="math-scale"><span>0</span><span>10</span><span>20</span><span>30</span><span>40</span><span>50</span></div>
+              </div>
+            </div>
+            <div class="math-metric-row">
+              <div class="math-metric-copy">
+                <span class="math-metric-label">Delta Wt</span>
+                <span id="math-delta-wt" class="math-metric-value green"><span class="math-text">{{ math_delta_wt|default:'+6.6' }}</span></span>
+              </div>
+              <div class="math-progress">
+                <div class="math-progress-track hatched">
+                  <span class="math-fill delta" style="width: 66%;"></span>
+                  <span class="math-marker"></span>
+                </div>
+                <div class="math-scale"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span></div>
+              </div>
+            </div>
+          </div>
           <div class="space-y-2">
-            <div class="flex items-center justify-between"><span class="text-slate-500">Current Score</span><span id="math-score" class="text-cyan-300">--</span></div>
-            <div class="flex items-center justify-between"><span class="text-slate-500">Bias</span><span id="math-bias" class="math-hwm text-emerald-300"><span class="math-track"><span class="math-fill"></span></span><span class="math-marker"></span><span class="math-text">--</span></span></div>
-            <div class="flex items-center justify-between"><span class="text-slate-500">Momentum</span><span id="math-momentum" class="math-hwm text-emerald-300"><span class="math-track"><span class="math-fill"></span></span><span class="math-marker"></span><span class="math-text">--</span></span></div>
-            <div class="flex items-center justify-between"><span class="text-slate-500">[Delta Wt]</span><span id="math-delta-wt" class="math-hwm text-cyan-300"><span class="math-track"><span class="math-fill"></span></span><span class="math-marker"></span><span class="math-text">--</span></span></div>
-            <div class="flex items-center justify-between"><span class="text-slate-500">[IV Skew]</span><span id="math-iv-skew" class="math-hwm text-cyan-300"><span class="math-track"><span class="math-fill"></span></span><span class="math-marker"></span><span class="math-text">--</span></span></div>
-            <div class="flex items-center justify-between"><span class="text-slate-500">[Gamma Boost]</span><span id="math-gamma-boost" class="math-hwm text-emerald-300"><span class="math-track"><span class="math-fill"></span></span><span class="math-marker"></span><span class="math-text">--</span></span></div>
+            <div class="math-metric-row">
+              <div class="math-metric-copy">
+                <span class="math-metric-label">Score</span>
+                <span id="math-score" class="math-metric-value">71</span>
+              </div>
+              <div class="math-progress">
+                <div class="math-progress-track">
+                  <span class="math-fill pos" style="width: 71%;"></span>
+                  <span class="math-marker"></span>
+                </div>
+                <div class="math-scale"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+              </div>
+            </div>
+            <div class="math-metric-row">
+              <div class="math-metric-copy">
+                <span class="math-metric-label">IV Skew</span>
+                <span id="math-iv-skew" class="math-metric-value red"><span class="math-text">-1.2%</span></span>
+              </div>
+              <div class="math-progress">
+                <div class="math-progress-track">
+                  <span class="math-fill neg" style="width: 38%;"></span>
+                  <span class="math-marker"></span>
+                </div>
+                <div class="math-scale"><span>-5</span><span>0</span><span>+5</span></div>
+              </div>
+            </div>
+            <div class="math-metric-row">
+              <div class="math-metric-copy">
+                <span class="math-metric-label">Gamma Boost</span>
+                <span id="math-gamma-boost" class="math-metric-value red"><span class="math-text">-9.5</span></span>
+              </div>
+              <div class="math-progress">
+                <div class="math-progress-track">
+                  <span class="math-fill neg" style="width: 26.25%;"></span>
+                  <span class="math-marker"></span>
+                </div>
+                <div class="math-scale"><span>-20</span><span>-10</span><span>0</span><span>10</span><span>20</span></div>
+              </div>
+            </div>
             <div class="flex items-center justify-between"><span class="text-slate-500">Trade State</span><span id="math-trade-state" class="text-slate-200">--</span></div>
           </div>
         </div>
