@@ -37,7 +37,6 @@ def onmessage(message):
         except: return
         
     ticks = []
-    # CRITICAL FIX: Handle flat dictionary format from Fyers
     if isinstance(payload, dict):
         if isinstance(payload.get("d"), list):
             ticks = payload.get("d", [])
@@ -47,7 +46,6 @@ def onmessage(message):
         ticks = payload
         
     for raw in ticks:
-        # CRITICAL FIX: If symbol is missing, assume it's the FUT_KEY we subscribed to
         symbol = raw.get("symbol") or raw.get("n") or config.FUT_KEY
         if symbol != config.FUT_KEY:
             continue
@@ -64,32 +62,23 @@ def onmessage(message):
         bucket_minute = (ts.minute // 2) * 2
         bucket_time = ts.replace(minute=bucket_minute, second=0, microsecond=0)
         
-        # --- DEBUG LOG 1: Tick Heartbeat ---
-        #print(f"💓 Tick: LTP={ltp} | CumVol={cum_vol} | TBQ={tbq} | TSQ={tsq}")
-        
         # Tick Rule for Volume Delta
         prev_ltp = current_candle.get("last_price", ltp)
         price_diff = ltp - prev_ltp
         direction = 1 if price_diff > 0 else (-1 if price_diff < 0 else 0)
         
-        # Calculate actual volume traded in this specific tick (Cumulative diff)
+        # Calculate actual volume traded in this specific tick
         prev_cum_vol = current_candle.get("cum_vol", cum_vol)
-        if prev_cum_vol is None:
-            prev_cum_vol = 0
-        if cum_vol is None:
-            cum_vol = 0
-        tick_vol = max(0, cum_vol - prev_cum_vol)  # Prevent negative volume on new day
+        if prev_cum_vol is None: prev_cum_vol = 0
+        if cum_vol is None: cum_vol = 0
         
+        tick_vol = max(0, cum_vol - prev_cum_vol)
         buy_vol = tick_vol if direction > 0 else 0
         sell_vol = tick_vol if direction < 0 else 0
         
         # If new 2-min bucket started, save old candle and start new one
         if current_candle and current_candle.get("timestamp") != bucket_time:
             with buffer_lock:
-                # --- DEBUG LOG 2: Candle Closed ---
-                delta = current_candle["buy_vol"] - current_candle["sell_vol"]
-                #print(f"✅ CANDLE CLOSED! Time: {current_candle['timestamp'].strftime('%H:%M')} | Close: {current_candle['close']} | Delta: {delta}")
-                
                 live_buffer.append(current_candle.copy())
                 if len(live_buffer) > 5: live_buffer.pop(0) # Keep last 5 candles
             current_candle = {}
@@ -125,7 +114,7 @@ def onopen():
         return
     fyers_socket.subscribe(symbols=[config.FUT_KEY], data_type="SymbolUpdate")
     fyers_socket.keep_running()
-    print(f"⚡ Live Signal Engine connected to {config.FUT_KEY}!")
+    print(f"⚡ Live Signal Engine connected to {config.FUT_KEY}! Waiting for 2-min candle close...")
 
 def generate_signal():
     """Checks if a candle just closed, and predicts the next move."""
@@ -163,7 +152,9 @@ def generate_signal():
                 
                 # 3. Predict
                 prob_up = MODEL.predict_proba(features)[0][1]
-                signal = "🟢 STRONG BUY CE" if prob_up > 0.60 else ("🔴 SHORT PE" if prob_up < 0.40 else "⚪ NEUTRAL")
+                
+                # SCALPING THRESHOLDS (52% / 48%)
+                signal = "🟢 BUY CE (Scalp)" if prob_up > 0.52 else ("🔴 SHORT PE (Scalp)" if prob_up < 0.48 else "⚪ NEUTRAL - NO TRADE")
                 
                 print("\n" + "="*50)
                 print(f"⏰ Candle Closed: {closed_candle['timestamp'].strftime('%H:%M')}")

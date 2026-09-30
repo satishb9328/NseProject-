@@ -214,92 +214,277 @@ def find_swing_pivots(high: np.ndarray, low: np.ndarray, n: int = 2):
     sl_idx = argrelextrema(low, np.less, order=n)[0].tolist()
     return sh_idx, sl_idx
 
-def detect_liquidity_sweep(high: np.ndarray, low: np.ndarray, close: np.ndarray, open_: np.ndarray, sh_idx: list, sl_idx: list, lookback: int = 10):
-    result = {"swept": False, "direction": None, "sweep_level": None, "sweep_bar": None, "sweep_low": None, "sweep_high": None}
+def detect_liquidity_sweep(
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    open_: np.ndarray,
+    sh_idx: list,
+    sl_idx: list,
+    lookback: int | None = None,
+    atr_values: np.ndarray | None = None,
+    atr_period: int = 14,
+    min_sweep_atr: float = 0.05,
+):
+    """Detect the newest ATR-scaled liquidity sweep with a reclaim close."""
+    result = {"swept": False, "direction": None, "sweep_level": None,
+              "sweep_bar": None, "sweep_low": None, "sweep_high": None,
+              "atr": None, "lookback": None}
+    high, low, close, open_ = map(np.asarray, (high, low, close, open_))
     n = len(close)
-    check_range = range(max(n - lookback, 1), n)
+    if n < 3:
+        return result
 
-    if sl_idx:
-        recent_sl_level = low[sl_idx[-1]]
+    true_range = np.maximum(high[1:] - low[1:], np.maximum(
+        np.abs(high[1:] - close[:-1]), np.abs(low[1:] - close[:-1])))
+    true_range = np.concatenate(([high[0] - low[0]], true_range))
+    atr = (pd.Series(true_range).rolling(atr_period, min_periods=1).mean().to_numpy()
+           if atr_values is None else np.asarray(atr_values, dtype=float))
+    atr_now = float(atr[-1]) if len(atr) and np.isfinite(atr[-1]) else 0.0
+    volatility_ratio = atr_now / max(float(np.nanmedian(true_range[-atr_period:])), 1e-9)
+    base = int(lookback or 10)
+    dynamic_lookback = int(np.clip(round(base / max(volatility_ratio, 0.25)), 5, max(base * 2, 5)))
+    result["atr"], result["lookback"] = round(atr_now, 4), dynamic_lookback
+    check_range = range(max(n - dynamic_lookback, 1), n)
+    min_penetration = atr_now * float(min_sweep_atr)
+
+    recent_low_pivot = max((int(i) for i in sl_idx if int(i) < n - 1), default=None)
+    if recent_low_pivot is not None:
+        level = float(low[recent_low_pivot])
         for i in check_range:
-            if low[i] < recent_sl_level and close[i] > recent_sl_level:
-                result.update({"swept": True, "direction": "bullish", "sweep_level": round(float(recent_sl_level), 4), "sweep_bar": i, "sweep_low": round(float(low[i]), 4), "sweep_high": round(float(high[i]), 4)})
+            if low[i] <= level - min_penetration and close[i] > level and close[i] > open_[i]:
+                result.update({"swept": True, "direction": "bullish",
+                               "sweep_level": round(level, 4), "sweep_bar": i,
+                               "sweep_low": round(float(low[i]), 4),
+                               "sweep_high": round(float(high[i]), 4)})
                 return result
 
-    if sh_idx:
-        recent_sh_level = high[sh_idx[-1]]
+    recent_high_pivot = max((int(i) for i in sh_idx if int(i) < n - 1), default=None)
+    if recent_high_pivot is not None:
+        level = float(high[recent_high_pivot])
         for i in check_range:
-            if high[i] > recent_sh_level and close[i] < recent_sh_level:
-                result.update({"swept": True, "direction": "bearish", "sweep_level": round(float(recent_sh_level), 4), "sweep_bar": i, "sweep_low": round(float(low[i]), 4), "sweep_high": round(float(high[i]), 4)})
+            if high[i] >= level + min_penetration and close[i] < level and close[i] < open_[i]:
+                result.update({"swept": True, "direction": "bearish",
+                               "sweep_level": round(level, 4), "sweep_bar": i,
+                               "sweep_low": round(float(low[i]), 4),
+                               "sweep_high": round(float(high[i]), 4)})
                 return result
     return result
 
-def detect_fvg(high: np.ndarray, low: np.ndarray, close: np.ndarray, direction: str | None, lookback: int = 20):
-    result = {"found": False, "fvg_high": None, "fvg_low": None, "fvg_mid": None, "retesting": False, "direction": direction}
-    if direction is None: return result
-    n = len(close)
-    current_close = close[n - 1]
 
-    for i in range(n - 1, max(n - lookback - 1, 1), -1):
-        if direction == "bullish":
-            if high[i - 2] < low[i]:
-                gap_low, gap_high = float(high[i - 2]), float(low[i])
-                result.update({"found": True, "fvg_high": round(gap_high, 4), "fvg_low": round(gap_low, 4), "fvg_mid": round((gap_low + gap_high) / 2, 4), "retesting": gap_low <= current_close <= gap_high})
-                return result
-        elif direction == "bearish":
-            if low[i - 2] > high[i]:
-                gap_high, gap_low = float(low[i - 2]), float(high[i])
-                result.update({"found": True, "fvg_high": round(gap_high, 4), "fvg_low": round(gap_low, 4), "fvg_mid": round((gap_low + gap_high) / 2, 4), "retesting": gap_low <= current_close <= gap_high})
-                return result
+def detect_fvg(
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    direction: str | None,
+    lookback: int | None = None,
+    atr_values: np.ndarray | None = None,
+    weekly_high: np.ndarray | None = None,
+    weekly_low: np.ndarray | None = None,
+    weekly_close: np.ndarray | None = None,
+    max_age_bars: int = 30,
+):
+    """Find the newest unmitigated, time-valid FVG and optional weekly nesting."""
+    result = {"found": False, "fvg_high": None, "fvg_low": None, "fvg_mid": None,
+              "retesting": False, "direction": direction, "mitigated": False,
+              "expired": False, "nested": False, "weekly_fvg_high": None,
+              "weekly_fvg_low": None}
+    if direction not in {"bullish", "bearish"}:
+        return result
+    high, low, close = map(lambda x: np.asarray(x, dtype=float), (high, low, close))
+    n = len(close)
+    if n < 3:
+        return result
+
+    tr = np.maximum(high[1:] - low[1:], np.maximum(np.abs(high[1:] - close[:-1]),
+                                                     np.abs(low[1:] - close[:-1])))
+    tr = np.concatenate(([high[0] - low[0]], tr))
+    atr = (pd.Series(tr).rolling(14, min_periods=1).mean().to_numpy()
+           if atr_values is None else np.asarray(atr_values, dtype=float))
+    atr_now = float(atr[-1]) if len(atr) and np.isfinite(atr[-1]) else 0.0
+    vol_ratio = atr_now / max(float(np.nanmedian(tr[-14:])), 1e-9)
+    base = int(lookback or 20)
+    dynamic_lookback = int(np.clip(round(base / max(vol_ratio, 0.25)), 8, max(base * 2, 8)))
+
+    def _zones(h, l, c, window):
+        found = []
+        start = max(2, len(c) - window)
+        for i in range(len(c) - 1, start - 1, -1):
+            if direction == "bullish" and h[i - 2] < l[i]:
+                found.append((i, float(h[i - 2]), float(l[i])))
+            elif direction == "bearish" and l[i - 2] > h[i]:
+                found.append((i, float(h[i]), float(l[i - 2])))
+        return found
+
+    def _nested(zone_low, zone_high):
+        if weekly_high is None or weekly_low is None or weekly_close is None:
+            return False, None
+        wh, wl, wc = map(lambda x: np.asarray(x, dtype=float),
+                          (weekly_high, weekly_low, weekly_close))
+        for _, weekly_low_zone, weekly_high_zone in _zones(wh, wl, wc, len(wc)):
+            overlap = max(zone_low, weekly_low_zone) <= min(zone_high, weekly_high_zone)
+            inside = zone_low >= weekly_low_zone and zone_high <= weekly_high_zone
+            if overlap or inside:
+                return True, (weekly_low_zone, weekly_high_zone)
+        return False, None
+
+    for bar, zone_low, zone_high in _zones(high, low, close, dynamic_lookback):
+        if n - 1 - bar > int(max_age_bars):
+            continue
+        subsequent_low = low[bar + 1:]
+        subsequent_high = high[bar + 1:]
+        fully_mitigated = bool(
+            np.any(subsequent_low <= zone_low) if direction == "bullish"
+            else np.any(subsequent_high >= zone_high)
+        )
+        if fully_mitigated:
+            continue
+        nested, weekly_zone = _nested(zone_low, zone_high)
+        result.update({"found": True, "fvg_high": round(zone_high, 4),
+                       "fvg_low": round(zone_low, 4),
+                       "fvg_mid": round((zone_low + zone_high) / 2, 4),
+                       "retesting": bool(zone_low <= close[-1] <= zone_high),
+                       "nested": nested})
+        if weekly_zone:
+            result["weekly_fvg_low"], result["weekly_fvg_high"] = map(
+                lambda value: round(value, 4), weekly_zone)
+        return result
     return result
 
-def detect_mss(high: np.ndarray, low: np.ndarray, close: np.ndarray, sh_idx: list, sl_idx: list, direction: str | None):
-    result = {"confirmed": False, "mss_level": None, "mss_bar": None}
-    if direction is None: return result
-    n = len(close)
-    NOISE_FILTER = 0.0005  
-    check_range = range(n - 1, max(n - 12, 0), -1)
 
-    if direction == "bullish" and sh_idx:
-        pivot_level = float(high[sh_idx[-1]])
-        for i in check_range:
-            if float(close[i]) > pivot_level * (1 + NOISE_FILTER):
-                result.update({"confirmed": True, "mss_level": round(pivot_level, 4), "mss_bar": i})
-                return result
-    elif direction == "bearish" and sl_idx:
-        pivot_level = float(low[sl_idx[-1]])
-        for i in check_range:
-            if float(close[i]) < pivot_level * (1 - NOISE_FILTER):
-                result.update({"confirmed": True, "mss_level": round(pivot_level, 4), "mss_bar": i})
-                return result
+def detect_mss(
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    sh_idx: list,
+    sl_idx: list,
+    direction: str | None,
+    lookback: int | None = None,
+    atr_values: np.ndarray | None = None,
+    min_break_atr: float = 0.10,
+):
+    """Confirm MSS with an ATR-scaled displacement beyond the latest pivot."""
+    result = {"confirmed": False, "mss_level": None, "mss_bar": None,
+              "atr": None, "lookback": None}
+    if direction not in {"bullish", "bearish"}:
+        return result
+    high, low, close = map(lambda x: np.asarray(x, dtype=float), (high, low, close))
+    n = len(close)
+    if n < 3:
+        return result
+    tr = np.maximum(high[1:] - low[1:], np.maximum(np.abs(high[1:] - close[:-1]),
+                                                     np.abs(low[1:] - close[:-1])))
+    tr = np.concatenate(([high[0] - low[0]], tr))
+    atr = (pd.Series(tr).rolling(14, min_periods=1).mean().to_numpy()
+           if atr_values is None else np.asarray(atr_values, dtype=float))
+    atr_now = float(atr[-1]) if len(atr) and np.isfinite(atr[-1]) else 0.0
+    vol_ratio = atr_now / max(float(np.nanmedian(tr[-14:])), 1e-9)
+    base = int(lookback or 12)
+    dynamic_lookback = int(np.clip(round(base / max(vol_ratio, 0.25)), 6, max(base * 2, 6)))
+    result["atr"], result["lookback"] = round(atr_now, 4), dynamic_lookback
+    noise = max(0.0005, (atr_now * float(min_break_atr)) / max(abs(float(close[-1])), 1e-9))
+    pivots = sh_idx if direction == "bullish" else sl_idx
+    valid_pivots = [int(i) for i in pivots if 0 <= int(i) < n - 1]
+    if not valid_pivots:
+        return result
+    pivot = valid_pivots[-1]
+    level = float(high[pivot] if direction == "bullish" else low[pivot])
+    for i in range(n - 1, max(n - dynamic_lookback - 1, pivot + 1), -1):
+        broke = (close[i] > level * (1.0 + noise) if direction == "bullish"
+                 else close[i] < level * (1.0 - noise))
+        if broke:
+            result.update({"confirmed": True, "mss_level": round(level, 4),
+                           "mss_bar": i})
+            return result
     return result
 
-def detect_order_block(high: np.ndarray, low: np.ndarray, close: np.ndarray, open_: np.ndarray, volume: np.ndarray, direction: str | None, sweep_bar: int | None, lookback: int = 15):
-    result = {"found": False, "ob_high": None, "ob_low": None, "ob_mid": None, "ob_bar": None}
-    if direction is None: return result
+
+def detect_order_block(
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    open_: np.ndarray,
+    volume: np.ndarray,
+    direction: str | None,
+    sweep_bar: int | None,
+    lookback: int | None = None,
+    atr_values: np.ndarray | None = None,
+    profile_price: np.ndarray | None = None,
+    profile_volume: np.ndarray | None = None,
+    profile_bins: int = 24,
+    max_age_bars: int = 30,
+):
+    """Find a fresh, unmitigated OB aligned with a recent POC/HVN."""
+    result = {"found": False, "ob_high": None, "ob_low": None, "ob_mid": None,
+              "ob_bar": None, "mitigated": False, "expired": False,
+              "profile_node": None, "poc": None, "hvn": []}
+    if direction not in {"bullish", "bearish"}:
+        return result
+    high, low, close, open_, volume = map(
+        lambda x: np.asarray(x, dtype=float), (high, low, close, open_, volume))
     n = len(close)
-    start = min(sweep_bar if sweep_bar is not None else n - 2, n - 2)
+    if n < 4:
+        return result
+
+    tr = np.maximum(high[1:] - low[1:], np.maximum(np.abs(high[1:] - close[:-1]),
+                                                     np.abs(low[1:] - close[:-1])))
+    tr = np.concatenate(([high[0] - low[0]], tr))
+    atr = (pd.Series(tr).rolling(14, min_periods=1).mean().to_numpy()
+           if atr_values is None else np.asarray(atr_values, dtype=float))
+    atr_now = float(atr[-1]) if len(atr) and np.isfinite(atr[-1]) else 0.0
+    vol_ratio = atr_now / max(float(np.nanmedian(tr[-14:])), 1e-9)
+    base = int(lookback or 15)
+    dynamic_lookback = int(np.clip(round(base / max(vol_ratio, 0.25)), 8, max(base * 2, 8)))
+    start = min(int(sweep_bar) if sweep_bar is not None else n - 2, n - 2)
     bodies = np.abs(close - open_)
-    avg_body = bodies[max(0, start - 10): start].mean() if start > 0 else 1.0
-    avg_body = avg_body if avg_body != 0 else 1.0
-    avg_vol = volume[max(0, start - 10): start].mean() if start > 0 else 1.0
-    avg_vol = avg_vol if avg_vol != 0 else 1.0
+    avg_body = max(float(np.nanmean(bodies[max(0, start - 10):start])), 1e-9)
+    avg_vol = max(float(np.nanmean(volume[max(0, start - 10):start])), 1e-9)
 
-    for i in range(start, max(start - lookback, 1), -1):
-        if direction == "bullish":
-            is_bearish_ob = close[i] < open_[i]
-            next_body = close[i + 1] - open_[i + 1]
-            if is_bearish_ob and (next_body > avg_body * 1.25) and (close[i + 1] > open_[i + 1]) and (volume[i + 1] > avg_vol * 1.1):
-                ob_low, ob_high = float(low[i]), float(high[i])
-                result.update({"found": True, "ob_high": round(ob_high, 4), "ob_low": round(ob_low, 4), "ob_mid": round((ob_low + ob_high) / 2, 4), "ob_bar": i})
-                return result
-        elif direction == "bearish":
-            is_bullish_ob = close[i] > open_[i]
-            next_body = open_[i + 1] - close[i + 1]
-            if is_bullish_ob and (next_body > avg_body * 1.25) and (close[i + 1] < open_[i + 1]) and (volume[i + 1] > avg_vol * 1.1):
-                ob_low, ob_high = float(low[i]), float(high[i])
-                result.update({"found": True, "ob_high": round(ob_high, 4), "ob_low": round(ob_low, 4), "ob_mid": round((ob_low + ob_high) / 2, 4), "ob_bar": i})
-                return result
+    prices = np.asarray(profile_price if profile_price is not None else
+                        (high + low + close) / 3.0, dtype=float)
+    prof_vol = np.asarray(profile_volume if profile_volume is not None else volume, dtype=float)
+    valid = np.isfinite(prices) & np.isfinite(prof_vol) & (prof_vol > 0)
+    if valid.any():
+        pmin, pmax = float(np.nanmin(prices[valid])), float(np.nanmax(prices[valid]))
+        if pmax > pmin:
+            edges = np.linspace(pmin, pmax, max(int(profile_bins), 4) + 1)
+            totals, _ = np.histogram(prices[valid], bins=edges, weights=prof_vol[valid])
+            centers = (edges[:-1] + edges[1:]) / 2.0
+            poc_idx = int(np.argmax(totals))
+            hvn_idx = np.flatnonzero(totals >= np.percentile(totals, 75))
+            poc = float(centers[poc_idx])
+            hvn = [float(centers[i]) for i in hvn_idx]
+            result["poc"], result["hvn"] = round(poc, 4), [round(x, 4) for x in hvn]
+        else:
+            poc, hvn = pmin, [pmin]
+    else:
+        poc, hvn = None, []
+
+    for i in range(start, max(start - dynamic_lookback, 1), -1):
+        bullish = close[i] < open_[i] and close[i + 1] > open_[i + 1]
+        bearish = close[i] > open_[i] and close[i + 1] < open_[i + 1]
+        displacement = abs(close[i + 1] - open_[i + 1]) > avg_body * 1.25
+        volume_confirmed = volume[i + 1] > avg_vol * 1.10
+        if not ((direction == "bullish" and bullish) or (direction == "bearish" and bearish)):
+            continue
+        if not (displacement and volume_confirmed) or n - 1 - i > int(max_age_bars):
+            continue
+        ob_low, ob_high = float(low[i]), float(high[i])
+        node_tolerance = max(atr_now * 0.25, (ob_high - ob_low) * 0.10, 1e-9)
+        nodes = ([] if poc is None else [poc]) + hvn
+        node = next((x for x in nodes if ob_low - node_tolerance <= x <= ob_high + node_tolerance), None)
+        if node is None:
+            continue
+        later_low, later_high = low[i + 1:], high[i + 1:]
+        mitigated = bool(np.any(later_low <= ob_low) if direction == "bullish"
+                         else np.any(later_high >= ob_high))
+        if mitigated:
+            continue
+        result.update({"found": True, "ob_high": round(ob_high, 4),
+                       "ob_low": round(ob_low, 4),
+                       "ob_mid": round((ob_low + ob_high) / 2, 4),
+                       "ob_bar": i, "profile_node": round(float(node), 4)})
+        return result
     return result
 
 def premium_discount_zone(high: np.ndarray, low: np.ndarray, close: np.ndarray, direction: str | None, lookback: int = 50):

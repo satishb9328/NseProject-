@@ -1,10 +1,10 @@
 {
-  "run_at": "2026-09-03T21:08:52",
+  "run_at": "2026-09-30T15:03:18",
   "history_dir": "D:\\Api data\\ML_HISTO_DATA\\Upstox Data\\Day Data",
   "max_data_age_days": 3,
   "ltp_max": 5000.0,
-  "symbols_scanned": 502,
-  "stocks_passed": 459,
-  "stocks_skipped": 43,
+  "symbols_scanned": 500,
+  "stocks_passed": 462,
+  "stocks_skipped": 38,
   "status": "OK"
 }
