@@ -229,40 +229,52 @@
           <span id="preopen-projected-pct" class="font-mono text-sm font-bold {% if projected_open_tone == 'up' %}text-green-400{% elif projected_open_tone == 'down' %}text-red-400{% else %}text-slate-500{% endif %}">{{ projected_open_display }}</span>
         </div>
         <div class="flex flex-col gap-2">
-          <div id="sentiment-bias-chip" class="sentiment-metric metric-neutral flex w-full items-center justify-between gap-3">
-            <span class="flex items-baseline gap-2">
+          <div id="sentiment-bias-chip" class="sentiment-metric metric-neutral" style="width: 100%; display: block; margin-bottom: 15px;">
+            <div class="flex items-center justify-between gap-3">
               <span class="metric-label">Bias</span>
-              <span id="sentiment-bias" class="font-mono text-sm font-semibold">+0%</span>
-            </span>
-            <span id="sentiment-bias-bar" class="elastic-bar" role="img" aria-label="Bias meter">
-              <span class="elastic-marker"></span>
-              <span class="shadow-bar"></span>
-              <span class="active-bar"></span>
-            </span>
+              <span id="sentiment-bias" class="font-mono text-sm font-semibold">--</span>
+            </div>
+            <div class="math-bar-container" style="width: 100%; display: block; margin-bottom: 15px;">
+              <span id="sentiment-bias-bar" class="math-progress-track" role="img" aria-label="Bias meter" style="display: block; width: 100%;">
+                <span class="bar-outline" style="position: absolute; inset: 0; border: 1px solid rgba(45, 212, 191, .7); border-radius: 8px;"></span>
+                <span class="bar-fill active-bar" style="position: absolute; left: 50%; top: 0; height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, #ef4444, #facc15); transition: width .4s ease-out;"></span>
+                <span class="shadow-bar" style="position: absolute; left: 50%; top: 0; height: 100%; width: 0; opacity: .25;"></span>
+                <span class="math-marker"></span>
+              </span>
+              <div class="math-scale" style="display: flex; justify-content: space-between;"><span>-20</span><span>-10</span><span>0</span><span>10</span><span>18</span></div>
+            </div>
           </div>
-          <div id="sentiment-momentum-chip" class="sentiment-metric metric-neutral flex w-full items-center justify-between gap-3">
-            <span class="flex items-baseline gap-2">
+          <div id="sentiment-momentum-chip" class="sentiment-metric metric-neutral" style="width: 100%; display: block; margin-bottom: 15px;">
+            <div class="flex items-center justify-between gap-3">
               <span class="metric-label">Momentum</span>
-              <span id="sentiment-momentum" class="font-mono text-sm font-semibold">0%</span>
-              <span id="sentiment-momentum-label" class="text-xs">(Quiet)</span>
-            </span>
-            <span id="sentiment-momentum-bar" class="elastic-bar" role="img" aria-label="Momentum meter">
-              <span class="elastic-marker"></span>
-              <span class="shadow-bar"></span>
-              <span class="active-bar"></span>
-            </span>
+              <span id="sentiment-momentum" class="font-mono text-sm font-semibold">--</span>
+              <span id="sentiment-momentum-label" class="math-metric-badge"></span>
+            </div>
+            <div class="math-bar-container" style="width: 100%; display: block; margin-bottom: 15px;">
+              <span id="sentiment-momentum-bar" class="math-progress-track" role="img" aria-label="Momentum meter" style="display: block; width: 100%;">
+                <span class="bar-outline" style="position: absolute; inset: 0; border: 1px solid rgba(45, 212, 191, .7); border-radius: 8px;"></span>
+                <span class="bar-fill active-bar" style="position: absolute; left: 0; top: 0; height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, #facc15, #4ade80); transition: width .4s ease-out;"></span>
+                <span class="shadow-bar" style="position: absolute; left: 0; top: 0; height: 100%; width: 0; opacity: .25;"></span>
+                <span class="math-marker"></span>
+              </span>
+              <div class="math-scale" style="display: flex; justify-content: space-between;"><span>0</span><span>10</span><span>20</span><span>30</span><span>40</span><span>50</span></div>
+            </div>
           </div>
-          <div id="sentiment-score-chip" class="sentiment-metric metric-neutral flex w-full items-center justify-between gap-3">
-            <span class="flex items-baseline gap-2">
+          <div id="sentiment-score-chip" class="sentiment-metric metric-neutral" style="width: 100%; display: block; margin-bottom: 15px;">
+            <div class="flex items-center justify-between gap-3">
               <span class="metric-label">Score</span>
-              <span id="sentiment-score" class="font-mono text-sm font-semibold">50/100</span>
-              <span id="sentiment-score-label" class="text-xs">(Neutral)</span>
-            </span>
-            <span id="sentiment-score-bar" class="elastic-bar" role="img" aria-label="Score meter">
-              <span class="elastic-marker"></span>
-              <span class="shadow-bar"></span>
-              <span class="active-bar"></span>
-            </span>
+              <span id="sentiment-score" class="font-mono text-sm font-semibold">--</span>
+              <span id="sentiment-score-label" class="math-metric-badge"></span>
+            </div>
+            <div class="math-bar-container" style="width: 100%; display: block; margin-bottom: 15px;">
+              <span id="sentiment-score-bar" class="math-progress-track" role="img" aria-label="Score meter" style="display: block; width: 100%;">
+                <span class="bar-outline" style="position: absolute; inset: 0; border: 1px solid rgba(45, 212, 191, .7); border-radius: 8px;"></span>
+                <span class="bar-fill active-bar" style="position: absolute; left: 0; top: 0; height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, #facc15, #4ade80); transition: width .4s ease-out;"></span>
+                <span class="shadow-bar" style="position: absolute; left: 0; top: 0; height: 100%; width: 0; opacity: .25;"></span>
+                <span class="math-marker"></span>
+              </span>
+              <div class="math-scale" style="display: flex; justify-content: space-between;"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+            </div>
           </div>
         </div>
         <div id="sentiment-insight" class="sentiment-insight insight-neutral mt-2 px-2.5 py-1.5 text-xs font-medium leading-snug">

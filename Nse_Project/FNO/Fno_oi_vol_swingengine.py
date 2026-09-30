@@ -33,7 +33,7 @@ from collections import Counter
 @dataclass
 class Config:
     """Central configuration — edit paths & thresholds here."""
-    csv_dir:        str = r'D:\FNO DATA\Participant data'
+    csv_dir:        str = r'D:\FNO DATA\Participant data\OpenInterest'
     vol_csv_dir:    str = r'D:\FNO DATA\Participant data\Volume'
     db_path:        str = r'D:\FNO DATA\fno_swing.db'
     years_history:  int = 3
