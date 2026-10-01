@@ -295,6 +295,21 @@ def dashboard_view(request):
         df, current_expiry = None, None
 
     context = {'current_expiry': current_expiry}
+    top_20 = []
+    top_stocks_csv = (
+        Path(__file__).resolve().parent.parent
+        / "Swing_stocks"
+        / "nifty200_smc_precision_screen.csv"
+    )
+    if top_stocks_csv.exists():
+        try:
+            stocks = pd.read_csv(top_stocks_csv).where(pd.notnull, None)
+            if "score" in stocks.columns:
+                stocks = stocks.sort_values(by="score", ascending=False)
+            top_20 = stocks.head(20).to_dict(orient="records")
+        except Exception as exc:
+            logger.warning("Could not load top swing stocks for dashboard: %s", exc)
+    context["top_20"] = top_20
     context.update(get_swing_ml_context())
     return render(request, "dashboard.html", context)
 

@@ -12,6 +12,52 @@
       <p class="max-w-3xl text-slate-400">Live precision entry reporting and top composite-score setups from the Nifty Swing ML screen.</p>
     </div>
 
+    <div class="mb-8 glass rounded-3xl border border-ink-700/80 p-6">
+      <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p class="text-xs uppercase tracking-[0.25em] text-neon-green">Composite Ranking</p>
+          <h2 class="text-xl font-semibold text-slate-100">TOP 20 STOCKS BY COMPOSITE SCORE</h2>
+        </div>
+        <span class="inline-flex items-center rounded-full bg-slate-800/80 px-3 py-1 text-xs uppercase tracking-[0.18em] text-slate-400">{{ top_20|length }} symbols</span>
+      </div>
+
+      <div class="overflow-x-auto rounded-3xl border border-ink-700/70 bg-ink-900/70">
+        <table class="min-w-full text-left table-auto text-sm table table-dark">
+          <thead class="bg-slate-900/80 text-slate-300">
+            <tr>
+              <th class="px-4 py-3 text-slate-300">Rank</th>
+              <th class="px-4 py-3 text-slate-300">Symbol</th>
+              <th class="px-4 py-3 text-slate-300">Price</th>
+              <th class="px-4 py-3 text-slate-300">Score</th>
+              <th class="px-4 py-3 text-slate-300">Fundamentals</th>
+              <th class="px-4 py-3 text-slate-300">Setup Details</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if top_20 %}
+              {% for stock in top_20 %}
+                <tr class="border-t border-ink-700/60 text-slate-300 hover:bg-slate-800/70">
+                  <td class="px-4 py-3 font-mono text-slate-500">{{ forloop.counter }}</td>
+                  <td class="px-4 py-3 font-semibold text-slate-100">{{ stock.symbol|default:'-' }}</td>
+                  <td class="px-4 py-3 font-mono">{{ stock.lastPrice|default:'-' }}</td>
+                  <td class="px-4 py-3 font-mono font-semibold text-neon-green">{{ stock.score|default:'-' }}</td>
+                  <td class="px-4 py-3 text-xs text-slate-400">PE {{ stock.peRatio|default:'-' }} · ROE {{ stock.roe|default:'-' }}%</td>
+                  <td class="max-w-md px-4 py-3 text-xs text-slate-400">
+                    {% if stock.smc_signal and stock.smc_signal != 'NO_SETUP' %}<span class="font-semibold text-neon-violet">{{ stock.smc_signal }}</span>{% endif %}
+                    <span class="ml-1">{{ stock.reasons|default:'-' }}</span>
+                  </td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td class="px-4 py-6 text-center text-slate-500" colspan="6">No composite-score results available.</td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <div class="grid gap-8">
       <div class="glass rounded-3xl border border-ink-700/80 p-6">
         <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

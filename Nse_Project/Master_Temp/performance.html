@@ -86,7 +86,10 @@
           <h2 class="font-display text-lg font-semibold text-slate-100">Score distribution</h2>
           <p class="mt-1 text-xs text-slate-500">All recorded signal sessions</p>
         </div>
-        <span class="rounded-lg border border-ink-600 bg-ink-800/70 px-2 py-1 font-mono text-[10px] text-slate-400">COUNTS</span>
+        <div class="flex items-center gap-2">
+          <button id="btn-update-fno" type="button" class="rounded-lg border border-neon-green/40 bg-neon-green/10 px-3 py-2 text-xs font-semibold text-neon-green transition hover:bg-neon-green/20 disabled:cursor-wait disabled:opacity-60" style="margin-bottom: 15px; cursor: pointer;">🔄 Sync FNO Data</button>
+          <span class="rounded-lg border border-ink-600 bg-ink-800/70 px-2 py-1 font-mono text-[10px] text-slate-400">COUNTS</span>
+        </div>
       </div>
       <div class="h-72"><canvas id="scoreChart" aria-label="FNO score distribution chart"></canvas></div>
     </article>
@@ -145,6 +148,42 @@
           x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { family: 'JetBrains Mono' } } },
           y: { beginAtZero: true, grid: { color: 'rgba(56, 189, 248, .1)' }, ticks: { color: '#64748b', precision: 0 } }
         }
+      }
+    });
+  })();
+</script>
+<script>
+  (() => {
+    const button = document.getElementById('btn-update-fno');
+    if (!button) return;
+
+    button.addEventListener('click', async () => {
+      const originalText = '🔄 Sync FNO Data';
+      button.disabled = true;
+      button.textContent = 'Updating... Please wait ⏳';
+
+      try {
+        const response = await fetch('{% url "run_fno_update" %}', {
+          method: 'POST',
+          headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+          credentials: 'same-origin',
+        });
+
+        const payload = await response.json().catch(() => ({}));
+        if (response.status === 200) {
+          alert('Data Updated Successfully!');
+          window.location.reload();
+          return;
+        }
+
+        throw new Error(payload.message || 'FNO update failed.');
+      } catch (error) {
+        alert(error.message || 'Unable to update FNO data.');
+        button.disabled = false;
+        button.textContent = originalText;
       }
     });
   })();

@@ -664,6 +664,51 @@
   </div>
 </section>
 
+<section id="top-swing-stocks" class="mt-8 scroll-mt-24">
+  <div class="glass rounded-2xl p-5 shadow-card sm:p-6">
+    <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <p class="text-xs uppercase tracking-[0.22em] text-neon-green">Swing Scanner</p>
+        <h2 class="mt-1 font-display text-xl font-bold text-slate-50">TOP 20 STOCKS BY COMPOSITE SCORE</h2>
+      </div>
+      <span class="rounded-full border border-ink-600 bg-ink-800/70 px-3 py-1 text-xs text-slate-400">{{ top_20|length }} symbols</span>
+    </div>
+    <div class="overflow-x-auto rounded-xl border border-ink-700/70 bg-ink-900/70">
+      <table class="w-full min-w-[900px] text-left text-xs">
+        <thead class="border-b border-ink-700/70 bg-ink-900/80 text-[10px] uppercase tracking-wider text-slate-500">
+          <tr>
+            <th class="px-4 py-3">Rank</th>
+            <th class="px-4 py-3">Symbol</th>
+            <th class="px-4 py-3">Price</th>
+            <th class="px-4 py-3">Score</th>
+            <th class="px-4 py-3">PE</th>
+            <th class="px-4 py-3">ROE</th>
+            <th class="px-4 py-3">Setup Details</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-ink-800/80 text-slate-300">
+          {% for stock in top_20 %}
+          <tr class="transition-colors hover:bg-ink-800/50">
+            <td class="px-4 py-3 font-mono text-slate-500">{{ forloop.counter }}</td>
+            <td class="px-4 py-3 font-semibold text-slate-100">{{ stock.symbol|default:'-' }}</td>
+            <td class="px-4 py-3 font-mono">{{ stock.lastPrice|default:'-' }}</td>
+            <td class="px-4 py-3 font-mono font-bold text-neon-green">{{ stock.score|default:'-' }}</td>
+            <td class="px-4 py-3 font-mono">{{ stock.peRatio|default:'-' }}</td>
+            <td class="px-4 py-3 font-mono">{{ stock.roe|default:'-' }}%</td>
+            <td class="max-w-[520px] px-4 py-3 text-slate-400">
+              {% if stock.smc_signal and stock.smc_signal != 'NO_SETUP' %}<span class="font-semibold text-neon-blue">{{ stock.smc_signal }}</span>{% endif %}
+              <span class="ml-1">{{ stock.reasons|default:'-' }}</span>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td class="px-4 py-6 text-center text-slate-500" colspan="7">No composite-score scan results available.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
 <section id="gamma-alerts" class="mt-10 scroll-mt-24">
   <div class="glass rounded-2xl p-6">
     <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">

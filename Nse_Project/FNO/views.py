@@ -1,7 +1,10 @@
 import datetime
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 
+from django.http import JsonResponse
 from django.shortcuts import render
 
 from .Fno_oi_vol_swingengine import (
@@ -16,6 +19,42 @@ from .Fno_oi_vol_swingengine import (
 
 
 FNO_DATABASE_PATH = r"D:\FNO DATA\fno_swing.db"
+
+
+def run_fno_update(request):
+	"""Run the F&O data refresh from the FNO app directory."""
+	if request.method != "POST":
+		return JsonResponse({"status": "error", "message": "POST required."}, status=405)
+
+	try:
+		result = subprocess.run(
+			[sys.executable, "fno_swing_engine.py", "update"],
+			cwd=Path(__file__).resolve().parent,
+			capture_output=True,
+			text=True,
+			check=False,
+			timeout=600,
+		)
+	except subprocess.TimeoutExpired:
+		return JsonResponse(
+			{"status": "error", "message": "FNO update timed out."},
+			status=504,
+		)
+
+	if result.returncode != 0:
+		return JsonResponse(
+			{
+				"status": "error",
+				"message": "FNO update failed.",
+				"output": result.stdout or result.stderr,
+			},
+			status=500,
+		)
+
+	return JsonResponse(
+		{"status": "success", "message": "FNO data updated.", "output": result.stdout},
+		status=200,
+	)
 
 
 def _load_daily_report():

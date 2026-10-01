@@ -342,7 +342,7 @@
               </div>
               <div class="math-progress">
                 <div class="math-progress-track">
-                  <span class="math-fill neg" style="width: 59%;"></span>
+                  <span id="math-bias-fill" class="math-fill neg" style="width: 59%;"></span>
                   <span class="math-marker"></span>
                 </div>
                 <div class="math-scale"><span>-20</span><span>-10</span><span>0</span><span>10</span><span>18</span></div>
@@ -355,7 +355,7 @@
               </div>
               <div class="math-progress">
                 <div class="math-progress-track">
-                  <span class="math-fill pos" style="width: 69.6%;"></span>
+                  <span id="math-momentum-fill" class="math-fill pos" style="width: 69.6%;"></span>
                   <span class="math-marker"></span>
                 </div>
                 <div class="math-scale"><span>0</span><span>10</span><span>20</span><span>30</span><span>40</span><span>50</span></div>
@@ -368,7 +368,7 @@
               </div>
               <div class="math-progress">
                 <div class="math-progress-track hatched">
-                  <span class="math-fill delta" style="width: 66%;"></span>
+                  <span id="math-delta-wt-fill" class="math-fill delta" style="width: 66%;"></span>
                   <span class="math-marker"></span>
                 </div>
                 <div class="math-scale"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span></div>
@@ -383,7 +383,7 @@
               </div>
               <div class="math-progress">
                 <div class="math-progress-track">
-                  <span class="math-fill pos" style="width: 71%;"></span>
+                  <span id="math-score-fill" class="math-fill pos" style="width: 71%;"></span>
                   <span class="math-marker"></span>
                 </div>
                 <div class="math-scale"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
@@ -756,6 +756,8 @@
   // ---- Math Console high-water marks (session peak per metric) ----
   // Fixed 0–100% reference scales so the white marker never sticks at 100%.
   const MATH_SCALES = { 'math-bias': 100, 'math-momentum': 100, 'math-delta-wt': 50, 'math-iv-skew': 20, 'math-gamma-boost': 10 };
+  const MATH_BAR_RANGES = { 'math-bias': [-20, 18], 'math-momentum': [0, 50], 'math-delta-wt': [0, 10] };
+  const MATH_FILL_IDS = { 'math-bias': 'math-bias-fill', 'math-momentum': 'math-momentum-fill', 'math-delta-wt': 'math-delta-wt-fill' };
   const mathPeaks = {}; // element id -> peak magnitude (absolute strength from 0)
 
   function renderMathHwm(id, rawValue, displayText) {
@@ -775,9 +777,11 @@
       }
     }
 
-    const fill = el.querySelector('.math-fill');
+    const fill = document.getElementById(MATH_FILL_IDS[id]);
     if (fill) {
-      fill.style.width = `${(Math.min(magnitude, scale) / scale) * 100}%`;
+      const [min, max] = MATH_BAR_RANGES[id];
+      const bounded = Math.max(min, Math.min(max, Number.isFinite(n) ? n : 0));
+      fill.style.width = `${((bounded - min) / (max - min)) * 100}%`;
       fill.classList.toggle('pos', Number.isFinite(n) && n > 0);
       fill.classList.toggle('neg', Number.isFinite(n) && n < 0);
     }
@@ -795,6 +799,10 @@
     const signed = value => (Number.isFinite(value) ? `${value >= 0 ? '+' : ''}${value.toFixed(1)}%` : '--');
     setText('math-score', Number.isFinite(currentLiveScore) ? `${Math.round(currentLiveScore)}` : '--');
     const scoreEl = document.getElementById('math-score');
+    const scoreFill = document.getElementById('math-score-fill');
+    if (scoreFill) {
+      scoreFill.style.width = `${Math.max(0, Math.min(100, currentLiveScore))}%`;
+    }
     if (scoreEl) {
       scoreEl.style.color = currentLiveScore >= 75 ? '#00ff00' : currentLiveScore <= 25 ? '#ff0000' : '#ffffff';
     }
