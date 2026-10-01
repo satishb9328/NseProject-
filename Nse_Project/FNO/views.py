@@ -35,10 +35,16 @@ def run_fno_update(request):
 			check=False,
 			timeout=600,
 		)
-	except subprocess.TimeoutExpired:
+	except subprocess.TimeoutExpired as error:
+		stderr = error.stderr.decode(errors="replace") if isinstance(error.stderr, bytes) else error.stderr or ""
 		return JsonResponse(
-			{"status": "error", "message": "FNO update timed out."},
+			{"status": "error", "message": "FNO update timed out.", "stderr": stderr},
 			status=504,
+		)
+	except (OSError, subprocess.SubprocessError) as error:
+		return JsonResponse(
+			{"status": "error", "message": "FNO update could not run.", "stderr": str(error)},
+			status=500,
 		)
 
 	if result.returncode != 0:
@@ -46,6 +52,7 @@ def run_fno_update(request):
 			{
 				"status": "error",
 				"message": "FNO update failed.",
+				"stderr": result.stderr,
 				"output": result.stdout or result.stderr,
 			},
 			status=500,

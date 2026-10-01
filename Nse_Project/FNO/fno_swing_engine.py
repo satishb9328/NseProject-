@@ -47,8 +47,9 @@ except ImportError:  # running as a top-level script (python fno_swing_engine.py
 @dataclass
 class Config:
     """Central configuration — edit paths & thresholds here."""
-    csv_dir:        str = r'D:\FNO DATA\Participant data'
-    db_path:        str = r'D:\FNO DATA\fno_swing.db'
+    csv_dir:        str = r'D:\FNO DATA\Participant data\OpenInterest'
+    vol_csv_dir:    str = r'D:\FNO DATA\Participant data\Volume'
+    db_path:        str = r'D:\FNO DATA\Participant data\Database\fno_swing.db'
     years_history:  int = 3          # Store 3 years (recommended sweet spot)
 
     # ── Signal thresholds (tune based on your backtest) ──
@@ -125,15 +126,17 @@ def load_participant_csvs(client_type: str,
     rows = []
 
     for path in sorted(glob.glob(pattern)):
-        m = re.match(r'participant_oi_(\d{2})(\d{2})(\d{4})\.csv$',
-                     os.path.basename(path))
-        if not m:
+        date_match = re.search(r'(\d{8})', os.path.basename(path))
+        if not date_match:
             continue
-        dd, mm, yyyy = m.groups()
+        date_string = date_match.group(1)
         try:
-            file_date = datetime.date(int(yyyy), int(mm), int(dd))
+            file_date = datetime.datetime.strptime(date_string, '%Y%m%d').date()
         except ValueError:
-            continue
+            try:
+                file_date = datetime.datetime.strptime(date_string, '%d%m%Y').date()
+            except ValueError:
+                continue
 
         if start_date and file_date < start_date:
             continue
@@ -192,6 +195,63 @@ def load_all_participants(start_date=None, end_date=None) -> dict[str, list[dict
     """Load all 4 participants once. Reuse everywhere to avoid re-reading."""
     return {p: load_participant_csvs(p, start_date, end_date)
             for p in PARTICIPANTS}
+
+
+def load_latest_volume_csv() -> tuple[dict, Optional[str]]:
+    """Loads the most recent participant volume CSV."""
+    pattern = os.path.join(CFG.vol_csv_dir, '*participant_vol_*.csv')
+    files = sorted(glob.glob(pattern))
+    if not files:
+        return {}, None
+
+    latest_file = files[-1]
+    date_match = re.search(r'participant_vol_(\d{4})(\d{2})(\d{2})\.csv', os.path.basename(latest_file))
+    file_date_str = f"{date_match.group(3)}-{date_match.group(2)}-{date_match.group(1)}" if date_match else "Unknown"
+
+    data = {}
+    try:
+        with open(latest_file, 'r', encoding='utf-8', errors='ignore') as f:
+            reader = csv.reader(f)
+            headers = None
+            for row in reader:
+                if not row or not row[0].strip(): continue
+                if str(row[0]).strip().lower() == 'client type':
+                    headers = [h.strip().lower() for h in row]
+                    continue
+                if headers and str(row[0]).strip().upper() in PARTICIPANTS:
+                    client = str(row[0]).strip().upper()
+                    record = {}
+                    for i, h in enumerate(headers):
+                        if i < len(row):
+                            record[h] = safe_float(row[i])
+                    data[client] = record
+    except Exception:
+        pass
+    return data, file_date_str
+
+
+def calculate_net_volume(data_dict: dict) -> dict:
+    """Calculates Net Aggression (Buy - Sell) from Volume CSV."""
+    results = {}
+    for client, row in data_dict.items():
+        net_fut = row.get('future index long', 0) - row.get('future index short', 0)
+        net_opt = (row.get('option index call long', 0) + row.get('option index put short', 0)) - \
+                  (row.get('option index put long', 0) + row.get('option index call short', 0))
+        results[client] = net_fut + net_opt
+    return results
+
+
+def get_tomorrow_matrix(fii_oi_npf: float, fii_net_vol: float) -> tuple[str, str, str]:
+    """The core logic merging OI stance with Volume aggression."""
+    if fii_oi_npf < 0 and fii_net_vol > 0:
+        return "SHORT COVERING", "🟢 STRONG BULLISH (Gap-Up/Squeeze)", "FII were Short but bought heavily today. Trapped! Expect panic buying tomorrow. Buy CE at open/dips."
+    elif fii_oi_npf > 0 and fii_net_vol > 0:
+        return "LONG BUILD-UP", "🟢 BULLISH (Continuation)", "Fresh buying alongside existing longs. Trend is strong. Buy CE on dips."
+    elif fii_oi_npf > 0 and fii_net_vol < 0:
+        return "LONG UNWINDING", "🔴 BEARISH (Topping/Reversal)", "FII booking profits on longs. Upside capped. Buy PE on rallies."
+    elif fii_oi_npf < 0 and fii_net_vol < 0:
+        return "ADDING SHORTS", "🔴 STRONG BEARISH (Breakdown)", "Fresh shorting alongside existing shorts. Do NOT buy CE. Buy PE on rallies."
+    return "NEUTRAL / CHOPPY", "⚖️ SIDEWAYS", "No clear institutional aggression. Avoid directional option buying."
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -774,6 +834,20 @@ class SwingEngine:
 
         signal = generate_swing_signal(day, fii, None)
 
+        vol_data, vol_date = load_latest_volume_csv()
+        vol_net = calculate_net_volume(vol_data) if vol_data else {}
+        fii_net_vol = vol_net.get('FII', 0)
+        dii_net_vol = vol_net.get('DII', 0)
+        pro_net_vol = vol_net.get('PRO', 0)
+        cli_net_vol = vol_net.get('CLIENT', 0)
+
+        action = "N/A"
+        tomorrow_bias = "⚠️ VOLUME DATA MISSING"
+        tomorrow_note = "Download today's volume CSV to predict tomorrow."
+        if vol_data:
+            action, tomorrow_bias, tomorrow_note = get_tomorrow_matrix(
+                day.fii_npf, fii_net_vol)
+
         lines = [
             '╔═══════════════════════════════════════════════════════╗',
             '║        FNO SWING TRADING REPORT                       ║',
@@ -787,6 +861,20 @@ class SwingEngine:
             f'  PRO   NOPO : {day.pro_nopo:>+12,.0f}',
             f'  DII  Net   : {day.dii_combined:>+12,.0f}',
             f'  CLIENT NFNO: {day.client_nfno:>+12,.0f}',
+            '',
+            '  ── TOMORROW\'S DIRECTION (OI + VOLUME) ────────────',
+            f'  Volume Date: {vol_date or "Missing"}',
+            '  Participant  │   Net OI (Pos)   │  Net Vol (Aggr)  │ Role',
+            '  ─────────────┼──────────────────┼──────────────────┼───────────────',
+            f'  FII          │ {day.fii_npf:>+15,.0f} │ {fii_net_vol:>+15,.0f} │ Trend Driver',
+            f'  PRO          │ {day.pro_nopo:>+15,.0f} │ {pro_net_vol:>+15,.0f} │ Smart Snipers',
+            f'  DII          │ {day.dii_combined:>+15,.0f} │ {dii_net_vol:>+15,.0f} │ Hedgers',
+            f'  CLIENT       │ {day.client_nfno:>+15,.0f} │ {cli_net_vol:>+15,.0f} │ Contrarian',
+            '  ─────────────┴──────────────────┴──────────────────┴───────────────',
+            f'  Matrix Logic : FII OI ({day.fii_npf:+,.0f}) vs FII Vol ({fii_net_vol:+,.0f})',
+            f'  Action       : {action}',
+            f'  Bias         : {tomorrow_bias}',
+            f'  Advice       : {tomorrow_note}',
             '',
             '  ── KEY FLAGS ─────────────────────────────────────',
             f'  Smart Money Score    : {day.smart_money_score:+d}',

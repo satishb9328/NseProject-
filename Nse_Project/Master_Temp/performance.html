@@ -179,7 +179,7 @@
           return;
         }
 
-        throw new Error(payload.message || 'FNO update failed.');
+        throw new Error(payload.stderr || payload.output || payload.message || 'FNO update failed.');
       } catch (error) {
         alert(error.message || 'Unable to update FNO data.');
         button.disabled = false;
