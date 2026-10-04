@@ -1038,7 +1038,9 @@ def build_option_chain_rows(
             'call_ltp': '-',
             'call_coi': '-',
             'call_coi_pct': '-',
+            'call_coi_rel_pct': '-',
             'put_coi_pct': '-',
+            'put_coi_rel_pct': '-',
             'put_coi': '-',
             'put_ltp': '-',
             'put_velocity': '-',
@@ -1096,6 +1098,19 @@ def build_option_chain_rows(
             oi_total = call_oi + put_oi
             row['call_oi_pct'] = round((call_oi / oi_total) * 100, 1) if oi_total != 0 else 0
             row['put_oi_pct'] = round((put_oi / oi_total) * 100, 1) if oi_total != 0 else 0
+
+        # Relative COI dominance per strike (Call vs Put). Absolute-value math keeps a
+        # negative COI on either leg from ever producing negative or >100% figures.
+        call_coi_val = _to_number(row.get('call_coi'))
+        put_coi_val = _to_number(row.get('put_coi'))
+
+        if call_coi_val is not None and put_coi_val is not None:
+            ce_oich_abs = abs(call_coi_val)
+            pe_oich_abs = abs(put_coi_val)
+            coi_total = ce_oich_abs + pe_oich_abs
+
+            row['call_coi_rel_pct'] = round((ce_oich_abs / coi_total) * 100, 1) if coi_total != 0 else 0.0
+            row['put_coi_rel_pct'] = round((pe_oich_abs / coi_total) * 100, 1) if coi_total != 0 else 0.0
 
     def has_activity(value):
         return isinstance(value, (int, float)) and value != 0

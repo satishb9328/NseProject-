@@ -93,7 +93,12 @@ def test_build_option_chain_rows() -> None:
     check("put_coi_pct preserved as change-in-OI %", row["put_coi_pct"], -20.0)
     # Velocity is shares/sec and must NOT be divided by the lot size.
     check("velocity not scaled to lots", row["call_velocity"] == 80_000.0 / lot, False)
-    check("every expected key present", sorted(row.keys()), sorted(EXPECTED_JS_KEYS))
+    # New relative COI dominance per strike (absolute-value math): 250 vs 160 lots.
+    check("call_coi_rel_pct is call's share of |COI|", row["call_coi_rel_pct"], 61.0)
+    check("put_coi_rel_pct is put's share of |COI|", row["put_coi_rel_pct"], 39.0)
+    check("every expected key present",
+          sorted(row.keys()),
+          sorted(EXPECTED_JS_KEYS + ["call_coi_rel_pct", "put_coi_rel_pct"]))
 
 
 def _headers(html: str) -> list:
@@ -140,14 +145,16 @@ def test_live_signals_html() -> None:
     check("compact table present", 'id="compact-options-table"' in html, True)
     check("compact table class present", 'class="compact-chain-table"' in html, True)
 
-    # The compact chain renders exactly 5 columns.
-    for header in (">CALL COI%</th>", ">CALL LTP</th>", ">STRIKE</th>",
-                   ">PUT LTP</th>", ">PUT COI%</th>"):
+    # The compact chain renders 7 columns: the original five plus two relative COI columns.
+    for header in (">CALL COI%</th>", ">CALL LTP</th>", ">CALL COI REL%</th>",
+                   ">STRIKE</th>", ">PUT COI REL%</th>", ">PUT LTP</th>",
+                   ">PUT COI%</th>"):
         check(f"compact header {header!r}", header in html, True)
 
-    # renderCompactChain reads only the 5 compact fields.
+    # renderCompactChain reads the 7 compact fields (5 original + 2 relative COI).
     check("compact renderer present", "function renderCompactChain" in html, True)
-    for key in ("call_coi_pct", "call_ltp", "strike", "put_ltp", "put_coi_pct"):
+    for key in ("call_coi_pct", "call_coi_rel_pct", "call_ltp", "strike",
+                "put_ltp", "put_coi_rel_pct", "put_coi_pct"):
         check(f"compact renderer reads row.{key}", f"row.{key}" in html, True)
 
 

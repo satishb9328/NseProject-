@@ -202,13 +202,15 @@
                 <tr>
                   <th scope="col" class="call-side text-[11px]">CALL COI%</th>
                   <th scope="col" class="call-side text-[11px]">CALL LTP</th>
+                  <th scope="col" class="call-side text-[11px]">CALL COI REL%</th>
                   <th scope="col" class="strike-header text-[11px]">STRIKE</th>
+                  <th scope="col" class="put-side text-[11px]">PUT COI REL%</th>
                   <th scope="col" class="put-side text-[11px]">PUT LTP</th>
                   <th scope="col" class="put-side text-[11px]">PUT COI%</th>
                 </tr>
               </tbody>
               <tbody id="compact-options-tbody">
-                <tr><td colspan="5" class="px-1 py-2 text-[11px] text-slate-500">Loading compact chain…</td></tr>
+                <tr><td colspan="7" class="px-1 py-2 text-[11px] text-slate-500">Loading compact chain…</td></tr>
               </tbody>
             </table>
           </div>
@@ -1167,6 +1169,13 @@
       if (n === 0) return '0.0%';
       return `${n > 0 ? '+' : ''}${n.toFixed(1)}%`;
     };
+    // Relative COI dominance (Call vs Put share at a strike) is always 0–100%.
+    const fmtCoiRel = (value) => {
+      if (value === null || value === undefined || value === '-' || value === '') return '-';
+      const n = toNumber(value);
+      if (n === 0) return '0.0%';
+      return `${n.toFixed(1)}%`;
+    };
 
     // Session high-water mark (peak) per strike per side, keyed by strike price.
     // Peaks persist across the 1 Hz re-renders so a dropping COI% leaves its marker behind.
@@ -1212,7 +1221,7 @@
 
     function renderCompactChain(rows, spot) {
       if (!Array.isArray(rows) || !rows.length) {
-        compactBody.innerHTML = '<tr><td colspan="5" class="px-1 py-2 text-[11px] text-slate-500">No option chain data yet…</td></tr>';
+        compactBody.innerHTML = '<tr><td colspan="7" class="px-1 py-2 text-[11px] text-slate-500">No option chain data yet…</td></tr>';
         return;
       }
       const sorted = rows.slice().sort((a, b) => toNumber(a.strike) - toNumber(b.strike));
@@ -1247,7 +1256,9 @@
         if (strike === atmStrike) tr.className = 'atm-row';
         tr.appendChild(coiCell(fmtCoi(row.call_coi_pct), 'call', Math.abs(toNumber(row.call_coi_pct)), peak.call, callMax));
         tr.appendChild(compactCell(fmtLtp(row.call_ltp), 'call-side font-mono'));
+        tr.appendChild(compactCell(fmtCoiRel(row.call_coi_rel_pct), 'call-side font-mono'));
         tr.appendChild(compactCell(fmtStrike(row.strike), 'strike-cell font-mono font-bold'));
+        tr.appendChild(compactCell(fmtCoiRel(row.put_coi_rel_pct), 'put-side font-mono'));
         tr.appendChild(compactCell(fmtLtp(row.put_ltp), 'put-side font-mono'));
         tr.appendChild(coiCell(fmtCoi(row.put_coi_pct), 'put', Math.abs(toNumber(row.put_coi_pct)), peak.put, putMax));
         fragment.appendChild(tr);
