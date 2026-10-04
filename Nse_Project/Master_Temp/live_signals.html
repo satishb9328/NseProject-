@@ -109,11 +109,11 @@
   .hwm-text { position: relative; z-index: 3; text-shadow: 0 1px 2px rgba(2, 6, 23, .95), 0 0 6px rgba(2, 6, 23, .6); }
 
   /* ---- Math Console: horizontal metric cards ---- */
-  .math-console-metrics { display: grid; gap: .75rem; }
-  .math-metric-row { display: grid; grid-template-columns: minmax(150px, .8fr) minmax(0, 2fr); gap: 1rem; align-items: center; padding: .7rem .75rem; border: 1px solid rgba(51, 65, 85, .8); border-radius: .65rem; background: rgba(15, 23, 42, .58); }
+  .math-console-metrics { display: grid; gap: .375rem; }
+  .math-metric-row { display: grid; grid-template-columns: minmax(150px, .8fr) minmax(0, 2fr); gap: 1rem; align-items: center; padding: .35rem .75rem; border: 1px solid rgba(51, 65, 85, .8); border-radius: .65rem; background: rgba(15, 23, 42, .58); }
   .math-metric-copy { min-width: 0; }
   .math-metric-label { display: block; color: #94a3b8; font-size: 10px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; }
-  .math-metric-value { display: block; margin-top: .2rem; color: #f8fafc; font-size: 12px; font-weight: 700; line-height: 1.35; }
+  .math-metric-value { display: block; margin-top: .1rem; color: #f8fafc; font-size: 12px; font-weight: 700; line-height: 1.35; }
   .math-metric-value.red { color: #f87171; }
   .math-metric-value.green { color: #4ade80; }
   .math-metric-badge { display: inline-block; margin-left: .35rem; color: #f87171; font-size: 9px; font-weight: 800; letter-spacing: .08em; }
@@ -126,7 +126,7 @@
   .math-progress-track .math-fill.delta { background: #22c55e; }
   .math-progress-track .math-marker { position: absolute; top: -3px; bottom: -3px; left: 0; width: 1px; background: rgba(248, 250, 252, .75); box-shadow: 0 0 4px rgba(255, 255, 255, .55); z-index: 2; pointer-events: none; }
   .math-progress-track .math-text { position: absolute; right: 0; top: 14px; color: #cbd5e1; font-size: 9px; line-height: 1; white-space: nowrap; }
-  .math-scale { display: flex; justify-content: space-between; margin-top: .45rem; color: #64748b; font-size: 9px; font-variant-numeric: tabular-nums; }
+  .math-scale { display: flex; justify-content: space-between; margin-top: .2rem; color: #64748b; font-size: 9px; font-variant-numeric: tabular-nums; }
   @media (max-width: 640px) { .math-metric-row { grid-template-columns: 1fr; gap: .65rem; } }
   @media (prefers-reduced-motion: reduce) { .math-progress-track .math-fill { transition: none; } }
 
@@ -215,7 +215,7 @@
             </table>
           </div>
         </section>
-      <section id="preopen-trap-snapshot" class="flex h-full flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-4 lg:col-start-1 lg:row-start-2">
+      <section id="preopen-trap-snapshot" class="flex h-full flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-2 lg:col-start-1 lg:row-start-2">
         <div class="mb-2 flex items-center justify-between gap-3">
           <h2 class="text-sm font-bold uppercase tracking-[.18em] text-slate-200">PRE-OPEN GAMMA TRAP</h2>
           <span class="text-xs uppercase tracking-wider text-slate-500">09:00 - 09:10 IST</span>
@@ -230,13 +230,13 @@
           <span class="flex-1 text-center text-xs font-semibold uppercase tracking-wider text-slate-500">Projected Open vs Prev Close</span>
           <span id="preopen-projected-pct" class="font-mono text-sm font-bold {% if projected_open_tone == 'up' %}text-green-400{% elif projected_open_tone == 'down' %}text-red-400{% else %}text-slate-500{% endif %}">{{ projected_open_display }}</span>
         </div>
-        <div class="flex flex-col gap-2">
-          <div id="sentiment-bias-chip" class="sentiment-metric metric-neutral" style="width: 100%; display: block; margin-bottom: 15px;">
+        <div class="flex flex-col gap-1">
+          <div id="sentiment-bias-chip" class="sentiment-metric metric-neutral" style="width: 100%; display: block; margin-bottom: 8px;">
             <div class="flex items-center justify-between gap-3">
               <span class="metric-label">Bias</span>
               <span id="sentiment-bias" class="font-mono text-sm font-semibold">--</span>
             </div>
-            <div class="math-bar-container" style="width: 100%; display: block; margin-bottom: 15px;">
+            <div class="math-bar-container" style="width: 100%; display: block; margin-bottom: 8px;">
               <span id="sentiment-bias-bar" class="math-progress-track" role="img" aria-label="Bias meter" style="display: block; width: 100%;">
                 <span class="bar-outline" style="position: absolute; inset: 0; border: 1px solid rgba(45, 212, 191, .7); border-radius: 8px;"></span>
                 <span class="bar-fill active-bar" style="position: absolute; left: 50%; top: 0; height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, #ef4444, #facc15); transition: width .4s ease-out;"></span>
@@ -246,13 +246,13 @@
               <div class="math-scale" style="display: flex; justify-content: space-between;"><span>-20</span><span>-10</span><span>0</span><span>10</span><span>18</span></div>
             </div>
           </div>
-          <div id="sentiment-momentum-chip" class="sentiment-metric metric-neutral" style="width: 100%; display: block; margin-bottom: 15px;">
+          <div id="sentiment-momentum-chip" class="sentiment-metric metric-neutral" style="width: 100%; display: block; margin-bottom: 8px;">
             <div class="flex items-center justify-between gap-3">
               <span class="metric-label">Momentum</span>
               <span id="sentiment-momentum" class="font-mono text-sm font-semibold">--</span>
               <span id="sentiment-momentum-label" class="math-metric-badge"></span>
             </div>
-            <div class="math-bar-container" style="width: 100%; display: block; margin-bottom: 15px;">
+            <div class="math-bar-container" style="width: 100%; display: block; margin-bottom: 8px;">
               <span id="sentiment-momentum-bar" class="math-progress-track" role="img" aria-label="Momentum meter" style="display: block; width: 100%;">
                 <span class="bar-outline" style="position: absolute; inset: 0; border: 1px solid rgba(45, 212, 191, .7); border-radius: 8px;"></span>
                 <span class="bar-fill active-bar" style="position: absolute; left: 0; top: 0; height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, #facc15, #4ade80); transition: width .4s ease-out;"></span>
@@ -262,13 +262,13 @@
               <div class="math-scale" style="display: flex; justify-content: space-between;"><span>0</span><span>10</span><span>20</span><span>30</span><span>40</span><span>50</span></div>
             </div>
           </div>
-          <div id="sentiment-score-chip" class="sentiment-metric metric-neutral" style="width: 100%; display: block; margin-bottom: 15px;">
+          <div id="sentiment-score-chip" class="sentiment-metric metric-neutral" style="width: 100%; display: block; margin-bottom: 8px;">
             <div class="flex items-center justify-between gap-3">
               <span class="metric-label">Score</span>
               <span id="sentiment-score" class="font-mono text-sm font-semibold">--</span>
               <span id="sentiment-score-label" class="math-metric-badge"></span>
             </div>
-            <div class="math-bar-container" style="width: 100%; display: block; margin-bottom: 15px;">
+            <div class="math-bar-container" style="width: 100%; display: block; margin-bottom: 8px;">
               <span id="sentiment-score-bar" class="math-progress-track" role="img" aria-label="Score meter" style="display: block; width: 100%;">
                 <span class="bar-outline" style="position: absolute; inset: 0; border: 1px solid rgba(45, 212, 191, .7); border-radius: 8px;"></span>
                 <span class="bar-fill active-bar" style="position: absolute; left: 0; top: 0; height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, #facc15, #4ade80); transition: width .4s ease-out;"></span>
@@ -331,8 +331,8 @@
             </div>
           </div>
         </div>
-        <div id="math-console" class="mt-3 min-h-[180px] rounded-lg border border-cyan-800/50 bg-black/50 p-3 font-mono text-[11px] leading-5">
-          <div class="mb-1 flex items-center justify-between border-b border-slate-800 pb-1">
+        <div id="math-console" class="mt-1.5 min-h-[120px] rounded-lg border border-cyan-800/50 bg-black/50 p-2 font-mono text-[11px] leading-5">
+          <div class="mb-0.5 flex items-center justify-between border-b border-slate-800 pb-0.5">
             <span class="uppercase tracking-wider text-cyan-400">⚙ MATH CONSOLE</span>
             <span class="text-slate-600">live debug</span>
           </div>
@@ -377,7 +377,7 @@
               </div>
             </div>
           </div>
-          <div class="space-y-2">
+          <div class="space-y-1">
             <div class="math-metric-row">
               <div class="math-metric-copy">
                 <span class="math-metric-label">Score</span>
