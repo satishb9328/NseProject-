@@ -7,7 +7,7 @@ from pathlib import Path
 from django.http import JsonResponse
 from django.shortcuts import render
 
-from .Fno_oi_vol_swingengine import (
+from .fno_swing_engine import (
 	DaySignals,
 	SwingDB,
 	SwingEngine,

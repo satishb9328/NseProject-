@@ -15,6 +15,7 @@ import yfinance as yf
 import pandas_ta as ta
 import json
 import os
+import sqlite3
 import sys
 import threading
 import gzip
@@ -22,6 +23,7 @@ import requests
 from collections import Counter
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 import warnings
 from scipy.signal import argrelextrema
 import numpy as np
@@ -69,6 +71,7 @@ STATUS_FILE        = os.path.join(BASE_DIR, "scan_status.json")
 DAY_DATA_DIR = r"D:\Api data\ML_HISTO_DATA\Upstox Data\Day Data"
 WEEK_DATA_DIR = r"D:\Api data\ML_HISTO_DATA\Upstox Data\Weeks Data"
 NIFTY_CSV_FILE = r"C:\Users\ADMIN\Desktop\MyProject2\Nse_Project\ind_nifty500list.csv"
+FNO_DATABASE_PATH = r"D:\FNO DATA\Participant data\Database\fno_swing.db"
 
 CACHE_EXPIRY_HOURS = 6
 MAX_WORKERS        = 5
@@ -213,6 +216,35 @@ def find_swing_pivots(high: np.ndarray, low: np.ndarray, n: int = 2):
     sh_idx = argrelextrema(high, np.greater, order=n)[0].tolist()
     sl_idx = argrelextrema(low, np.less, order=n)[0].tolist()
     return sh_idx, sl_idx
+
+def _anchored_vwap(high: np.ndarray, low: np.ndarray, close: np.ndarray, volume: np.ndarray, anchor_idx: int) -> float | None:
+    if anchor_idx < 0 or anchor_idx >= len(close):
+        return None
+    typical_price = (high[anchor_idx:] + low[anchor_idx:] + close[anchor_idx:]) / 3.0
+    anchored_volume = volume[anchor_idx:]
+    valid = np.isfinite(typical_price) & np.isfinite(anchored_volume) & (anchored_volume >= 0)
+    if not valid.any() or float(anchored_volume[valid].sum()) <= 0:
+        return None
+    return float(np.sum(typical_price[valid] * anchored_volume[valid]) / np.sum(anchored_volume[valid]))
+
+def get_fno_market_context() -> dict:
+    context = {"smart_money_score": 0.0, "retail_trap": False}
+    try:
+        database_uri = f"{Path(FNO_DATABASE_PATH).as_uri()}?mode=ro"
+        connection = sqlite3.connect(database_uri, uri=True)
+        try:
+            connection.row_factory = sqlite3.Row
+            latest = connection.execute(
+                "SELECT smart_money_score, retail_trap FROM cross_signals ORDER BY date DESC LIMIT 1"
+            ).fetchone()
+        finally:
+            connection.close()
+        if latest is not None:
+            context["smart_money_score"] = _safe_float(latest["smart_money_score"])
+            context["retail_trap"] = bool(latest["retail_trap"])
+    except (OSError, sqlite3.Error, ValueError) as exc:
+        _log(f"  [FNO] Market context unavailable; using neutral defaults: {exc}")
+    return context
 
 def detect_liquidity_sweep(
     high: np.ndarray,
@@ -543,6 +575,18 @@ def smc_entry_signal(hist: pd.DataFrame, atr_value: float | None):
         displaced = displacement_confirmed(c_arr, o_arr, v_arr, direction)
 
         confluence = sum([sweep["swept"], fvg["found"], fvg["retesting"], mss["confirmed"], ob["found"], fib["in_zone"], displaced])
+        avwap_levels = (
+            _anchored_vwap(np.asarray(h_arr, dtype=float), np.asarray(l_arr, dtype=float), np.asarray(c_arr, dtype=float), np.asarray(v_arr, dtype=float), sh_idx[-1]),
+            _anchored_vwap(np.asarray(h_arr, dtype=float), np.asarray(l_arr, dtype=float), np.asarray(c_arr, dtype=float), np.asarray(v_arr, dtype=float), sl_idx[-1]),
+        )
+        has_fvg_or_sweep = bool(fvg["found"] or sweep["swept"])
+        if direction == "bullish":
+            avwap_rejection = any(level is not None and l_arr[-1] <= level < c_arr[-1] for level in avwap_levels)
+        else:
+            avwap_rejection = any(level is not None and c_arr[-1] < level <= h_arr[-1] for level in avwap_levels)
+        if avwap_rejection and has_fvg_or_sweep:
+            confluence += 1
+
         signal = "WEAK_SETUP" if confluence < 3 else "MODERATE_SETUP" if confluence < 5 else "HIGH_CONFLUENCE"
 
         atr_buf = float(atr_value) * ATR_SL_MULTIPLIER if atr_value else 0.0
@@ -846,7 +890,7 @@ def fetch_stock_data(symbol: str, instrument_key: str, cache: dict, nifty_hist: 
 # SCORING ENGINE
 # ════════════════════════════════════════════════════════════════════════════════
 
-def score_stock_advanced(row: dict) -> dict:
+def score_stock_advanced(row: dict, market_context: dict) -> dict:
     score = 0.0
     reasons = []
 
@@ -900,8 +944,8 @@ def score_stock_advanced(row: dict) -> dict:
     smc_sig = row.get("smc_signal", "NO_SETUP")
     score += smc_conf * 2
 
-    if smc_sig == "HIGH_CONFLUENCE": reasons.append(f"SMC High Confluence ({smc_conf}/7)")
-    elif smc_sig == "MODERATE_SETUP": reasons.append(f"SMC Moderate Setup ({smc_conf}/7)")
+    if smc_sig == "HIGH_CONFLUENCE": reasons.append(f"SMC High Confluence ({smc_conf}/8)")
+    elif smc_sig == "MODERATE_SETUP": reasons.append(f"SMC Moderate Setup ({smc_conf}/8)")
     if row.get("mss_confirmed"): reasons.append("MSS Confirmed")
 
     fib_val = row.get('fib_50')
@@ -909,7 +953,15 @@ def score_stock_advanced(row: dict) -> dict:
     if row.get("displaced"): reasons.append("Displacement Vol Confirmed")
 
     final_score = round(score / SCORE_NORMALIZER, 1)
-    row["score"] = float(min(final_score, 100.0))
+    if str(row.get("smc_direction") or "").strip().lower() == "bullish":
+        smart_money_score = _safe_float(market_context.get("smart_money_score"))
+        if bool(market_context.get("retail_trap")) or smart_money_score <= -3:
+            final_score -= 20.0
+            reasons.append("⚠️ AVOID: Market Retail Trap")
+        elif smart_money_score >= 4:
+            final_score += 10.0
+            reasons.append("🚀 FNO Market Tailwind")
+    row["score"] = float(max(0.0, min(final_score, 100.0)))
     row["reasons"] = " | ".join(reasons) if reasons else "No strong signals"
 
     return row
@@ -1012,6 +1064,7 @@ def main():
         print("  !! No symbols found or mapped. Exiting.")
         return 1
 
+    market_context = get_fno_market_context()
     cache = load_cache()
     cache.clear() 
     final_data = []
@@ -1046,7 +1099,7 @@ def main():
             result = future.result()
             if result is None: continue
 
-            result = score_stock_advanced(result)
+            result = score_stock_advanced(result, market_context)
             clean_result = {k: v for k, v in result.items() if not isinstance(v, (pd.DataFrame, pd.Series))}
             clean_result["symbol"] = sym
 
