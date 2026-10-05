@@ -118,17 +118,21 @@
   .math-metric-value.green { color: #4ade80; }
   .math-metric-badge { display: inline-block; margin-left: .35rem; color: #f87171; font-size: 9px; font-weight: 800; letter-spacing: .08em; }
   .math-progress { min-width: 0; }
-  .math-progress-track { position: relative; height: 10px; overflow: visible; border: 1px solid rgba(100, 116, 139, .5); border-radius: 999px; background: rgba(30, 41, 59, .9); box-shadow: inset 0 1px 4px rgba(2, 6, 23, .8); }
+  .math-progress-track { position: relative; height: 18px; overflow: visible; border: 1px solid rgba(100, 116, 139, .5); border-radius: 999px; background: rgba(30, 41, 59, .9); box-shadow: inset 0 2px 6px rgba(2, 6, 23, .85); }
   .math-progress-track.hatched { background: repeating-linear-gradient(135deg, rgba(74, 222, 128, .12) 0 4px, rgba(15, 23, 42, .9) 4px 8px); }
-  .math-progress-track .math-fill { position: absolute; left: 0; top: 0; height: 100%; width: 0; border-radius: inherit; transition: width .4s ease-out; will-change: width; }
+  .math-progress-track .math-fill { position: absolute; left: 0; top: 0; height: 100%; width: 0; border-radius: inherit; transition: left .4s ease-out, width .4s ease-out; will-change: left, width; }
   .math-progress-track .math-fill.pos { background: linear-gradient(90deg, #facc15, #4ade80); }
   .math-progress-track .math-fill.neg { background: linear-gradient(90deg, #ef4444, #facc15); }
   .math-progress-track .math-fill.delta { background: #22c55e; }
-  .math-progress-track .math-marker { position: absolute; top: -3px; bottom: -3px; left: 0; width: 1px; background: rgba(248, 250, 252, .75); box-shadow: 0 0 4px rgba(255, 255, 255, .55); z-index: 2; pointer-events: none; }
+  .math-zero { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: rgba(148, 163, 184, .55); transform: translateX(-50%); z-index: 1; pointer-events: none; }
+  .macro-ref-line { position: absolute; top: -2px; bottom: -2px; left: 50%; width: 1px; transform: translateX(-50%); background: rgba(250, 204, 21, .95); box-shadow: 0 0 5px rgba(250, 204, 21, .8); z-index: 2; pointer-events: none; }
+  .math-progress-track .math-marker { position: absolute; top: -4px; bottom: -4px; left: 0; width: 2px; transform: translateX(-50%); border-radius: 2px; background: var(--peak-color, #f8fafc); box-shadow: 0 0 6px var(--peak-color, #fff), 0 0 14px var(--peak-color, #fff); z-index: 3; pointer-events: none; opacity: 0; transition: left .4s ease-out, opacity .3s ease; }
+  .math-progress-track .math-marker.is-visible { opacity: 1; animation: peak-pulse 1.6s ease-in-out infinite; }
+  @keyframes peak-pulse { 0%, 100% { filter: brightness(1); transform: translateX(-50%) scaleY(1); } 50% { filter: brightness(1.7); transform: translateX(-50%) scaleY(1.15); } }
   .math-progress-track .math-text { position: absolute; right: 0; top: 14px; color: #cbd5e1; font-size: 9px; line-height: 1; white-space: nowrap; }
   .math-scale { display: flex; justify-content: space-between; margin-top: .2rem; color: #64748b; font-size: 9px; font-variant-numeric: tabular-nums; }
   @media (max-width: 640px) { .math-metric-row { grid-template-columns: 1fr; gap: .65rem; } }
-  @media (prefers-reduced-motion: reduce) { .math-progress-track .math-fill { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .math-progress-track .math-fill, .math-progress-track .math-marker { transition: none; } .math-progress-track .math-marker.is-visible { animation: none; } }
 
   @keyframes pulse-green {
     0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.75); border-color: rgba(34, 197, 94, 0.9); }
@@ -215,74 +219,82 @@
             </table>
           </div>
         </section>
-      <section id="preopen-trap-snapshot" class="flex h-full flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-2 lg:col-start-1 lg:row-start-2">
-        <div class="mb-2 flex items-center justify-between gap-3">
-          <h2 class="text-sm font-bold uppercase tracking-[.18em] text-slate-200">PRE-OPEN GAMMA TRAP</h2>
-          <span class="text-xs uppercase tracking-wider text-slate-500">09:00 - 09:10 IST</span>
-        </div>
-        <div class="mb-2 flex items-center justify-between gap-3 text-sm">
-          <span class="font-medium text-slate-400">MAX IEP <span id="preopen-max" class="font-mono font-semibold text-red-400">{{ preopen_max|default_if_none:"—" }}</span></span>
-          <span class="font-medium text-slate-400">MIN IEP <span id="preopen-min" class="font-mono font-semibold text-green-400">{{ preopen_min|default_if_none:"—" }}</span></span>
-          <span class="font-medium text-slate-400">FINAL IEP <span id="preopen-final" class="font-mono font-semibold text-amber-400">{{ preopen_final|default_if_none:"—" }}</span></span>
-        </div>
-        <div class="mb-2 flex items-center justify-between gap-3 border-b border-slate-700/50 pb-2 text-sm">
-          <span class="font-medium text-slate-400">PREV CLOSE <span id="preopen-prev-close" class="font-mono font-semibold text-slate-200">{{ previous_close|default_if_none:"—" }}</span></span>
-          <span class="flex-1 text-center text-xs font-semibold uppercase tracking-wider text-slate-500">Projected Open vs Prev Close</span>
-          <span id="preopen-projected-pct" class="font-mono text-sm font-bold {% if projected_open_tone == 'up' %}text-green-400{% elif projected_open_tone == 'down' %}text-red-400{% else %}text-slate-500{% endif %}">{{ projected_open_display }}</span>
-        </div>
-        <div class="flex flex-col gap-1">
-          <div id="sentiment-bias-chip" class="sentiment-metric metric-neutral" style="width: 100%; display: block; margin-bottom: 8px;">
-            <div class="flex items-center justify-between gap-3">
-              <span class="metric-label">Bias</span>
-              <span id="sentiment-bias" class="font-mono text-sm font-semibold">--</span>
+      <div class="flex h-full flex-col gap-2 lg:col-start-1 lg:row-start-2">
+        <section id="preopen-market" class="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+          <div class="mb-2 flex items-center justify-between gap-3">
+            <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-slate-200">PRE-OPEN MARKET (CASH)</h2>
+            <span class="text-[10px] uppercase tracking-wider text-slate-500">09:00 - 09:10 IST</span>
+          </div>
+          <div class="mb-2 flex items-center justify-between gap-3 text-sm">
+            <span class="font-medium text-slate-400">MAX IEP <span id="preopen-max" class="font-mono font-semibold text-red-400">{{ preopen_max|default_if_none:"—" }}</span></span>
+            <span class="font-medium text-slate-400">MIN IEP <span id="preopen-min" class="font-mono font-semibold text-green-400">{{ preopen_min|default_if_none:"—" }}</span></span>
+            <span class="font-medium text-slate-400">FINAL IEP <span id="preopen-final" class="font-mono font-semibold text-amber-400">{{ preopen_final|default_if_none:"—" }}</span></span>
+          </div>
+          <div class="flex items-center justify-between gap-3 border-b border-slate-700/50 pb-2 text-sm">
+            <span class="font-medium text-slate-400">PREV CLOSE <span id="preopen-prev-close" class="font-mono font-semibold text-slate-200">{{ previous_close|default_if_none:"—" }}</span></span>
+            <span class="flex-1 text-center text-xs font-semibold uppercase tracking-wider text-slate-500">Projected Open vs Prev Close</span>
+            <span id="preopen-projected-pct" class="font-mono text-sm font-bold {% if projected_open_tone == 'up' %}text-green-400{% elif projected_open_tone == 'down' %}text-red-400{% else %}text-slate-500{% endif %}">{{ projected_open_display }}</span>
+          </div>
+        </section>
+
+        <section id="macro-option-chain" class="flex flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+          <div class="mb-2 flex items-center justify-between gap-3">
+            <h2 class="text-sm font-bold uppercase tracking-[.18em] text-slate-200">TOTAL OPTION CHAIN (MACRO)</h2>
+            <span class="text-xs uppercase tracking-wider text-slate-500">Whole Chain · Live</span>
+          </div>
+          <div class="flex flex-col gap-2">
+            <!-- Metric A: NET OI BIAS — bipolar, center-origin 0, scale -50% .. +50% -->
+            <div id="macro-oi-bias-chip" class="sentiment-metric metric-neutral">
+              <div class="flex items-center justify-between gap-3">
+                <span class="metric-label">Net OI Bias</span>
+                <span id="macro-oi-bias" class="font-mono text-sm font-semibold">--</span>
+              </div>
+              <div class="math-progress">
+                <div id="macro-oi-bias-bar" class="math-progress-track" role="img" aria-label="Net OI Bias meter">
+                  <span class="math-zero"></span>
+                  <span class="math-fill"></span>
+                  <span class="math-marker"></span>
+                </div>
+                <div class="math-scale"><span>-50%</span><span>-25%</span><span>0</span><span>+25%</span><span>+50%</span></div>
+              </div>
             </div>
-            <div class="math-bar-container" style="width: 100%; display: block; margin-bottom: 8px;">
-              <span id="sentiment-bias-bar" class="math-progress-track" role="img" aria-label="Bias meter" style="display: block; width: 100%;">
-                <span class="bar-outline" style="position: absolute; inset: 0; border: 1px solid rgba(45, 212, 191, .7); border-radius: 8px;"></span>
-                <span class="bar-fill active-bar" style="position: absolute; left: 50%; top: 0; height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, #ef4444, #facc15); transition: width .4s ease-out;"></span>
-                <span class="shadow-bar" style="position: absolute; left: 50%; top: 0; height: 100%; width: 0; opacity: .25;"></span>
-                <span class="math-marker"></span>
-              </span>
-              <div class="math-scale" style="display: flex; justify-content: space-between;"><span>-20</span><span>-10</span><span>0</span><span>10</span><span>18</span></div>
+            <!-- Metric B: TOTAL VOL SKEW — bipolar, center-origin 0, scale -50% .. +50% -->
+            <div id="macro-vol-skew-chip" class="sentiment-metric metric-neutral">
+              <div class="flex items-center justify-between gap-3">
+                <span class="metric-label">Total Vol Skew</span>
+                <span id="macro-vol-skew" class="font-mono text-sm font-semibold">--</span>
+              </div>
+              <div class="math-progress">
+                <div id="macro-vol-skew-bar" class="math-progress-track" role="img" aria-label="Total Vol Skew meter">
+                  <span class="math-zero"></span>
+                  <span class="math-fill"></span>
+                  <span class="math-marker"></span>
+                </div>
+                <div class="math-scale"><span>-50%</span><span>-25%</span><span>0</span><span>+25%</span><span>+50%</span></div>
+              </div>
+            </div>
+            <!-- Metric C: TOTAL PCR — unipolar, scale 0.0 .. 2.0, static reference line at 1.0 -->
+            <div id="macro-pcr-chip" class="sentiment-metric metric-neutral">
+              <div class="flex items-center justify-between gap-3">
+                <span class="metric-label">Total PCR</span>
+                <span id="macro-pcr" class="font-mono text-sm font-semibold">--</span>
+              </div>
+              <div class="math-progress">
+                <div id="macro-pcr-bar" class="math-progress-track" role="img" aria-label="Total PCR meter">
+                  <span class="macro-ref-line"></span>
+                  <span class="math-fill"></span>
+                  <span class="math-marker"></span>
+                </div>
+                <div class="math-scale"><span>0.0</span><span>0.5</span><span>1.0</span><span>1.5</span><span>2.0</span></div>
+              </div>
             </div>
           </div>
-          <div id="sentiment-momentum-chip" class="sentiment-metric metric-neutral" style="width: 100%; display: block; margin-bottom: 8px;">
-            <div class="flex items-center justify-between gap-3">
-              <span class="metric-label">Momentum</span>
-              <span id="sentiment-momentum" class="font-mono text-sm font-semibold">--</span>
-              <span id="sentiment-momentum-label" class="math-metric-badge"></span>
-            </div>
-            <div class="math-bar-container" style="width: 100%; display: block; margin-bottom: 8px;">
-              <span id="sentiment-momentum-bar" class="math-progress-track" role="img" aria-label="Momentum meter" style="display: block; width: 100%;">
-                <span class="bar-outline" style="position: absolute; inset: 0; border: 1px solid rgba(45, 212, 191, .7); border-radius: 8px;"></span>
-                <span class="bar-fill active-bar" style="position: absolute; left: 0; top: 0; height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, #facc15, #4ade80); transition: width .4s ease-out;"></span>
-                <span class="shadow-bar" style="position: absolute; left: 0; top: 0; height: 100%; width: 0; opacity: .25;"></span>
-                <span class="math-marker"></span>
-              </span>
-              <div class="math-scale" style="display: flex; justify-content: space-between;"><span>0</span><span>10</span><span>20</span><span>30</span><span>40</span><span>50</span></div>
-            </div>
+          <div id="sentiment-insight" class="sentiment-insight insight-neutral mt-2 px-2.5 py-1.5 text-xs font-medium leading-snug">
+            <span class="font-bold uppercase tracking-wider opacity-80">💡 Smart Market Insight · </span><span id="sentiment-insight-text">Loading live sentiment…</span>
           </div>
-          <div id="sentiment-score-chip" class="sentiment-metric metric-neutral" style="width: 100%; display: block; margin-bottom: 8px;">
-            <div class="flex items-center justify-between gap-3">
-              <span class="metric-label">Score</span>
-              <span id="sentiment-score" class="font-mono text-sm font-semibold">--</span>
-              <span id="sentiment-score-label" class="math-metric-badge"></span>
-            </div>
-            <div class="math-bar-container" style="width: 100%; display: block; margin-bottom: 8px;">
-              <span id="sentiment-score-bar" class="math-progress-track" role="img" aria-label="Score meter" style="display: block; width: 100%;">
-                <span class="bar-outline" style="position: absolute; inset: 0; border: 1px solid rgba(45, 212, 191, .7); border-radius: 8px;"></span>
-                <span class="bar-fill active-bar" style="position: absolute; left: 0; top: 0; height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, #facc15, #4ade80); transition: width .4s ease-out;"></span>
-                <span class="shadow-bar" style="position: absolute; left: 0; top: 0; height: 100%; width: 0; opacity: .25;"></span>
-                <span class="math-marker"></span>
-              </span>
-              <div class="math-scale" style="display: flex; justify-content: space-between;"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
-            </div>
-          </div>
-        </div>
-        <div id="sentiment-insight" class="sentiment-insight insight-neutral mt-2 px-2.5 py-1.5 text-xs font-medium leading-snug">
-          <span class="font-bold uppercase tracking-wider opacity-80">💡 Smart Market Insight · </span><span id="sentiment-insight-text">Loading live sentiment…</span>
-        </div>
-        <div id="cvd-widget" class="mt-3 rounded-xl border border-slate-800 bg-slate-900/50 p-3">
+        </section>
+
+        <div id="cvd-widget" class="rounded-xl border border-slate-800 bg-slate-900/50 p-3">
           <div class="mb-2 flex items-center justify-between">
             <h3 class="text-xs font-bold uppercase tracking-[.18em] text-slate-300">📊 Cumulative Volume Delta</h3>
             <span id="cvd-status" class="rounded-full border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-slate-400">Connecting…</span>
@@ -303,7 +315,7 @@
             <span>Close <span id="cvd-close" class="font-mono text-slate-200">--</span></span>
           </div>
         </div>
-      </section>
+      </div>
 
       <section id="ai-trade-setups" class="flex h-full flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-4 lg:col-start-3 lg:row-start-2">
         <div class="mb-2 flex items-center justify-between">
@@ -344,10 +356,11 @@
               </div>
               <div class="math-progress">
                 <div class="math-progress-track">
+                  <span class="math-zero"></span>
                   <span id="math-bias-fill" class="math-fill neg" style="width: 59%;"></span>
                   <span class="math-marker"></span>
                 </div>
-                <div class="math-scale"><span>-20</span><span>-10</span><span>0</span><span>10</span><span>18</span></div>
+                <div class="math-scale"><span>-20</span><span>-10</span><span>0</span><span>10</span><span>20</span></div>
               </div>
             </div>
             <div class="math-metric-row">
@@ -398,6 +411,7 @@
               </div>
               <div class="math-progress">
                 <div class="math-progress-track">
+                  <span class="math-zero"></span>
                   <span class="math-fill neg" style="width: 38%;"></span>
                   <span class="math-marker"></span>
                 </div>
@@ -411,6 +425,7 @@
               </div>
               <div class="math-progress">
                 <div class="math-progress-track">
+                  <span class="math-zero"></span>
                   <span class="math-fill neg" style="width: 26.25%;"></span>
                   <span class="math-marker"></span>
                 </div>
@@ -494,16 +509,31 @@
   // once per CE/PE/NO_TRADE transition, never on every 1 Hz poll.
   let audioAlertsEnabled = false;
   let previousTradeState = 'NO_TRADE';
-  // Session peak-hold extremes for the elastic sentiment bars (ghost trail).
-  // Seeded from the Redis-backed market state injected by views.py so a hard
-  // refresh keeps the accumulated peaks instead of resetting them to 0 before the
-  // next WebSocket / pre-open tick arrives.
-  let peakMaxBias = Math.max(0, {{ peak_bias|default:"0"|floatformat:0 }});
-  let peakMinBias = Math.min(0, {{ peak_bias|default:"0"|floatformat:0 }});
-  let peakMaxMom = Math.max(0, {{ peak_momentum|default:"0"|floatformat:0 }});
-  let peakMinMom = Math.min(0, {{ peak_momentum|default:"0"|floatformat:0 }});
-  let peakMaxScore = Math.max(50, {{ peak_score|default:"50"|floatformat:0 }});
-  let peakMinScore = Math.min(50, {{ peak_score|default:"50"|floatformat:0 }});
+  // Client-side High-Water Mark cache — sticky absolute extreme per metric (sign
+  // preserved). Seeded from the Redis-backed market state injected by views.py so
+  // a hard refresh keeps the accumulated peaks. A peak only advances when a new
+  // value breaks the previous ABSOLUTE record, so it never retreats with the live
+  // value (a SCORE peak of 94 stays at 94 when the live score pulls back to 66).
+  const peakCache = {
+    bias: Number({{ peak_bias|default:"0"|floatformat:0 }}) || 0,
+    momentum: Number({{ peak_momentum|default:"0"|floatformat:0 }}) || 0,
+    score: Number({{ peak_score|default:"50"|floatformat:0 }}) || 50,
+    // Macro-level option-chain peaks (left panel). Neutral centre is 0 for the two
+    // bipolar bars and 1.0 for the unipolar PCR bar, mirroring bumpPeak's `center`.
+    'net-oi-bias': Number({{ peak_net_oi_bias|default:"0"|floatformat:1 }}) || 0,
+    'total-vol-skew': Number({{ peak_total_vol_skew|default:"0"|floatformat:1 }}) || 0,
+    'total-pcr': Number({{ peak_total_pcr|default:"1.0"|floatformat:2 }}) || 1.0
+  };
+
+  // Advance the HWM for `key` only when `value` breaks the previous record
+  // (measured as absolute distance from `center`). Returns the sticky peak.
+  function bumpPeak(key, value, center = 0) {
+    const prev = peakCache[key];
+    if (prev === undefined || Math.abs(value - center) > Math.abs(prev - center)) {
+      peakCache[key] = value;
+    }
+    return peakCache[key];
+  }
 
   const number = value => { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : 0; };
   const fmt = value => value === null || value === undefined || value === '-' ? '-' : typeof value === 'number' ? value.toLocaleString('en-IN') : value;
@@ -578,36 +608,63 @@
     }
     return { tone: 'neutral', text: 'Metrics are mixed or neutral. Market is in a sideways chop zone.' };
   }
-  function renderElasticBar(bar, value, center, halfSpan, peakMax, peakMin) {
+  // ── Unified progress-bar renderer ──────────────────────────────────────
+  // bipolar: 0 anchored in the center (negative fills left, positive fills
+  // right). unipolar: 0 anchored at the left. `peak` positions the animated
+  // vertical tick at the signed extreme reached during the session.
+  function renderBar(bar, opts) {
     if (!bar) return;
-    const toPos = v => 50 + ((v - center) / halfSpan) * 50;
-    const clamp = v => Math.max(0, Math.min(100, v));
-    const pos = clamp(toPos(value));
-    const active = bar.querySelector('.active-bar');
-    const shadow = bar.querySelector('.shadow-bar');
-    // Active bar: spans from the 50% center marker to the current value.
-    if (active) {
-      active.style.left = Math.min(50, pos) + '%';
-      active.style.width = Math.abs(pos - 50) + '%';
-    }
-    // Shadow (peak-hold): transparent trail from the current value back to the
-    // historical extreme on the same side of the center.
-    const peak = value > center ? peakMax : value < center ? peakMin : value;
-    const peakPos = clamp(toPos(peak));
-    if (shadow) {
-      if (value > center) {
-        shadow.style.left = pos + '%';
-        shadow.style.width = Math.max(0, peakPos - pos) + '%';
-      } else if (value < center) {
-        shadow.style.left = peakPos + '%';
-        shadow.style.width = Math.max(0, pos - peakPos) + '%';
+    const { bipolar = false, value = 0, min = 0, max = 100, peak = null } = opts;
+    const span = (max - min) || 1;
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const v = clamp(Number.isFinite(value) ? value : 0, min, max);
+
+    const fill = bar.querySelector('.active-bar') || bar.querySelector('.math-fill');
+    if (fill) {
+      const valuePct = ((v - min) / span) * 100;
+      if (bipolar) {
+        const zeroPct = ((0 - min) / span) * 100;
+        if (v >= 0) {
+          fill.style.left = zeroPct + '%';
+          fill.style.width = Math.max(0, valuePct - zeroPct) + '%';
+          fill.style.background = 'linear-gradient(90deg, #34d399, #16a34a)';
+        } else {
+          fill.style.left = valuePct + '%';
+          fill.style.width = Math.max(0, zeroPct - valuePct) + '%';
+          fill.style.background = 'linear-gradient(90deg, #ef4444, #fb923c)';
+        }
       } else {
-        shadow.style.left = '50%';
-        shadow.style.width = '0%';
+        fill.style.left = '0%';
+        fill.style.width = Math.max(0, Math.min(100, valuePct)) + '%';
+        fill.style.background = 'linear-gradient(90deg, #facc15, #4ade80)';
+      }
+      fill.style.transition = 'left .4s ease-out, width .4s ease-out';
+    }
+    const shadow = bar.querySelector('.shadow-bar');
+    if (shadow) shadow.style.width = '0%';
+
+    const marker = bar.querySelector('.math-marker');
+    if (marker) {
+      const hasPeak = Number.isFinite(peak) && peak !== null && peak !== undefined && Math.abs(peak) > 0;
+      if (hasPeak) {
+        const p = clamp(peak, min, max);
+        const pct = ((p - min) / span) * 100;
+        marker.style.left = `${Math.max(0, Math.min(100, pct))}%`;
+        marker.style.setProperty('--peak-color', p < 0 ? '#f87171' : '#4ade80');
+        marker.classList.add('is-visible');
+      } else {
+        marker.classList.remove('is-visible');
       }
     }
-    // Green on the right/positive side, red on the left/negative side.
-    bar.style.setProperty('--bar-color', value >= center ? '#4ade80' : '#f87171');
+  }
+
+  // Bipolar center-origin wrapper (BIAS).
+  function renderElasticBar(bar, value, min, max, peak) {
+    renderBar(bar, { bipolar: true, value, min, max, peak });
+  }
+  // Unipolar left-origin wrapper (MOMENTUM).
+  function renderUnipolarBar(bar, value, min, max, peak) {
+    renderBar(bar, { bipolar: false, value, min, max, peak });
   }
 
   function renderThetaDecay() {
@@ -642,63 +699,110 @@
     renderSentiment(data);
   }
 
-  function renderScoreBar(bar, score) {
-    if (!bar) return;
-    const clamped = Math.max(0, Math.min(100, score));
-    const tone = toneScore(clamped);
-    const color = tone === 'bull' ? '#4ade80' : tone === 'bear' ? '#f87171' : '#94a3b8';
-    bar.style.setProperty('--bar-color', color);
-    const active = bar.querySelector('.active-bar');
-    if (active) {
-      active.style.left = '0%';
-      active.style.width = `${clamped}%`;
-    }
-    const shadow = bar.querySelector('.shadow-bar');
-    if (shadow) {
-      shadow.style.left = '0%';
-      shadow.style.width = '0%';
-    }
+  // Unipolar left-origin wrapper (SCORE 0–100).
+  function renderScoreBar(bar, score, peak) {
+    renderBar(bar, { bipolar: false, value: score, min: 0, max: 100, peak });
   }
 
   function renderSentiment(data) {
     const bias = Number.isFinite(Number(data.bias)) ? Number(data.bias) : 0;
     const momentum = Number.isFinite(Number(data.momentum)) ? Number(data.momentum) : 0;
     const score = Number.isFinite(Number(data.score)) ? Math.round(Number(data.score)) : 50;
-    const theme = score >= 60 ? 'bullish' : score <= 40 ? 'bearish' : 'neutral';
 
-    const explosive = Math.abs(momentum) > 10;
-    const label = Math.abs(momentum) < 5 ? 'Quiet' : Math.abs(momentum) <= 10 ? 'Healthy Trend' : 'EXPLOSIVE!';
-
-    peakMaxBias = Math.max(peakMaxBias, bias); peakMinBias = Math.min(peakMinBias, bias);
-    peakMaxMom = Math.max(peakMaxMom, momentum); peakMinMom = Math.min(peakMinMom, momentum);
-    peakMaxScore = Math.max(peakMaxScore, score); peakMinScore = Math.min(peakMinScore, score);
-    const peakBias = bias >= 0 ? peakMaxBias : peakMinBias;
-    const peakMom = momentum >= 0 ? peakMaxMom : peakMinMom;
-    const peakScore = score >= 50 ? peakMaxScore : peakMinScore;
-
-    document.getElementById('sentiment-bias').textContent = `${signedPct(bias)} (Peak: ${signedPct(peakBias)})`;
-    document.getElementById('sentiment-momentum').textContent = `${signedPct(momentum)} (Peak: ${signedPct(peakMom)})`;
-    renderElasticBar(document.getElementById('sentiment-bias-bar'), bias, 0, 100, peakMaxBias, peakMinBias);
-    renderElasticBar(document.getElementById('sentiment-momentum-bar'), momentum, 0, 100, peakMaxMom, peakMinMom);
-    renderScoreBar(document.getElementById('sentiment-score-bar'), score);
-
-    applyTone('sentiment-bias-chip', tonePct(bias), METRIC_TONES);
-    applyTone('sentiment-momentum-chip', tonePct(momentum), METRIC_TONES);
-    applyTone('sentiment-score-chip', toneScore(score), METRIC_TONES);
-
-    const momentumEl = document.getElementById('sentiment-momentum-label');
-    momentumEl.textContent = `(${label})`;
-    momentumEl.classList.toggle('font-bold', explosive);
-    momentumEl.classList.toggle('text-orange-500', explosive);
-
-    document.getElementById('sentiment-score').textContent = `${score}/100 (Peak: ${Math.round(peakScore)}/100)`;
-    document.getElementById('sentiment-score-label').textContent = `(${theme === 'bullish' ? 'Bullish' : theme === 'bearish' ? 'Bearish' : 'Neutral'})`;
-
+    // The Bias / Momentum / Score bars used to live in the left panel but were
+    // removed to eliminate redundancy with the Math Console. Those three metrics
+    // now render only in the Math Console; the left panel keeps the narrative
+    // Smart Market Insight strip fed from the same authoritative backend numbers.
     const insight = buildInsight(bias, momentum, score);
     const insightBox = document.getElementById('sentiment-insight');
-    Object.values(INSIGHT_TONES).forEach(function(cls) { insightBox.classList.remove(cls); });
-    insightBox.classList.add(INSIGHT_TONES[insight.tone]);
-    document.getElementById('sentiment-insight-text').textContent = insight.text;
+    if (insightBox) {
+      Object.values(INSIGHT_TONES).forEach(function(cls) { insightBox.classList.remove(cls); });
+      insightBox.classList.add(INSIGHT_TONES[insight.tone]);
+      const insightText = document.getElementById('sentiment-insight-text');
+      if (insightText) insightText.textContent = insight.text;
+    }
+  }
+
+  // ── Macro-level options data (left panel) ────────────────────────────────
+  // The left card is now a whole-chain aggregate view (Net OI Bias, Total Vol
+  // Skew, Total PCR) instead of duplicating the Math Console's Bias / Momentum
+  // / Score bars. renderMacroMetrics(data) maps one backend payload to the three
+  // bars; the field names below are the contract — adjust the fallback chain in
+  // one place if your WebSocket/API keys differ.
+
+  // Bipolar macro bars: sign drives the tone (negative = red, positive = green).
+  function macroSignTone(value) {
+    return value > 0 ? 'bull' : value < 0 ? 'bear' : 'neutral';
+  }
+  // PCR thresholds: < 0.7 red (oversold), > 1.2 green (overbought), else amber.
+  function pcrTone(value) {
+    if (value < 0.7) return 'bear';
+    if (value > 1.2) return 'bull';
+    return 'neutral';
+  }
+
+  // Unipolar PCR bar with a static 1.0 reference line and threshold colouring.
+  function renderPcrBar(bar, value, min, max, peak) {
+    if (!bar) return;
+    const span = (max - min) || 1;
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const v = clamp(Number.isFinite(value) ? value : 0, min, max);
+    const valuePct = ((v - min) / span) * 100;
+
+    const fill = bar.querySelector('.math-fill') || bar.querySelector('.active-bar');
+    if (fill) {
+      fill.style.left = '0%';
+      fill.style.width = Math.max(0, Math.min(100, valuePct)) + '%';
+      fill.style.background =
+        v < 0.7 ? 'linear-gradient(90deg, #ef4444, #fb923c)' :
+        v > 1.2 ? 'linear-gradient(90deg, #34d399, #16a34a)' :
+                  'linear-gradient(90deg, #facc15, #eab308)';
+      fill.style.transition = 'left .4s ease-out, width .4s ease-out';
+    }
+
+    const marker = bar.querySelector('.math-marker');
+    if (marker) {
+      const hasPeak = Number.isFinite(peak) && peak !== null && peak !== undefined && Math.abs(peak - 1.0) > 0.001;
+      if (hasPeak) {
+        const p = clamp(peak, min, max);
+        const pct = ((p - min) / span) * 100;
+        marker.style.left = `${Math.max(0, Math.min(100, pct))}%`;
+        marker.style.setProperty('--peak-color', p < 0.7 ? '#f87171' : p > 1.2 ? '#4ade80' : '#facc15');
+        marker.classList.add('is-visible');
+      } else {
+        marker.classList.remove('is-visible');
+      }
+    }
+  }
+
+  function renderMacroMetrics(data) {
+    if (!data || typeof data !== 'object') return;
+    const num = (value, fallback) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
+    const signedPct1 = value => `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
+    const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+
+    // Metric A — NET OI BIAS (bipolar, center-origin, -50% .. +50%).
+    // Negative = red / call-writing pressure, positive = green / put-writing pressure.
+    const oiBias = num(data.net_oi_bias ?? data.oi_bias, 0);
+    const peakOiBias = bumpPeak('net-oi-bias', oiBias, 0);
+    setText('macro-oi-bias', `${signedPct1(oiBias)} (Peak: ${signedPct1(peakOiBias)})`);
+    renderElasticBar(document.getElementById('macro-oi-bias-bar'), oiBias, -50, 50, peakOiBias);
+    applyTone('macro-oi-bias-chip', macroSignTone(oiBias), METRIC_TONES);
+
+    // Metric B — TOTAL VOL SKEW (bipolar, center-origin, -50% .. +50%).
+    // Negative = red / selling volume, positive = green / buying volume.
+    const volSkew = num(data.total_vol_skew ?? data.vol_skew, 0);
+    const peakVolSkew = bumpPeak('total-vol-skew', volSkew, 0);
+    setText('macro-vol-skew', `${signedPct1(volSkew)} (Peak: ${signedPct1(peakVolSkew)})`);
+    renderElasticBar(document.getElementById('macro-vol-skew-bar'), volSkew, -50, 50, peakVolSkew);
+    applyTone('macro-vol-skew-chip', macroSignTone(volSkew), METRIC_TONES);
+
+    // Metric C — TOTAL PCR (unipolar, 0.0 .. 2.0, static reference line at 1.0).
+    const pcr = num(data.total_pcr ?? data.pcr, 1.0);
+    const peakPcr = bumpPeak('total-pcr', pcr, 1.0);
+    setText('macro-pcr', `${pcr.toFixed(2)} (Peak: ${peakPcr.toFixed(2)})`);
+    renderPcrBar(document.getElementById('macro-pcr-bar'), pcr, 0, 2, peakPcr);
+    applyTone('macro-pcr-chip', pcrTone(pcr), METRIC_TONES);
   }
 
   function exposureColor(element, value) { const amount = Number(value); element.classList.remove('text-green-400', 'text-red-400', 'text-slate-200'); element.classList.add(Number.isFinite(amount) && amount > 0 ? 'text-green-400' : Number.isFinite(amount) && amount < 0 ? 'text-red-400' : 'text-slate-200'); }
@@ -755,44 +859,36 @@
   }
   // Transparency: push the live score / bias / momentum into the AI card's
   // hidden math console so the BUY CE / BUY PE logic is auditable in real time.
-  // ---- Math Console high-water marks (session peak per metric) ----
-  // Fixed 0–100% reference scales so the white marker never sticks at 100%.
-  const MATH_SCALES = { 'math-bias': 100, 'math-momentum': 100, 'math-delta-wt': 50, 'math-iv-skew': 20, 'math-gamma-boost': 10 };
-  const MATH_BAR_RANGES = { 'math-bias': [-20, 18], 'math-momentum': [0, 50], 'math-delta-wt': [0, 10] };
-  const MATH_FILL_IDS = { 'math-bias': 'math-bias-fill', 'math-momentum': 'math-momentum-fill', 'math-delta-wt': 'math-delta-wt-fill' };
-  const mathPeaks = {}; // element id -> peak magnitude (absolute strength from 0)
+  // ---- Math Console metric config (bipolar = center-origin) ---- //
+  const MATH_METRICS = {
+    'math-bias':        { bipolar: true,  min: -20, max: 20, peakKey: 'bias' },
+    'math-momentum':    { bipolar: false, min: 0,   max: 50, peakKey: 'momentum' },
+    'math-delta-wt':    { bipolar: false, min: 0,   max: 10, peakKey: 'delta-wt' },
+    'math-iv-skew':     { bipolar: true,  min: -5,  max: 5,  peakKey: 'iv-skew' },
+    'math-gamma-boost': { bipolar: true,  min: -20, max: 20, peakKey: 'gamma-boost' }
+  };
 
   function renderMathHwm(id, rawValue, displayText) {
     const el = document.getElementById(id);
     if (!el) return;
-    const scale = MATH_SCALES[id] || 100;
-    const n = Number(rawValue);
-    const magnitude = Number.isFinite(n) ? Math.abs(n) : 0;
-    const peak = Math.max(mathPeaks[id] || 0, magnitude);
-    mathPeaks[id] = peak;
+    const cfg = MATH_METRICS[id] || { bipolar: false, min: 0, max: 100, peakKey: id };
+    const value = Number.isFinite(Number(rawValue)) ? Number(rawValue) : 0;
+
+    // Sticky HWM: the peak only advances on a new absolute record.
+    const peak = bumpPeak(cfg.peakKey, value, 0);
 
     const text = el.querySelector('.math-text');
     if (text) {
       text.textContent = displayText;
       if (id === 'math-bias' || id === 'math-momentum') {
-        text.style.color = Number.isFinite(n) && n > 0 ? '#00ff00' : Number.isFinite(n) && n < 0 ? '#ff0000' : '#ffffff';
+        text.style.color = value > 0 ? '#00ff00' : value < 0 ? '#ff0000' : '#ffffff';
       }
     }
 
-    const fill = document.getElementById(MATH_FILL_IDS[id]);
-    if (fill) {
-      const [min, max] = MATH_BAR_RANGES[id];
-      const bounded = Math.max(min, Math.min(max, Number.isFinite(n) ? n : 0));
-      fill.style.width = `${((bounded - min) / (max - min)) * 100}%`;
-      fill.classList.toggle('pos', Number.isFinite(n) && n > 0);
-      fill.classList.toggle('neg', Number.isFinite(n) && n < 0);
-    }
-
-    const marker = el.querySelector('.math-marker');
-    if (marker) {
-      const markerPct = (Math.min(peak, scale) / scale) * 100;
-      marker.style.left = `${Math.min(99.5, Math.max(0.5, markerPct))}%`;
-      marker.style.opacity = peak > 0 ? '1' : '0';
+    const row = el.closest('.math-metric-row');
+    const track = row ? row.querySelector('.math-progress-track') : null;
+    if (track) {
+      renderBar(track, { bipolar: cfg.bipolar, value, min: cfg.min, max: cfg.max, peak });
     }
   }
 
@@ -801,12 +897,15 @@
     const signed = value => (Number.isFinite(value) ? `${value >= 0 ? '+' : ''}${value.toFixed(1)}%` : '--');
     setText('math-score', Number.isFinite(currentLiveScore) ? `${Math.round(currentLiveScore)}` : '--');
     const scoreEl = document.getElementById('math-score');
-    const scoreFill = document.getElementById('math-score-fill');
-    if (scoreFill) {
-      scoreFill.style.width = `${Math.max(0, Math.min(100, currentLiveScore))}%`;
-    }
     if (scoreEl) {
       scoreEl.style.color = currentLiveScore >= 75 ? '#00ff00' : currentLiveScore <= 25 ? '#ff0000' : '#ffffff';
+    }
+    // Score is unipolar 0–100; its HWM peak is the furthest point from neutral (50).
+    const scorePeak = bumpPeak('score', Number.isFinite(currentLiveScore) ? currentLiveScore : 50, 50);
+    const scoreRow = scoreEl ? scoreEl.closest('.math-metric-row') : null;
+    const scoreTrack = scoreRow ? scoreRow.querySelector('.math-progress-track') : null;
+    if (scoreTrack) {
+      renderBar(scoreTrack, { bipolar: false, value: currentLiveScore, min: 0, max: 100, peak: scorePeak });
     }
     renderMathHwm('math-bias', currentBias, signed(currentBias));
     renderMathHwm('math-momentum', currentMomentum, signed(currentMomentum));
@@ -945,7 +1044,7 @@
     updateMathConsole(currentTradeState);
   }
 
-  async function refreshOptions() { try { const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); updateSpotPrice(data); allRows = Array.isArray(data.option_chain) ? data.option_chain.sort((a, b) => number(a.strike) - number(b.strike)) : []; updateSentiment(data); updateScalperPlayground(); updateAITrades(); renderAdvancedMetrics(data); } catch (error) { console.warn('Option-chain fetch failed:', error); } }
+  async function refreshOptions() { try { const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); updateSpotPrice(data); allRows = Array.isArray(data.option_chain) ? data.option_chain.sort((a, b) => number(a.strike) - number(b.strike)) : []; updateSentiment(data); updateScalperPlayground(); updateAITrades(); renderAdvancedMetrics(data); renderMacroMetrics(data); } catch (error) { console.warn('Option-chain fetch failed:', error); } }
   async function refreshGamma() { try { const response = await fetch('/gamma/status/', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); const status = data?.status || data; if (status?.last_profile) renderProfile(status.last_profile); if (Array.isArray(status?.gamma_alerts)) status.gamma_alerts.forEach(renderSignal); if (status?.last_signal != null) renderSignal(status.last_signal); } catch (error) { console.warn('Gamma status fetch failed:', error); } }
 
   function updatePreopen(data) {
@@ -975,6 +1074,7 @@
   // so the "Peak: …" readouts and ghost bars show the persisted session peaks
   // before the first pre-open snapshot / WebSocket tick arrives.
   renderSentiment({ bias: 0, momentum: 0, score: 50 });
+  renderMacroMetrics({ net_oi_bias: 0, total_vol_skew: 0, total_pcr: 1.0 });
   refreshOptions(); refreshGamma(); refreshPreopen(); setInterval(refreshOptions, 1000); setInterval(refreshGamma, 2000); setInterval(refreshPreopen, 5000);
 
   // ---- 🔊 Voice-alert toggle (defaults OFF; browsers require a user gesture) ----
