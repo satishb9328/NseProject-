@@ -48,6 +48,14 @@ DEFAULT_MARKET_STATE = {
     "net_gex_ratio": 0.0,
     # Real-time ATM time decay (₹/hr), reverse-solved from the live LTP via py_vollib.
     "theta_decay_per_hour": 0.0,
+    # Whole-chain macro metrics for the left "TOTAL OPTION CHAIN (MACRO)" panel.
+    # Current values plus their session High-Water Mark peaks (PCR centred on 1.0).
+    "net_oi_bias": 0.0,
+    "total_vol_skew": 0.0,
+    "total_pcr": 1.0,
+    "peak_net_oi_bias": 0.0,
+    "peak_total_vol_skew": 0.0,
+    "peak_total_pcr": 1.0,
 }
 
 

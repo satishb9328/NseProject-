@@ -1185,6 +1185,9 @@ def live_option_chain_api(request):
             "net_gex": 0,
             "net_gex_ratio": 0,
             "theta_decay_per_hour": 0,
+            "net_oi_bias": 0,
+            "total_vol_skew": 0,
+            "total_pcr": 1.0,
             "strike_bounds": None,
             "option_chain": [],
             # Surfaced deliberately: the browser console/network tab then names the fault
@@ -1208,9 +1211,9 @@ def _build_live_option_chain_payload() -> dict:
     )
     chain = [_json_safe_row(row) for row in chain]
 
-    # Advanced-quant diagnostics, persisted by the feed worker's _refresh_market_state
-    # to the date-scoped Redis market_state key and read here so they refresh at the
-    # same 1 Hz cadence as the option chain itself.
+    # Advanced-quant diagnostics + whole-chain macro metrics, persisted by the feed
+    # worker to the date-scoped Redis market_state key and read here so they refresh
+    # at the same 1 Hz cadence as the option chain itself.
     market_state = _read_market_state_for_today()
 
     # Live index spot. This is what the dashboard polls for the SPOT readout, so it
@@ -1256,6 +1259,11 @@ def _build_live_option_chain_payload() -> dict:
         "net_gex": _json_safe_value(market_state.get("net_gex")),
         "net_gex_ratio": _json_safe_value(market_state.get("net_gex_ratio")),
         "theta_decay_per_hour": _json_safe_value(market_state.get("theta_decay_per_hour")),
+        # Whole-chain macro metrics for the left "TOTAL OPTION CHAIN (MACRO)" panel —
+        # computed and persisted by the feed worker (see upstox_live_feed).
+        "net_oi_bias": _json_safe_value(market_state.get("net_oi_bias")),
+        "total_vol_skew": _json_safe_value(market_state.get("total_vol_skew")),
+        "total_pcr": _json_safe_value(market_state.get("total_pcr")),
         "strike_bounds": list(strike_bounds) if strike_bounds else None,
         "option_chain": chain,
         "error": None,

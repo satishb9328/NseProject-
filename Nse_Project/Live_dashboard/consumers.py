@@ -20,6 +20,8 @@ from asgiref.sync import async_to_sync, sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.layers import get_channel_layer
 
+from .ai_candle_confirmation import AI_TRADE_GROUP
+
 try:
     import redis
 except ImportError:  # keeps the module importable if redis-py is missing
@@ -342,3 +344,23 @@ class PreopenTrapConsumer(AsyncWebsocketConsumer):
         await self.send(
             text_data=json.dumps({"type": "preopen_update", "payload": payload})
         )
+
+
+class AITradeTriggerConsumer(AsyncWebsocketConsumer):
+    """Streams AI trade-setup BUY_NOW triggers to the dashboard over WebSocket."""
+
+    async def connect(self):
+        if self.channel_layer is not None:
+            await self.channel_layer.group_add(AI_TRADE_GROUP, self.channel_name)
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        if self.channel_layer is not None:
+            await self.channel_layer.group_discard(AI_TRADE_GROUP, self.channel_name)
+
+    async def trade_trigger(self, event):
+        """Handler for the ``trade.trigger`` group message dispatched by the module."""
+        trigger = event.get("trigger")
+        if trigger is None:
+            return
+        await self.send(text_data=json.dumps(trigger))

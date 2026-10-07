@@ -223,6 +223,13 @@ market_state = {
     # Real Black-Scholes Net GEX + its bounded conviction ratio (net_gex / gross_gex).
     "net_gex": 0.0,
     "net_gex_ratio": 0.0,
+    # Whole-chain macro metrics + session peaks (Net OI Bias / Total Vol Skew / Total PCR).
+    "net_oi_bias": 0.0,
+    "total_vol_skew": 0.0,
+    "total_pcr": 1.0,
+    "peak_net_oi_bias": 0.0,
+    "peak_total_vol_skew": 0.0,
+    "peak_total_pcr": 1.0,
 }
 # Peak-hold extremes needed to derive the single "current-side" peak the dashboard
 # shows (mirrors the frontend's peakMax/peakMin logic). Score is centred on 50.
@@ -1182,7 +1189,27 @@ def _find_value_by_key(node: object, key: str) -> object:
 
 
 def _first_numeric(value: object) -> float | None:
-    return value if isinstance(value, (int, float)) else None
+    """Coerce a scalar to float, accepting numeric strings.
+
+    Upstox V3 ships cumulative volume (``vtt``) as a STRING (e.g. ``"3315845"``)
+    while OI / IV arrive as floats. The old int/float-only guard silently returned
+    None for those string values, so ``volume`` was never extracted and the
+    whole-chain ``total_vol_skew`` stayed frozen at 0. Accepting numeric strings
+    fixes volume extraction without disturbing the already-float fields.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return float(stripped)
+        except ValueError:
+            return None
+    return None
 
 
 def _nested(node: object, path: tuple) -> object:
@@ -1744,6 +1771,52 @@ def _on_cvd_candle(payload: dict) -> None:
         _latest_cumulative_cvd = float(cvd)
 
 
+def _compute_macro_metrics(instrument_data=None) -> dict:
+    """Whole-chain OI / volume aggregates for the ``TOTAL OPTION CHAIN (MACRO)`` panel.
+
+    Returns ``net_oi_bias``, ``total_vol_skew`` and ``total_pcr``. These are ratios, so
+    the internal share-scaled OI/volume is fine (the scale cancels out).
+    """
+    if instrument_data is None:
+        instrument_data = live_state.get("instrument_data", {})
+
+    total_call_oi = total_put_oi = 0.0
+    total_call_vol = total_put_vol = 0.0
+
+    for item in instrument_data.values():
+        if not isinstance(item, dict):
+            continue
+        side = (item.get("option_type") or "").upper()
+        oi = item.get("oi")
+        oi = float(oi) if isinstance(oi, (int, float)) else 0.0
+        volume = item.get("volume")
+        volume = float(volume) if isinstance(volume, (int, float)) else 0.0
+
+        if side == "CE":
+            total_call_oi += oi
+            total_call_vol += volume
+        elif side == "PE":
+            total_put_oi += oi
+            total_put_vol += volume
+
+    oi_sum = total_call_oi + total_put_oi
+    vol_sum = total_call_vol + total_put_vol
+
+    net_oi_bias = ((total_put_oi - total_call_oi) / oi_sum) * 100.0 if oi_sum else 0.0
+    total_vol_skew = ((total_put_vol - total_call_vol) / vol_sum) * 100.0 if vol_sum else 0.0
+    total_pcr = (total_put_oi / total_call_oi) if total_call_oi > 0 else 0.0
+
+    # Cap the bipolar metrics to ±50 to match the frontend's -50..+50 bar scale.
+    net_oi_bias = max(-50.0, min(50.0, net_oi_bias))
+    total_vol_skew = max(-50.0, min(50.0, total_vol_skew))
+
+    return {
+        "net_oi_bias": round(net_oi_bias, 2),
+        "total_vol_skew": round(total_vol_skew, 2),
+        "total_pcr": round(total_pcr, 4),
+    }
+
+
 def _refresh_market_state(instrument_data=None) -> None:
     """Fold the latest CVD + live sentiment peaks into the in-memory market state."""
     sentiment = _compute_live_sentiment_full(instrument_data)
@@ -1776,6 +1849,21 @@ def _refresh_market_state(instrument_data=None) -> None:
     # Redis snapshot (live_options_data) that the Gamma engine and dashboard consume.
     market_state["theta_decay_per_hour"] = sentiment["theta_decay_per_hour"]
     live_state["theta_decay_per_hour"] = sentiment["theta_decay_per_hour"]
+
+    # Whole-chain macro metrics (Net OI Bias / Total Vol Skew / Total PCR) + persistent
+    # session peaks. Bipolar peaks keep the SIGNED extreme (greatest |value| from 0);
+    # the PCR peak keeps the value furthest from the 1.0 neutral centre.
+    macro = _compute_macro_metrics(instrument_data)
+    market_state["net_oi_bias"] = macro["net_oi_bias"]
+    market_state["total_vol_skew"] = macro["total_vol_skew"]
+    market_state["total_pcr"] = macro["total_pcr"]
+
+    if abs(macro["net_oi_bias"]) > abs(market_state.get("peak_net_oi_bias", 0.0)):
+        market_state["peak_net_oi_bias"] = macro["net_oi_bias"]
+    if abs(macro["total_vol_skew"]) > abs(market_state.get("peak_total_vol_skew", 0.0)):
+        market_state["peak_total_vol_skew"] = macro["total_vol_skew"]
+    if abs(macro["total_pcr"] - 1.0) > abs(market_state.get("peak_total_pcr", 1.0) - 1.0):
+        market_state["peak_total_pcr"] = macro["total_pcr"]
 
 
 def _persist_market_state() -> None:

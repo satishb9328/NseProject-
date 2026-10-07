@@ -41,3 +41,4 @@ Nse Project/AUTHEN_TOKEN/config/fyers_config.json
 
 # Ignore all CSV files anywhere in the project
 *.csv
+*.json
