@@ -1178,12 +1178,16 @@ def live_option_chain_api(request):
             "bias": 0,
             "momentum": 0,
             "score": 50,
+            "cvd": 0,
             "delta_wt_impact": 0,
             "gamma_boost_val": 0,
             "iv_skew_est": 0,
             "acceleration": 0,
             "net_gex": 0,
             "net_gex_ratio": 0,
+            "net_vanna": 0,
+            "net_charm": 0,
+            "gamma_flip_level": 0,
             "theta_decay_per_hour": 0,
             "net_oi_bias": 0,
             "total_vol_skew": 0,
@@ -1256,8 +1260,15 @@ def _build_live_option_chain_payload() -> dict:
         "bias": _json_safe_value(market_state.get("bias")),
         "momentum": _json_safe_value(market_state.get("momentum")),
         "score": _json_safe_value(market_state.get("score")),
+        # Live cumulative CVD (index-level), bridged from the CVD engine so the AI
+        # card's macro bearish confirmation reads it straight from this 1 Hz payload.
+        "cvd": _json_safe_value(market_state.get("cumulative_cvd")),
         "net_gex": _json_safe_value(market_state.get("net_gex")),
         "net_gex_ratio": _json_safe_value(market_state.get("net_gex_ratio")),
+        # Advanced Greek Blend inputs (Vanna / Charm / Gamma Flip level) driving the score.
+        "net_vanna": _json_safe_value(market_state.get("net_vanna")),
+        "net_charm": _json_safe_value(market_state.get("net_charm")),
+        "gamma_flip_level": _json_safe_value(market_state.get("gamma_flip_level")),
         "theta_decay_per_hour": _json_safe_value(market_state.get("theta_decay_per_hour")),
         # Whole-chain macro metrics for the left "TOTAL OPTION CHAIN (MACRO)" panel —
         # computed and persisted by the feed worker (see upstox_live_feed).

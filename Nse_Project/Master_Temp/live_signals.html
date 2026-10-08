@@ -521,6 +521,9 @@
   let allRows = [], currentSpot = null, currentLiveScore = 50;
   // Live option-chain bias / momentum, exposed for the AI card's math console.
   let currentBias = 0, currentMomentum = 0;
+  // Macro tape for the bidirectional CE/PE decision. Net OI Bias (put - call) drives
+  // the bearish confirmation; CVD is captured for display but no longer gates trades.
+  let currentCVD = 0, currentMacroBias = 0;
   // Real-time ATM time decay (₹/hr), streamed from the backend via the live options payload.
   let currentThetaDecay = 0;
   // Voice-alert state. Audio defaults OFF (browser autoplay policies require a user
@@ -561,6 +564,29 @@
   // every raw float; prefer them so NET GEX/CHARM/VANNA never render as a 14-digit wall
   // of digits. Older payloads without *_display fall back to plain en-IN grouping.
   const fmtExposure = (display, raw) => (typeof display === 'string' && display && display !== '--') ? display : fmt(raw);
+  // Mirror the engine's format_exposure() Indian units (Cr/L/K) for the raw
+  // net_vanna / net_charm floats the 1 Hz API now broadcasts (no *_display string).
+  const fmtExposureRaw = value => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '--';
+    if (n === 0) return '0';
+    const magnitude = Math.abs(n);
+    const units = [[1e7, 'Cr'], [1e5, 'L'], [1e3, 'K']];
+    for (const [threshold, suffix] of units) {
+      if (magnitude >= threshold) {
+        return `${(n / threshold).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${suffix}`;
+      }
+    }
+    return magnitude >= 1
+      ? n.toLocaleString('en-IN', { maximumFractionDigits: 0 })
+      : n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+  // Gamma Flip level: 0.0 (the backend's "no flip" sentinel) renders as '-' like a missing value.
+  const fmtFlipLevel = value => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return '-';
+    return n.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  };
   const exactTitle = raw => Number.isFinite(Number(raw)) ? `${Number(raw).toLocaleString('en-IN')} (per contract)` : '';
   const pct = value => value === null || value === undefined || value === '-' ? '-' : `${Number(value).toFixed(1)}%`;
   const signedPct = value => `${value >= 0 ? '+' : ''}${Math.round(value)}%`;
@@ -710,12 +736,15 @@
     currentBias = Number.isFinite(Number(data.bias)) ? Number(data.bias) : 0;
     currentMomentum = Number.isFinite(Number(data.momentum)) ? Number(data.momentum) : 0;
     currentLiveScore = Number.isFinite(Number(data.score)) ? Number(data.score) : 50;
+    currentCVD = Number.isFinite(Number(data.cvd)) ? Number(data.cvd) : 0;
+    currentMacroBias = Number.isFinite(Number(data.net_oi_bias)) ? Number(data.net_oi_bias) : 0;
     // Capture the real-time ATM theta (₹/hr) broadcast by the backend and refresh the
     // "Time Decay" (Momentum Pullback card) + "ATM DECAY/HR" (Day Gamma card) readouts.
     currentThetaDecay = Number.isFinite(Number(data.theta_decay_per_hour)) ? Number(data.theta_decay_per_hour) : 0;
     applyMathConsolePulse(currentLiveScore, currentBias, currentMomentum, Number.isFinite(Number(data.delta_wt_impact)) ? Number(data.delta_wt_impact) : 0);
     renderThetaDecay();
     renderSentiment(data);
+    renderGammaGreeks(data);
   }
 
   // Unipolar left-origin wrapper (SCORE 0–100).
@@ -801,7 +830,7 @@
     const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
 
     // Metric A — NET OI BIAS (bipolar, center-origin, -50% .. +50%).
-    // Negative = red / call-writing pressure, positive = green / put-writing pressure.
+    // Sign: negative = bearish (call-heavy OI = call writing), positive = bullish (put-heavy).
     const oiBias = num(data.net_oi_bias ?? data.oi_bias, 0);
     const peakOiBias = bumpPeak('net-oi-bias', oiBias, 0);
     setText('macro-oi-bias', `${signedPct1(oiBias)} (Peak: ${signedPct1(peakOiBias)})`);
@@ -809,7 +838,7 @@
     applyTone('macro-oi-bias-chip', macroSignTone(oiBias), METRIC_TONES);
 
     // Metric B — TOTAL VOL SKEW (bipolar, center-origin, -50% .. +50%).
-    // Negative = red / selling volume, positive = green / buying volume.
+    // Sign: negative = bearish (call-heavy volume = call writing), positive = bullish (put-heavy).
     const volSkew = num(data.total_vol_skew ?? data.vol_skew, 0);
     const peakVolSkew = bumpPeak('total-vol-skew', volSkew, 0);
     setText('macro-vol-skew', `${signedPct1(volSkew)} (Peak: ${signedPct1(peakVolSkew)})`);
@@ -830,7 +859,7 @@
   function pcrColorClass(value) { const pcr = Number(value); if (!Number.isFinite(pcr)) return 'text-slate-50'; if (pcr >= 1.2) return 'text-green-400'; if (pcr <= 0.8) return 'text-red-400'; return 'text-yellow-400'; }
   // ---- Gamma Flip missing-value guard (None/null renders as "--") ----
   function isFlipMissing(value) { if (value === null || value === undefined) return true; const text = String(value).trim(); if (!text || text === '--' || /^(none|null)$/i.test(text)) return true; return !Number.isFinite(Number(value)); }
-  function renderProfile(profile) { if (!profile || typeof profile !== 'object') return; const spot = profileValue(profile, 'spot', 'Spot', 'spot_price'); const weekly = profile.weekly_gamma || profile; const day = profile.day_gamma || {}; if (!haveIndexSpot) { currentSpot = Number(spot); const el = document.getElementById('live-spot-price'); if (el) el.textContent = fmt(spot); } document.getElementById('live-spot').textContent = fmt(spot); document.getElementById('live-expiry').textContent = profile.expiry || '--'; [['weekly', weekly], ['day', day]].forEach(([prefix, metrics]) => { const netGex = profileValue(metrics, 'net_gex', 'netGEX', 'net_gex_value'); const pcr = profileValue(metrics, 'pcr', 'PCR'); const gexTier = metrics.signal ? signalTier(metrics.signal) : netGexTier(netGex, pcr); const pcrElement = document.getElementById(`${prefix}-pcr`); pcrElement.textContent = fmt(pcr); pcrElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); pcrElement.classList.add(pcrColorClass(pcr)); const gammaFlipRaw = profileValue(metrics, 'gamma_flip_level', 'gamma_flip', 'gammaFlip', 'gamma_flip_value'); document.getElementById(`${prefix}-gamma-flip`).textContent = fmtFlip(gammaFlipRaw); const gammaFlipWarning = document.getElementById(`${prefix}-gamma-flip-warning`); if (gammaFlipWarning) gammaFlipWarning.classList.toggle('is-visible', isFlipMissing(gammaFlipRaw)); document.getElementById(`${prefix}-call-wall`).textContent = fmt(metrics.call_wall ?? metrics.call_wall_strike); document.getElementById(`${prefix}-put-wall`).textContent = fmt(metrics.put_wall ?? metrics.put_wall_strike); const charmElement = document.getElementById(`${prefix}-net-charm`); const vannaElement = document.getElementById(`${prefix}-net-vanna`); charmElement.textContent = fmtExposure(metrics.net_charm_display, metrics.net_charm); vannaElement.textContent = fmtExposure(metrics.net_vanna_display, metrics.net_vanna); charmElement.title = exactTitle(metrics.net_charm); vannaElement.title = exactTitle(metrics.net_vanna); exposureColor(charmElement, metrics.net_charm); exposureColor(vannaElement, metrics.net_vanna); const gexElement = document.getElementById(`${prefix}-net-gex`); const summaryElement = document.getElementById(`${prefix}-net-gex-summary`); gexElement.textContent = fmtExposure(metrics.net_gex_display, netGex); gexElement.title = exactTitle(netGex); gexElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); gexElement.classList.add(gexTier.colorClass); summaryElement.textContent = gexTier.summary; summaryElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-400'); summaryElement.classList.add(gexTier.colorClass); }); }
+  function renderProfile(profile) { if (!profile || typeof profile !== 'object') return; const spot = profileValue(profile, 'spot', 'Spot', 'spot_price'); const weekly = profile.weekly_gamma || profile; const day = profile.day_gamma || {}; if (!haveIndexSpot) { currentSpot = Number(spot); const el = document.getElementById('live-spot-price'); if (el) el.textContent = fmt(spot); } document.getElementById('live-spot').textContent = fmt(spot); document.getElementById('live-expiry').textContent = profile.expiry || '--'; [['weekly', weekly], ['day', day]].forEach(([prefix, metrics]) => { const netGex = profileValue(metrics, 'net_gex', 'netGEX', 'net_gex_value'); const pcr = profileValue(metrics, 'pcr', 'PCR'); const gexTier = metrics.signal ? signalTier(metrics.signal) : netGexTier(netGex, pcr); const pcrElement = document.getElementById(`${prefix}-pcr`); pcrElement.textContent = fmt(pcr); pcrElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); pcrElement.classList.add(pcrColorClass(pcr)); if (prefix !== 'day') { const gammaFlipRaw = profileValue(metrics, 'gamma_flip_level', 'gamma_flip', 'gammaFlip', 'gamma_flip_value'); document.getElementById(`${prefix}-gamma-flip`).textContent = fmtFlip(gammaFlipRaw); const gammaFlipWarning = document.getElementById(`${prefix}-gamma-flip-warning`); if (gammaFlipWarning) gammaFlipWarning.classList.toggle('is-visible', isFlipMissing(gammaFlipRaw)); } document.getElementById(`${prefix}-call-wall`).textContent = fmt(metrics.call_wall ?? metrics.call_wall_strike); document.getElementById(`${prefix}-put-wall`).textContent = fmt(metrics.put_wall ?? metrics.put_wall_strike); if (prefix !== 'day') { const charmElement = document.getElementById(`${prefix}-net-charm`); const vannaElement = document.getElementById(`${prefix}-net-vanna`); charmElement.textContent = fmtExposure(metrics.net_charm_display, metrics.net_charm); vannaElement.textContent = fmtExposure(metrics.net_vanna_display, metrics.net_vanna); charmElement.title = exactTitle(metrics.net_charm); vannaElement.title = exactTitle(metrics.net_vanna); exposureColor(charmElement, metrics.net_charm); exposureColor(vannaElement, metrics.net_vanna); } const gexElement = document.getElementById(`${prefix}-net-gex`); const summaryElement = document.getElementById(`${prefix}-net-gex-summary`); gexElement.textContent = fmtExposure(metrics.net_gex_display, netGex); gexElement.title = exactTitle(netGex); gexElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); gexElement.classList.add(gexTier.colorClass); summaryElement.textContent = gexTier.summary; summaryElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-400'); summaryElement.classList.add(gexTier.colorClass); }); }
   function renderSignal(signal) { if (signal == null) return; const text = typeof signal === 'string' ? signal : signal.message || JSON.stringify(signal); if (seenSignals.has(text)) return; seenSignals.add(text); const stream = /weekly|macro/i.test(text) ? signalStreams.weekly : signalStreams.daily; if (!stream) return; if (stream.querySelector('p')) stream.replaceChildren(); const item = document.createElement('div'); item.className = 'rounded-lg border border-slate-700/80 bg-ink-800/80 p-2'; const timestamp = typeof signal === 'object' && signal.timestamp ? new Date(signal.timestamp).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }) : new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }); item.textContent = `${timestamp}  ${text}`; stream.prepend(item); while (stream.children.length > 8) stream.lastChild.remove(); }
 
   // ---- Live index SPOT ----
@@ -976,6 +1005,35 @@
     const delta_wt_impact = Number.isFinite(Number(data.delta_wt_impact)) ? Number(data.delta_wt_impact) : 0;
     applyMathConsolePulse(score, bias, momentum, delta_wt_impact);
   }
+
+  // ---- Advanced Greek Blend → DAY GAMMA card ---------------------------------
+  // The 1 Hz option-chain API broadcasts the exact DAY-profile greeks driving the
+  // score's gamma boost (net_vanna / net_charm / gamma_flip_level). These mirror
+  // _real_net_gex() exactly, so the DAY GAMMA card matches the engine every second.
+  function renderGammaGreeks(data) {
+    if (!data || typeof data !== 'object') return;
+
+    const setExposure = (id, raw) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = fmtExposureRaw(raw);
+      el.title = exactTitle(raw);
+      exposureColor(el, raw);
+    };
+    setExposure('day-net-vanna', data.net_vanna);
+    setExposure('day-net-charm', data.net_charm);
+
+    const flipEl = document.getElementById('day-gamma-flip');
+    if (flipEl) {
+      const flip = data.gamma_flip_level;
+      flipEl.textContent = fmtFlipLevel(flip);
+      const warning = document.getElementById('day-gamma-flip-warning');
+      if (warning) {
+        const missing = flip === null || flip === undefined || !Number.isFinite(Number(flip)) || Number(flip) <= 0;
+        warning.classList.toggle('is-visible', missing);
+      }
+    }
+  }
   // ---- 🔊 Voice alerts (native Text-to-Speech) ----
   function speakAlert(message) {
     if (!window.speechSynthesis) return;
@@ -993,26 +1051,29 @@
     const px = value => `₹${value.toFixed(2)}`;
     const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
 
-    // ---- AGGRESSIVE SCALPING tri-state: Bullish / Bearish / NO_TRADE ----
-    // Driven SOLELY by the live option-chain score (currentLiveScore, updated at 1 Hz)
-    // plus the live COI-acceleration momentum tie-breaker (currentMomentum, also 1 Hz).
-    // The 09:15 Pre-Open auction's IEP readout is deliberately ignored for intraday
-    // scalps. The slow 2-minute CVD feed has been removed entirely.
+    // ---- BIDIRECTIONAL SCALPING tri-state: Bullish / Bearish / NO_TRADE ----
+    // The score is the primary driver, but the whole-chain Net OI Bias confirms a
+    // falling market and can flip a marginal score (45-50) into PE. CVD is NOT used
+    // here: its feed can freeze (missing bid/ask), so it must never gate a PE signal.
     const score = currentLiveScore;
+    const macroBias = Number.isFinite(Number(currentMacroBias)) ? Number(currentMacroBias) : 0;
 
-    // Chop band is 45-55 (inclusive). Outside it, the live score wins outright.
+    // Bearish macro confirmation: negative Net OI Bias (put - call) alone is enough.
+    const isMacroBearish = (macroBias < 0);
+
     let bullish = score > 55;
-    let bearish = score < 45;
-    if (score >= 45 && score <= 55) {
-      // Fast tie-breaker: extreme COI-acceleration momentum overrides the chop.
-      // currentMomentum is already normalized to percentage points and folds in the
-      // acceleration boost (momentum = base_momentum + accel_boost), so ±15 matches
-      // the existing tonePct "bull/bear" convention and shares the score's 1 Hz clock.
-      bullish = currentMomentum > 15;
-      bearish = currentMomentum < -15;
+    let bearish = (score < 45) || (isMacroBearish && score < 50);
+
+    // Chop-band tie-breaker: extreme COI-acceleration momentum still resolves the
+    // middle zone, but with a wider dead-band (±20) so a near-neutral score can't flip.
+    if (!bullish && !bearish) {
+      bullish = currentMomentum > 20;
+      bearish = currentMomentum < -20;
     }
+
     const noTrade = !bullish && !bearish;
-    const optionSide = bearish ? 'PE' : 'CE';
+    let optionSide = 'NO_TRADE';
+    if (!noTrade) optionSide = bearish ? 'PE' : 'CE';
 
     // 🔊 Voice alert on state TRANSITIONS only — speak once per CE/PE flip, never on
     // every 1 Hz poll. NO_TRADE transitions stay silent to avoid announcement spam.
@@ -1459,17 +1520,21 @@
   };
 
   const WAITING = "🟡 WAITING";
-  const BUY_NOW = "🟢 BUY NOW (Confirmed!)";
+  const BUY_CE = "🟢 BUY NOW (CE Confirmed!)";
+  const BUY_PE = "🔴 BUY NOW (PE Confirmed!)";
   const WAITING_CLASSES = ["border-amber-500/40", "bg-amber-500/10", "text-amber-300"];
-  const CONFIRMED_CLASSES = ["border-emerald-500/50", "bg-emerald-500/15", "text-emerald-300"];
+  const CE_CLASSES = ["border-emerald-500/50", "bg-emerald-500/15", "text-emerald-300"];
+  const PE_CLASSES = ["border-rose-500/50", "bg-rose-500/15", "text-rose-300"];
 
-  function setSignal(boxId, confirmed) {
+  function setSignal(boxId, confirmed, optionSide) {
     const box = document.getElementById(boxId);
     if (!box) return;
-    box.textContent = confirmed ? BUY_NOW : WAITING;
-    WAITING_CLASSES.forEach((cls) => box.classList.remove(cls));
-    CONFIRMED_CLASSES.forEach((cls) => box.classList.remove(cls));
-    (confirmed ? CONFIRMED_CLASSES : WAITING_CLASSES).forEach((cls) => box.classList.add(cls));
+    const side = String(optionSide || "CE").toUpperCase();
+    const label = !confirmed ? WAITING : (side === "PE" ? BUY_PE : BUY_CE);
+    const classes = !confirmed ? WAITING_CLASSES : (side === "PE" ? PE_CLASSES : CE_CLASSES);
+    box.textContent = label;
+    [...WAITING_CLASSES, ...CE_CLASSES, ...PE_CLASSES].forEach((cls) => box.classList.remove(cls));
+    classes.forEach((cls) => box.classList.add(cls));
   }
 
   let audioCtx = null;
@@ -1502,7 +1567,7 @@
       if (!msg || msg.action !== "trade_trigger" || msg.status !== "BUY_NOW") return;
       const boxId = resolveBox(msg.setup_type);
       if (!boxId) return;
-      setSignal(boxId, true);
+      setSignal(boxId, true, msg.option_side);
       beep();
     };
     ws.onclose = () => {

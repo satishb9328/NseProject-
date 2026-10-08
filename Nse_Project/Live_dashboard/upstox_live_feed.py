@@ -223,6 +223,10 @@ market_state = {
     # Real Black-Scholes Net GEX + its bounded conviction ratio (net_gex / gross_gex).
     "net_gex": 0.0,
     "net_gex_ratio": 0.0,
+    # Advanced Greek Blend inputs (Vanna / Charm / Gamma Flip level) driving the score.
+    "net_vanna": 0.0,
+    "net_charm": 0.0,
+    "gamma_flip_level": 0.0,
     # Whole-chain macro metrics + session peaks (Net OI Bias / Total Vol Skew / Total PCR).
     "net_oi_bias": 0.0,
     "total_vol_skew": 0.0,
@@ -244,19 +248,24 @@ _sentiment_extremes = {
 # Latest cumulative CVD, fed by CVDEngine's on_candle callback (a separate worker
 # thread) and folded into the Redis market state on the next publish beat.
 _latest_cumulative_cvd = 0.0
-# Advanced-quant sentiment state. ``_previous_total_coi`` drives the momentum
-# ACCELERATION (rate of change of total |COI| vs the last tick). The advanced
-# diagnostics are persisted to the Redis ``market_state`` by _refresh_market_state
-# so views.py can serve them at the 1 Hz option-chain cadence.
-_previous_total_coi = None
+# Advanced-quant sentiment state. ``_previous_directional_coi`` drives the momentum
+# ACCELERATION (rate of change of the DIRECTIONAL COI signal, call_coi - put_coi, vs
+# the last tick). The advanced diagnostics are persisted to the Redis
+# ``market_state`` by _refresh_market_state so views.py can serve them at the 1 Hz
+# option-chain cadence.
+_previous_directional_coi = None
 # Advanced-quant tuning (score points on the 0-100 scale).
-# The gamma boost is now driven by the REAL Black-Scholes Net GEX from the downstream
-# Gamma engine (net_gex / gross_gex, bounded [-1, 1]) instead of the old OI-skew proxy.
-# STRENGTH scales that normalized ratio into score points; CAP bounds its influence so an
-# extreme negative-gamma structure can meaningfully counter momentum without killing an
-# explosive intraday scalp outright.
-_GAMMA_BOOST_STRENGTH = 20.0   # score points per unit of net_gex_ratio ([-1, 1])
-_GAMMA_BOOST_CAP = 20.0        # clamp the gamma boost to ±20 score points
+# The gamma boost is now an ADVANCED GREEK BLEND + GAMMA FLIP MULTIPLIER. The real
+# Black-Scholes Net GEX, Vanna and Charm are each normalized to a [-1, 1] ratio (net /
+# gross, like net_gex_ratio), then weighted into a composite base boost. When price sits
+# inside the gamma flip zone (|spot - flip| / spot < _FLIP_ZONE_PCT), the whole blend is
+# scaled by _FLIP_ZONE_MULTIPLIER to reflect the explosive potential of the zone.
+_GEX_BLEND_WEIGHT = 10.0       # max score points from the Net GEX ratio ([-1, 1])
+_VANNA_BLEND_WEIGHT = 5.0      # max score points from the normalized Vanna ratio ([-1, 1])
+_CHARM_BLEND_WEIGHT = 5.0      # max score points from the normalized Charm ratio ([-1, 1])
+_GAMMA_BOOST_CAP = 25.0        # clamp the final gamma boost to ±25 score points
+_FLIP_ZONE_PCT = 0.2           # |spot - flip| / spot < 0.2% => explosive flip zone
+_FLIP_ZONE_MULTIPLIER = 1.5    # multiplier applied to the blend inside the flip zone
 _ACCEL_GAIN = 0.5              # scale COI acceleration into momentum points
 _ACCEL_CAP = 15.0              # clamp the acceleration boost to ±15 momentum points
 
@@ -1434,22 +1443,35 @@ def _gamma_processor() -> gamma_engine.GammaProcessor:
     return _gamma_processor_instance
 
 
-def _real_net_gex(instrument_data=None, spot: float = 0.0) -> tuple[float, float]:
-    """Return the real ``(day_net_gex, net_gex_ratio)`` from the Black-Scholes Gamma engine.
+def _real_net_gex(instrument_data=None, spot: float = 0.0) -> dict:
+    """Return the real Black-Scholes Greek profile that drives the score's gamma boost.
 
     Reuses the SAME ``normalize_live_payload`` + ``GammaProcessor.process_payload`` path the
-    downstream Gamma bot runs, so the value matches the Day Gamma card exactly (the
-    ``-54.06 Cr`` figure). ``net_gex_ratio`` is ``net_gex / gross_gex`` bounded in [-1, 1] —
-    a scale-invariant conviction measure safe to fold into the score.
+    downstream Gamma bot runs, so every value matches the Day Gamma card exactly.
+    ``net_gex_ratio``, ``vanna_ratio`` and ``charm_ratio`` are each ``net / gross`` bounded
+    in [-1, 1] — scale-invariant conviction measures safe to fold into the score. The engine
+    only exposes a gross GEX, so gross Vanna/Charm are summed here from the same per-leg day
+    exposures (``coi * greek``) the engine already aggregates, keeping all three ratios on an
+    identical footing.
 
-    Returns ``(0.0, 0.0)`` on any failure (no spot/expiry, empty chain, engine error) so the
-    score's neutral fallback is never disturbed by a GEX leg that cannot be priced.
+    Returns a neutral dict on any failure (no spot/expiry, empty chain, engine error) so the
+    score's fallback is never disturbed by a leg that cannot be priced.
     """
+    neutral = {
+        "net_gex": 0.0,
+        "net_gex_ratio": 0.0,
+        "net_vanna": 0.0,
+        "net_charm": 0.0,
+        "vanna_ratio": 0.0,
+        "charm_ratio": 0.0,
+        "gamma_flip_level": None,
+        "spot": float(spot) if spot > 0 else 0.0,
+    }
     if spot <= 0:
-        return 0.0, 0.0
+        return neutral
     expiry = active_expiry_iso()
     if not expiry:
-        return 0.0, 0.0
+        return neutral
     try:
         payload = {
             "instrument_data": instrument_data or {},
@@ -1458,16 +1480,43 @@ def _real_net_gex(instrument_data=None, spot: float = 0.0) -> tuple[float, float
         }
         normalized = gamma_engine.normalize_live_payload(payload)
         if not normalized:
-            return 0.0, 0.0
+            return neutral
         profile = _gamma_processor().process_payload(normalized)
         if not profile:
-            return 0.0, 0.0
+            return neutral
         day = profile.day_gamma
-        ratio = day.net_gex_ratio if math.isfinite(day.net_gex_ratio) else 0.0
-        return float(day.net_gex), max(-1.0, min(1.0, ratio))
+
+        # Gross Vanna / Charm: the engine stores per-leg day exposures only as net sums
+        # (day_net_charm / day_net_vanna), so recompute the gross magnitude from the same
+        # ``coi * greek`` legs it aggregates, mirroring how gross_gex is built.
+        day_strikes = [s for s in profile.strikes if s.has_day_coi]
+        gross_vanna = sum(
+            abs(s.call_coi * s.call_vanna) + abs(s.put_coi * s.put_vanna)
+            for s in day_strikes
+        )
+        gross_charm = sum(
+            abs(s.call_coi * s.call_charm) + abs(s.put_coi * s.put_charm)
+            for s in day_strikes
+        )
+        vanna_ratio = (day.net_vanna / gross_vanna) if gross_vanna > 0 else 0.0
+        charm_ratio = (day.net_charm / gross_charm) if gross_charm > 0 else 0.0
+
+        gex_ratio = day.net_gex_ratio if math.isfinite(day.net_gex_ratio) else 0.0
+        flip = day.gamma_flip_level if day.gamma_flip_level is not None else profile.gamma_flip_level
+
+        return {
+            "net_gex": float(day.net_gex),
+            "net_gex_ratio": max(-1.0, min(1.0, gex_ratio)),
+            "net_vanna": float(day.net_vanna),
+            "net_charm": float(day.net_charm),
+            "vanna_ratio": max(-1.0, min(1.0, vanna_ratio)),
+            "charm_ratio": max(-1.0, min(1.0, charm_ratio)),
+            "gamma_flip_level": flip,
+            "spot": float(spot),
+        }
     except Exception:
         logger.warning("Real GEX computation failed; gamma boost disabled.", exc_info=True)
-        return 0.0, 0.0
+        return neutral
 
 
 # ---------------------------------------------------------------------------
@@ -1634,17 +1683,20 @@ def _compute_live_sentiment_full(instrument_data=None) -> dict:
     with a Gaussian kernel over distance from spot so deep-OTM strikes barely move
     the aggregate. Falls back to equal weighting when spot / strike data is absent.
 
-    Momentum acceleration: the rate of change of total |COI| vs the previous tick is
-    folded into momentum so a sudden COI spike registers aggressively.
+    Directional bias: heavy CALL WRITING (call OI > put OI) maps NEGATIVE, so a crash
+    driven by call writing drags the score DOWN toward bearish instead of lifting it
+    to CE. Momentum is DIRECTIONAL too (put_coi - call_coi): call-building drives it
+    negative and its rate of change (acceleration) spikes it in the same direction.
 
-    Gamma boost: the REAL Black-Scholes Net GEX from the downstream Gamma engine
-    (net_gex / gross_gex, bounded [-1, 1]) nudges the score bearish when negative and
-    bullish when positive, clamped to ±_GAMMA_BOOST_CAP so heavy structure counters
-    momentum without killing explosive scalps.
+    Gamma boost: an ADVANCED GREEK BLEND of the real Black-Scholes Net GEX, Vanna and
+    Charm (each normalized to a [-1, 1] net/gross ratio) weighted GEX=10 / Vanna=5 /
+    Charm=5 into a base boost. That blend is then scaled by a GAMMA FLIP MULTIPLIER when
+    price sits within _FLIP_ZONE_PCT of the flip level, and clamped to ±_GAMMA_BOOST_CAP
+    so heavy structure counters momentum without killing explosive scalps.
 
     Returns a dict of raw floats so the dashboard MATH console can show the maths.
     """
-    global _previous_total_coi
+    global _previous_directional_coi
 
     if instrument_data is None:
         instrument_data = live_state.get("instrument_data", {})
@@ -1693,11 +1745,14 @@ def _compute_live_sentiment_full(instrument_data=None) -> dict:
                 put_iv_n += 1
 
     total_oi = call_oi + put_oi
-    total_coi = call_coi + put_coi
+    # DIRECTIONAL COI: puts being added (bearish) minus calls being added (bullish).
+    # An Indian-market crash is driven by heavy CALL WRITING: call_coi >> 0 while
+    # put_coi is muted, so put_coi - call_coi goes NEGATIVE and drives momentum DOWN.
+    directional_coi = put_coi - call_coi
 
-    # Acceleration = rate of change of total |COI| vs the last tick.
-    acceleration = 0.0 if _previous_total_coi is None else total_coi - _previous_total_coi
-    _previous_total_coi = total_coi
+    # Acceleration = rate of change of the directional COI signal vs the last tick.
+    acceleration = 0.0 if _previous_directional_coi is None else directional_coi - _previous_directional_coi
+    _previous_directional_coi = directional_coi
 
     # Neutral fallback: an empty OR half-initialised chain is NOT directional.
     if total_oi <= 0 or call_oi <= 0 or put_oi <= 0:
@@ -1706,11 +1761,14 @@ def _compute_live_sentiment_full(instrument_data=None) -> dict:
             "delta_wt_impact": 0.0, "gamma_boost_val": 0.0,
             "iv_skew_est": 0.0, "acceleration": round(acceleration, 2),
             "net_gex": 0.0, "net_gex_ratio": 0.0,
+            "net_vanna": 0.0, "net_charm": 0.0, "gamma_flip_level": None,
             "theta_decay_per_hour": 0.0,
         }
 
+    # BEARISH BIAS: heavy CALL WRITING (call OI > put OI) maps NEGATIVE, so a crash
+    # driven by call writing penalises the score instead of lifting it toward CE.
     unweighted_bias = ((put_oi - call_oi) / total_oi) * 100.0
-    base_momentum = (total_coi / total_oi) * 100.0
+    base_momentum = (directional_coi / total_oi) * 100.0
 
     # Distance-weighted bias (equal-weight fallback when no strike/spot data).
     if weighted and (w_call_oi + w_put_oi) > 0:
@@ -1725,11 +1783,30 @@ def _compute_live_sentiment_full(instrument_data=None) -> dict:
     accel_boost = max(-_ACCEL_CAP, min(_ACCEL_CAP, (acceleration / total_oi) * 100.0 * _ACCEL_GAIN))
     momentum = base_momentum + accel_boost
 
-    # Gamma boost from the REAL Black-Scholes Net GEX computed by the downstream Gamma
-    # engine (the same value driving the Day Gamma card). net_gex_ratio is bounded
-    # [-1, 1]: negative => bearish, positive => bullish.
-    net_gex, net_gex_ratio = _real_net_gex(instrument_data, spot)
-    gamma_boost_val = max(-_GAMMA_BOOST_CAP, min(_GAMMA_BOOST_CAP, net_gex_ratio * _GAMMA_BOOST_STRENGTH))
+    # ADVANCED GREEK BLEND + GAMMA FLIP MULTIPLIER --------------------------------
+    # Real Black-Scholes Net GEX, Vanna and Charm (each normalized to [-1, 1]) are
+    # weighted into a composite base boost, then scaled by a flip multiplier when price
+    # sits inside the gamma flip zone (explosive potential).
+    greeks = _real_net_gex(instrument_data, spot)
+    net_gex = greeks["net_gex"]
+    net_gex_ratio = greeks["net_gex_ratio"]
+    net_vanna = greeks["net_vanna"]
+    net_charm = greeks["net_charm"]
+    gamma_flip_level = greeks["gamma_flip_level"]
+
+    base_boost = (
+        net_gex_ratio * _GEX_BLEND_WEIGHT
+        + greeks["vanna_ratio"] * _VANNA_BLEND_WEIGHT
+        + greeks["charm_ratio"] * _CHARM_BLEND_WEIGHT
+    )
+
+    flip_multiplier = 1.0
+    if gamma_flip_level is not None and spot > 0:
+        flip_distance_pct = abs(spot - gamma_flip_level) / spot * 100.0
+        if flip_distance_pct < _FLIP_ZONE_PCT:
+            flip_multiplier = _FLIP_ZONE_MULTIPLIER
+
+    gamma_boost_val = max(-_GAMMA_BOOST_CAP, min(_GAMMA_BOOST_CAP, base_boost * flip_multiplier))
 
     # IV skew estimate: mean(put IV) - mean(call IV) in IV percentage points.
     iv_skew_est = 0.0
@@ -1751,6 +1828,9 @@ def _compute_live_sentiment_full(instrument_data=None) -> dict:
         "acceleration": round(acceleration, 2),
         "net_gex": net_gex,
         "net_gex_ratio": net_gex_ratio,
+        "net_vanna": net_vanna,
+        "net_charm": net_charm,
+        "gamma_flip_level": gamma_flip_level,
         "theta_decay_per_hour": theta_decay_per_hour,
     }
 
@@ -1776,6 +1856,9 @@ def _compute_macro_metrics(instrument_data=None) -> dict:
 
     Returns ``net_oi_bias``, ``total_vol_skew`` and ``total_pcr``. These are ratios, so
     the internal share-scaled OI/volume is fine (the scale cancels out).
+
+    Sign convention matches the score's ``weighted_bias``: NEGATIVE == bearish
+    (call-heavy OI / volume = heavy call writing during a crash).
     """
     if instrument_data is None:
         instrument_data = live_state.get("instrument_data", {})
@@ -1802,6 +1885,8 @@ def _compute_macro_metrics(instrument_data=None) -> dict:
     oi_sum = total_call_oi + total_put_oi
     vol_sum = total_call_vol + total_put_vol
 
+    # BEARISH SIGN CONVENTION: negative == bearish. Indian-market crashes are driven
+    # by heavy CALL WRITING, so call-heavy OI / volume maps NEGATIVE (red).
     net_oi_bias = ((total_put_oi - total_call_oi) / oi_sum) * 100.0 if oi_sum else 0.0
     total_vol_skew = ((total_put_vol - total_call_vol) / vol_sum) * 100.0 if vol_sum else 0.0
     total_pcr = (total_put_oi / total_call_oi) if total_call_oi > 0 else 0.0
@@ -1845,6 +1930,14 @@ def _refresh_market_state(instrument_data=None) -> None:
     market_state["score"] = score
     market_state["net_gex"] = sentiment["net_gex"]
     market_state["net_gex_ratio"] = sentiment["net_gex_ratio"]
+    # Advanced Greek Blend inputs (Vanna / Charm / Gamma Flip level) — the same raw
+    # values driving the score's gamma boost. A missing flip is persisted as 0.0 (the
+    # JSON pipeline already renders None as 0 via _json_safe_value).
+    market_state["net_vanna"] = sentiment["net_vanna"]
+    market_state["net_charm"] = sentiment["net_charm"]
+    market_state["gamma_flip_level"] = (
+        sentiment["gamma_flip_level"] if sentiment["gamma_flip_level"] is not None else 0.0
+    )
     # Real-time ATM time decay, also mirrored onto live_state so it rides the same
     # Redis snapshot (live_options_data) that the Gamma engine and dashboard consume.
     market_state["theta_decay_per_hour"] = sentiment["theta_decay_per_hour"]

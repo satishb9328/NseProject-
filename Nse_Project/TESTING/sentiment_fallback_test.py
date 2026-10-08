@@ -91,7 +91,7 @@ def test_compute_live_sentiment() -> None:
 
     print("\n2) _compute_live_sentiment() directional data is preserved")
 
-    # Bearish: call OI >> put OI must still produce a sub-40 score (not neutral).
+    # Bearish: call OI >> put OI (heavy call writing) must produce a sub-40 score.
     bias, momentum, score = feed._compute_live_sentiment({
         "ce1": {"option_type": "CE", "oi": 2000, "coi": 0},
         "pe1": {"option_type": "PE", "oi": 1000, "coi": 0},
@@ -100,7 +100,7 @@ def test_compute_live_sentiment() -> None:
     check("bearish momentum", momentum, 0.0)
     check("bearish score", score, 100 / 3)
 
-    # Bullish: put OI >> call OI must still produce a super-60 score (not neutral).
+    # Bullish: put OI >> call OI must produce a super-60 score (not neutral).
     bias, momentum, score = feed._compute_live_sentiment({
         "ce1": {"option_type": "CE", "oi": 1000, "coi": 0},
         "pe1": {"option_type": "PE", "oi": 2000, "coi": 0},

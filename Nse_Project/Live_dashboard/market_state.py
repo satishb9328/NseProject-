@@ -46,6 +46,11 @@ DEFAULT_MARKET_STATE = {
     # Real Black-Scholes Net GEX + its bounded conviction ratio (net_gex / gross_gex).
     "net_gex": 0.0,
     "net_gex_ratio": 0.0,
+    # Advanced Greek Blend inputs (Vanna / Charm / Gamma Flip level) that drive the
+    # score's gamma boost. gamma_flip_level is 0.0 when no flip exists in the chain.
+    "net_vanna": 0.0,
+    "net_charm": 0.0,
+    "gamma_flip_level": 0.0,
     # Real-time ATM time decay (₹/hr), reverse-solved from the live LTP via py_vollib.
     "theta_decay_per_hour": 0.0,
     # Whole-chain macro metrics for the left "TOTAL OPTION CHAIN (MACRO)" panel.
