@@ -820,7 +820,7 @@ def find_nearest_nifty_future_key():
     columns_lower = {col.lower().strip(): col for col in df.columns}
     key_col = columns_lower.get("instrument_key")
     name_col = columns_lower.get("name")
-    type_col = columns_lower.get("instrument_type")
+    type_col = columns_lower.get("instrument_type")  
     expiry_col = columns_lower.get("expiry")
     symbol_col = columns_lower.get("tradingsymbol")
 
