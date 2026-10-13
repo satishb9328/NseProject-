@@ -1,37 +1,46 @@
-# ---- Python ----
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-
-# ---- Virtual Environments ----
 .venv/
 venv/
-env/
-ENV/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
 
-# ---- Local Databases & Data Files ----
-*.db
-*.sqlite3
-tbt_data_*.db
-*.csv
-*.parquet
-*.json
-
-# ---- Environment Variables (Keep your API keys secret) ----
 .env
-upstox_credentials.json
+.env.*
 
-# ---- PyCharm / IntelliJ IDE Files ----
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
 .idea/
-*.iml
-*.ipr
-*.iws
 
-# ---- VS Code ----
-.vscode/
+db.sqlite3
+*.sqlite3
+tbt_local_test.db
+Nse Project/tbt_local_test.db
 
-# ---- OS Generated Files ----
-.DS_Store
-Thumbs.db
-desktop.ini
+*.log
+
+build/
+dist/
+*.egg-info/
+
+# Project-generated market cache/output files
+nifty_yf_cache.json
+# Live feed runtime artifacts: single-instance lock + persisted previous-day OI baseline
+logs/upstox_live_feed.lock
+poi_baseline/
+nifty200_advanced_strategy_screen.csv
+Nse Project/Swing_stocks/nifty_yf_cache.json
+Nse Project/Swing_stocks/nifty200_advanced_strategy_screen.csv
+Nse Project/Swing_stocks/nifty200_smc_precision_screen.csv
+
+# Local auth/token artifacts
+Nse Project/AUTHEN_TOKEN/AccessToken/
+Nse Project/AUTHEN_TOKEN/config/fyers_config.json
+
+# Ignore all CSV files anywhere in the project
+*.csv
+*.json
+*.txt
+!requirements.txt
