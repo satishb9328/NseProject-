@@ -43,3 +43,4 @@ Nse Project/AUTHEN_TOKEN/config/fyers_config.json
 *.csv
 *.json
 *.txt
+!requirements.txt
