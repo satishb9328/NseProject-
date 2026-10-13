@@ -475,6 +475,12 @@ def _daily_metrics(df):
     rng52 = high52 - low52
     pct_above_low = (last_close - low52) / low52 * 100.0
     range_pos = (last_close - low52) / rng52 * 100.0 if rng52 > 0 else 0.0
+    recent_5_low = float(low.iloc[-5:].min())
+    break_prev_high = bool(last_close > float(high.iloc[-2]))
+    avg_vol_10 = vol.rolling(10, min_periods=10).mean().shift(1).iloc[-1]
+    vol_above_avg10 = bool(
+        np.isfinite(avg_vol_10) and float(vol.iloc[-1]) > float(avg_vol_10)
+    )
 
     ema20 = _ema(close, DAILY_EMA_FAST)
     ema50 = _ema(close, DAILY_EMA_SLOW)
@@ -482,6 +488,28 @@ def _daily_metrics(df):
     e20 = float(ema20.iloc[-1])
     e50 = float(ema50.iloc[-1])
     e200 = float(ema200.iloc[-1])
+    prev_low = float(low.iloc[-2])
+    curr_low = float(low.iloc[-1])
+    prev_close = float(close.iloc[-2])
+    curr_open = float(df["open"].iloc[-1])
+    curr_green_and_rising = last_close > curr_open and last_close > prev_close
+    strict_ema_bounce = bool(
+        curr_green_and_rising
+        and (
+            (
+                (prev_low <= float(ema20.iloc[-2]) * 1.01
+                 or curr_low <= e20 * 1.01)
+                and last_close > e20
+                and last_close <= e20 * 1.02
+            )
+            or (
+                (prev_low <= float(ema50.iloc[-2]) * 1.01
+                 or curr_low <= e50 * 1.01)
+                and last_close > e50
+                and last_close <= e50 * 1.02
+            )
+        )
+    )
 
     rsi_series = _rsi(close, RSI_PERIOD)
     r = float(rsi_series.iloc[-1])
@@ -493,6 +521,14 @@ def _daily_metrics(df):
     bb20_mid_series = close.rolling(BB20_MID_PERIOD, min_periods=BB20_MID_PERIOD).mean()
     bb20_mid = float(bb20_mid_series.iloc[-1])
     rsi_dipped = bool((rsi_series.iloc[-RSI_DIP_LOOKBACK:] < RSI_OVERSOLD).any())
+    strict_bb20_mid_reclaim = bool(
+        np.isfinite(bb20_mid_series.iloc[-2])
+        and np.isfinite(bb20_mid_series.iloc[-1])
+        and close.iloc[-2] < bb20_mid_series.iloc[-2]
+        and close.iloc[-1] > bb20_mid_series.iloc[-1]
+        and close.iloc[-1] <= bb20_mid_series.iloc[-1] * 1.02
+        and close.iloc[-1] > df["open"].iloc[-1]
+    )
 
     # BB lower band (20-SMA - 2*std) + daily "snap" detection: the prior day's
     # low pierced the lower band, and today's close reclaimed it with a bullish
@@ -503,12 +539,18 @@ def _daily_metrics(df):
     prev_low = float(low.iloc[-2])
     prev_lower = float(bb20_lower_series.iloc[-2])
     curr_open = float(df["open"].iloc[-1])
+    proximity_limit = daily_bb20_lower * 1.02
+    avg_vol_10_series = vol.rolling(10, min_periods=10).mean().shift(1)
+    avg_vol_10 = float(avg_vol_10_series.iloc[-1])
+    last_vol = float(vol.iloc[-1])
     is_daily_snap = bool(
         np.isfinite(prev_low) and np.isfinite(prev_lower) and prev_low < prev_lower
         and np.isfinite(last_close) and np.isfinite(daily_bb20_lower)
-        and last_close > daily_bb20_lower
+        and last_close > daily_bb20_lower and last_close <= proximity_limit
         and np.isfinite(curr_open) and last_close > curr_open
-        and np.isfinite(r) and r < BB_SNAP_RSI_MAX)
+        and np.isfinite(r) and r < BB_SNAP_RSI_MAX
+        and np.isfinite(last_vol) and np.isfinite(avg_vol_10)
+        and last_vol > avg_vol_10)
 
     # "Consolidation / Flag" gauges: established uptrend + sideways contraction.
     uptrend = bool(np.isfinite(e50) and np.isfinite(e200) and e200 > 0 and e50 > e200)
@@ -518,6 +560,40 @@ def _daily_metrics(df):
     tr_contract = _tr_contraction(high, low, close)
     adx_low = bool(np.isfinite(adx) and adx < ADX_FLAT)
     flag_consolidation = bool(uptrend and (adx_low or bb_squeeze or tr_contract))
+
+    pivot_10d = high.shift(1).rolling(10, min_periods=10).max()
+    pivot_value = float(pivot_10d.iloc[-1])
+    prev_close = float(close.iloc[-2])
+    fresh_flag_breakout = bool(
+        np.isfinite(pivot_value)
+        and pivot_value > 0
+        and np.isfinite(prev_close)
+        and prev_close < pivot_value
+        and last_close > pivot_value
+        and last_close <= pivot_value * 1.03
+    )
+    avg_vol_10_value = float(avg_vol_10_series.iloc[-1])
+    vol_surge_15x = bool(
+        np.isfinite(avg_vol_10_value)
+        and avg_vol_10_value > 0
+        and last_vol >= avg_vol_10_value * 1.5
+    )
+
+    previous_df = df.iloc[:-1]
+    previous_close_series = previous_df["close"].astype(float)
+    previous_high_series = previous_df["high"].astype(float)
+    previous_low_series = previous_df["low"].astype(float)
+    previous_adx_series = _adx(
+        previous_high_series, previous_low_series, previous_close_series, ADX_PERIOD
+    )
+    previous_adx = float(previous_adx_series.iloc[-1])
+    consolidation_yesterday = bool(
+        (np.isfinite(previous_adx) and previous_adx < ADX_FLAT)
+        or _bb_squeeze(previous_close_series)
+        or _tr_contraction(
+            previous_high_series, previous_low_series, previous_close_series
+        )
+    )
 
     # Volume dry-up: latest volume vs prior 20-day average (today excluded).
     avg20 = vol.rolling(VOL_AVG_WINDOW, min_periods=VOL_AVG_WINDOW).mean().shift(1)
@@ -538,7 +614,11 @@ def _daily_metrics(df):
         "range_pos": range_pos,
         "near_low": pct_above_low <= LOW_PROXIMITY_PCT,
         "reversal": _has_reversal_signature(df),
+        "recent_5_low": recent_5_low,
+        "break_prev_high": break_prev_high,
+        "vol_above_avg10": vol_above_avg10,
         "ema_support": _daily_ema_support(close, ema20, ema50),
+        "strict_ema_bounce": strict_ema_bounce,
         "ema20": e20,
         "ema50": e50,
         "ema200": e200,
@@ -547,9 +627,15 @@ def _daily_metrics(df):
         "bb_squeeze": bb_squeeze,
         "tr_contract": tr_contract,
         "flag_consolidation": flag_consolidation,
+        "pivot_10d": pivot_value,
+        "fresh_flag_breakout": fresh_flag_breakout,
+        "vol_surge_15x": vol_surge_15x,
+        "consolidation_yesterday": consolidation_yesterday,
         "rsi": r,
         "bb20_mid": bb20_mid,
         "rsi_dipped": rsi_dipped,
+        "rsi_oversold": rsi_dipped,
+        "strict_bb20_mid_reclaim": strict_bb20_mid_reclaim,
         "daily_bb20_lower": daily_bb20_lower,
         "is_daily_snap": is_daily_snap,
         "s20": s20,
@@ -616,7 +702,9 @@ def _weekly_metrics(df):
     weekly_snap = (
         (low.shift(1) < bb20_lower_series.shift(1))
         & (close > bb20_lower_series)
+        & (close <= bb20_lower_series * 1.03)
         & (rsi_series < BB_SNAP_RSI_MAX)
+        & (vol > avg10)
     ).astype(bool).fillna(False)
     weekly_bb20_lower = float(bb20_lower_series.iloc[-1])
 
@@ -668,13 +756,12 @@ def _classify(d, w):
     > Mega Reversal (Weekly BB20) > BB Lower Band Snap (Weekly)
     > BB Lower Band Snap (Daily) > Mid-Range Bounce > VCP Breakout
     > Consolidation / Flag."""
-    if d["near_low"] and d["reversal"]:
+    if (d["near_low"] and d["reversal"] and d["break_prev_high"]
+            and d["last_close"] <= d["recent_5_low"] * 1.03
+            and d["vol_above_avg10"]):
         return "Bottom Fishing"
-    if (d["rsi_dipped"] and d["rsi"] > RSI_RECLAIM
-            and d["last_close"] >= d["bb20_mid"]
-            and d["vol_dry"]
-            and np.isfinite(w["weekly_vol_ratio"])
-            and w["weekly_vol_ratio"] < WEEKLY_VOL_DRY_THRESH):
+    elif (d["rsi_oversold"] and d["strict_bb20_mid_reclaim"]
+          and d["vol_above_avg10"]):
         return "Oversold BB20 Reclaim"
     if (w["weekly_rsi_dipped"]
             and d["rsi"] > RSI_RECLAIM
@@ -687,11 +774,15 @@ def _classify(d, w):
         return "BB Lower Band Snap (Weekly)"
     if d["is_daily_snap"]:
         return "BB Lower Band Snap (Daily)"
-    if MID_RANGE_LO <= d["range_pos"] <= MID_RANGE_HI and d["ema_support"]:
+    elif (d["range_pos"] >= MID_RANGE_LO and d["range_pos"] <= MID_RANGE_HI
+          and d["strict_ema_bounce"] and d["vol_above_avg10"]):
         return "Mid-Range Bounce"
     if w["ema_contact"] and w["trend_ok"] and (w["vcp"] or w["inside"]):
         return "VCP Breakout"
-    if d["flag_consolidation"]:
+    if (d["uptrend"]
+            and (d["flag_consolidation"] or d["consolidation_yesterday"])
+            and d["fresh_flag_breakout"]
+            and d["vol_surge_15x"]):
         return "Consolidation / Flag"
     return None
 
@@ -891,6 +982,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-
-
-

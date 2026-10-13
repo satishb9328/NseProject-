@@ -324,6 +324,17 @@ def scan_stock_for_smc_reversal(symbol: str, fund_dict: dict) -> dict | None:
         diag["invalid_sequence"] += 1
         return None
 
+    current_close = last_close
+    if not vol_spike:
+        diag["invalid_sequence"] += 1
+        return None
+    if not (sl_price <= current_close <= entry_price * 1.02):
+        diag["invalid_sequence"] += 1
+        return None
+    if last_idx - choch_idx > 3:
+        diag["invalid_sequence"] += 1
+        return None
+
     diag["valid_setups"] += 1
     
     # Format PE/ROE for display
@@ -415,7 +426,10 @@ def main():
         print(f"     {row['Reasons']}")
         print("-" * 80)
 
-    output_file = "nifty500_pure_smc_trade_setups.csv"
+    output_file = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "nifty500_pure_smc_trade_setups.csv",
+    )
     df_results.to_csv(output_file, index=False)
     print(f"\n  ✅ Saved {len(df_results)} trade setups to {output_file}\n")
 

@@ -9,8 +9,10 @@ The request path is a pure DB read plus cheap formatting — no pandas, no parqu
 no Upstox API calls, and no candlestick/chart-pattern scanning happens here.
 """
 from django.shortcuts import render
+from django.http import JsonResponse
+from django.utils import timezone
 
-from .models import TrendSetup
+from .models import LiveSignal, TrendSetup
 
 
 CATEGORY_ORDER = [
@@ -169,4 +171,21 @@ def trend_setups_view(request):
         "total": total,
         "summary_cards": cards,
         "sections": sections,
+    })
+
+
+def live_signals_today(request):
+    """Return today's persisted live scanner signals as JSON."""
+    rows = LiveSignal.objects.filter(date=timezone.localdate()).order_by("-created_at")
+    return JsonResponse({
+        "signals": [
+            {
+                "stock_symbol": row.stock_symbol,
+                "signal_type": row.signal_type,
+                "trigger_price": str(row.trigger_price),
+                "weekly_midline": str(row.weekly_midline),
+                "created_at": row.created_at.isoformat(),
+            }
+            for row in rows
+        ]
     })

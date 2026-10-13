@@ -209,16 +209,35 @@ def upstox_feed_to_tick(instrument_key: str, feed_payload: dict) -> Optional["CV
     """Extract one ``CVDTick`` from a single Upstox V3 ``feeds`` entry.
 
     Verified against the live V3 payload:
-        fullFeed.marketFF.ltpc.ltp                       -> LTP
+        fullFeed.marketFF.ltpc.ltp                       -> option/future LTP
         fullFeed.marketFF.ltpc.ltt                       -> epoch ms
         fullFeed.marketFF.vtt                            -> cumulative day volume
         fullFeed.marketFF.marketLevel.bidAskQuote[0]     -> {bidP, askP}
+        fullFeed.indexFF.ltpc.ltp                        -> index LTP (no vol/bid-ask)
     """
     if not isinstance(feed_payload, dict):
         return None
     ff = feed_payload.get("fullFeed") or feed_payload
     if not isinstance(ff, dict):
         return None
+
+    # Indices (e.g. "NSE_INDEX|Nifty 50") stream as ``fullFeed.indexFF``. They carry an
+    # LTP but no bid/ask or cumulative traded volume, so emit a price-only tick.
+    index_ff = ff.get("indexFF")
+    if isinstance(index_ff, dict):
+        index_ltpc = index_ff.get("ltpc") or {}
+        ltp = _to_float(index_ltpc.get("ltp"))
+        if ltp is None:
+            return None
+        return CVDTick(
+            symbol=instrument_key,
+            ltp=ltp,
+            bid=None,
+            ask=None,
+            total_volume=0,
+            timestamp=_coerce_timestamp(index_ltpc.get("ltt")),
+        )
+
     market_ff = ff.get("marketFF") or ff
     if not isinstance(market_ff, dict):
         return None

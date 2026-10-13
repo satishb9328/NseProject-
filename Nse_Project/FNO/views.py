@@ -18,7 +18,7 @@ from .fno_swing_engine import (
 )
 
 
-FNO_DATABASE_PATH = r"D:\FNO DATA\fno_swing.db"
+FNO_DATABASE_PATH = r"D:\FNO DATA\Participant data\Database\fno_swing.db"
 
 
 def run_fno_update(request):

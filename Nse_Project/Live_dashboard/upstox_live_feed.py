@@ -13,7 +13,9 @@ import re
 import signal
 import sys
 import tempfile
+import threading
 import time
+import urllib.parse
 from collections import deque
 from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
@@ -40,6 +42,8 @@ from Nse_Project.graceful_shutdown import is_shutdown_requested, setup_signal_ha
 # they consider it to be.
 from Nse_Project.expiry_utils import belongs_to_expiry, normalize_expiry, resolve_row_expiry
 from Nse_Project.Brokers.cvd_engine import CVDEngine
+from Nse_Project.Live_dashboard.ai_candle_confirmation import CandleConfirmationEngine
+from Nse_Project.Live_dashboard.fib_swing_engine import FibonacciSwingEngine
 from Nse_Project.Live_dashboard.market_state import (
     load_market_state,
     market_state_key,
@@ -191,7 +195,22 @@ REDIS_PUBLISH_MIN_INTERVAL = float(os.getenv("REDIS_PUBLISH_MIN_INTERVAL", "1.0"
 _last_redis_publish_ts = 0.0
 
 LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(message)s"
-logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, datefmt="%Y-%m-%d %H:%M:%S")
+# File + console logging. Previously the feed logged only to the console (stderr),
+# so every crash / backfill / evaluation detail was lost the moment the terminal
+# closed. Persist to logs/upstox_feed.log as well so a late-start diagnosis (or a
+# silent exception) can be traced after the fact.
+_LOG_DIR = BASE_DIR / "logs"
+_LOG_DIR.mkdir(parents=True, exist_ok=True)
+_UPSTOX_FEED_LOG_PATH = _LOG_DIR / "upstox_feed.log"
+logging.basicConfig(
+    level=logging.INFO,
+    format=LOG_FORMAT,
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(_UPSTOX_FEED_LOG_PATH, encoding="utf-8"),
+    ],
+)
 logger = logging.getLogger("LiveUpstoxFeed")
 redis_client = redis.Redis.from_url(
     REDIS_URL,
@@ -1851,6 +1870,287 @@ def _on_cvd_candle(payload: dict) -> None:
         _latest_cumulative_cvd = float(cvd)
 
 
+# ── AI Trade Setup confirmation (option-premium candlesticks) ─────────────────
+# Wiring for ai_candle_confirmation.CandleConfirmationEngine. The engine was
+# previously orphaned (never instantiated). It is now attached to the live feed:
+# option LTP ticks for the ATM CE/PE strikes are aggregated into 1-minute candles
+# by a dedicated CVDEngine instance (publish disabled), and every closed candle is
+# routed to the matching engine. When the entry-zone + candlestick (Pin bar /
+# Engulfing) gates pass, the engine dispatches the ``trade_trigger`` (BUY_NOW)
+# WebSocket payload.
+AI_SETUP_CANDLE_SECONDS = 60                 # 1-minute option candles
+MOMENTUM_PULLBACK_DIP = 0.85                 # Momentum Pullback entry = LTP * 0.85 (15% dip)
+SUPP_RES_TRAP_DIP = 0.85                     # Supp/Res Trap fade entry = LTP * 0.85
+AI_SETUP_ENTRY_REFRESH_DRIFT = 0.01          # re-arm an engine only when its entry drifts > 1%
+# First-Candle Fibonacci Swing: a dedicated 1-minute CVDEngine over the NIFTY future.
+# 60s is required so the base range is the 09:15-09:16 opening candle.
+FIB_SWING_CANDLE_SECONDS = 60                # 1-minute index-future candles
+
+# setup_type strings MUST match live_signals.html resolveBox():
+#   contains "momentum" -> momentum-signal-box ; contains "supp"/"trap" -> suppres-signal-box
+MOMENTUM_PULLBACK_SETUP = "momentum_pullback"
+SUPP_RES_TRAP_SETUP = "supp_res_trap"
+_AI_SETUP_TYPES = (MOMENTUM_PULLBACK_SETUP, SUPP_RES_TRAP_SETUP)
+
+# (instrument_key, setup_type) -> CandleConfirmationEngine. Written from the
+# asyncio loop, read from the option-CVD worker thread, hence the lock.
+_ai_engines: dict[tuple, "CandleConfirmationEngine"] = {}
+_ai_engines_lock = threading.Lock()
+
+
+def _ai_entry_factor(setup_type: str) -> float:
+    """Entry-price multiplier for a setup, always applied to the option LTP."""
+    return MOMENTUM_PULLBACK_DIP if setup_type == MOMENTUM_PULLBACK_SETUP else SUPP_RES_TRAP_DIP
+
+
+def _option_ltp(instrument_key: str, instrument_data: dict) -> float | None:
+    """Live option premium for an instrument key, or None when untraded/unknown."""
+    entry = instrument_data.get(instrument_key) if isinstance(instrument_data, dict) else None
+    if not isinstance(entry, dict):
+        return None
+    ltp = entry.get("ltp")
+    if isinstance(ltp, bool):
+        return None
+    try:
+        value = float(ltp)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _resolve_atm_option_keys(spot: float | None, instrument_data: dict) -> tuple[str | None, str | None]:
+    """Return the CE and PE instrument keys for the strike nearest ``spot``."""
+    if not isinstance(spot, (int, float)) or spot <= 0:
+        return None, None
+    best_strike: float | None = None
+    best_dist: float | None = None
+    for key, entry in instrument_data.items():
+        if not isinstance(entry, dict):
+            continue
+        strike = entry.get("strike")
+        if isinstance(strike, bool) or not isinstance(strike, (int, float)):
+            continue
+        dist = abs(float(strike) - float(spot))
+        if best_dist is None or dist < best_dist:
+            best_strike = float(strike)
+            best_dist = dist
+    if best_strike is None:
+        return None, None
+
+    ce_key = pe_key = None
+    for key, entry in instrument_data.items():
+        if not isinstance(entry, dict):
+            continue
+        strike = entry.get("strike")
+        if isinstance(strike, bool) or not isinstance(strike, (int, float)):
+            continue
+        if float(strike) != best_strike:
+            continue
+        side = str(entry.get("option_type") or "").strip().upper()
+        if side == "CE" and ce_key is None:
+            ce_key = key
+        elif side == "PE" and pe_key is None:
+            pe_key = key
+    return ce_key, pe_key
+
+
+def _refresh_ai_engines(ai_option_cvd: "CVDEngine") -> None:
+    """(Re)create CandleConfirmationEngine instances for the ATM CE/PE options.
+
+    Runs from the asyncio loop. Idempotent: an engine is only replaced when its
+    option side or entry price changes meaningfully (ATM strike roll / >1% LTP
+    drift), so each engine's rolling candle history survives across ticks.
+    """
+    spot = live_state.get("spot_price")
+    if isinstance(spot, bool):
+        spot = None
+    try:
+        spot_f = float(spot) if spot is not None else None
+    except (TypeError, ValueError):
+        spot_f = None
+
+    instrument_data = live_state.get("instrument_data") or {}
+    ce_key, pe_key = _resolve_atm_option_keys(spot_f, instrument_data)
+
+    desired: dict[tuple, tuple[str, float]] = {}
+    for key in (ce_key, pe_key):
+        if not key:
+            continue
+        ltp = _option_ltp(key, instrument_data)
+        if not ltp:
+            continue
+        meta = INSTRUMENT_METADATA.get(key) or {}
+        entry_data = instrument_data.get(key) or {}
+        side = str(meta.get("option_type") or entry_data.get("option_type") or "CE").strip().upper() or "CE"
+        for setup_type in _AI_SETUP_TYPES:
+            entry = round(ltp * _ai_entry_factor(setup_type), 2)
+            desired[(key, setup_type)] = (side, entry)
+
+    with _ai_engines_lock:
+        # Drop engines for keys/setups no longer tracked.
+        for k in list(_ai_engines.keys()):
+            if k not in desired:
+                del _ai_engines[k]
+
+        # Re-arm only when the side or entry price changed beyond the drift band.
+        for (key, setup_type), (side, entry) in desired.items():
+            eng = _ai_engines.get((key, setup_type))
+            if (
+                eng is not None
+                and eng.option_side == side
+                and abs(eng.entry_price - entry) <= max(0.05, eng.entry_price * AI_SETUP_ENTRY_REFRESH_DRIFT)
+            ):
+                continue
+            _ai_engines[(key, setup_type)] = CandleConfirmationEngine(
+                setup_type, entry, symbol=key, option_side=side, dispatch=True
+            )
+
+    # Keep the option-candle feed allowlist in sync with the tracked ATM options.
+    if ai_option_cvd is not None:
+        ai_option_cvd.set_symbol_allowlist({k for (k, _s) in desired})
+
+
+def _route_ai_option_candle(candle: dict) -> None:
+    """Route a closed option candle (from the option-CVD worker thread) to the
+    CandleConfirmationEngine instances tracking that instrument key."""
+    if not isinstance(candle, dict):
+        return
+    key = candle.get("symbol")
+    if not key:
+        return
+    with _ai_engines_lock:
+        engines = [eng for (k, _setup), eng in _ai_engines.items() if k == key]
+    for eng in engines:
+        try:
+            eng.on_candle(candle)
+        except Exception:
+            logger.exception("AI setup engine on_candle failed for %s", key)
+
+
+# ── First-Candle Fibonacci Swing wiring ────────────────────────────────────────
+# The FibonacciSwingEngine needs the live "Math Console Score" + "Momentum" at the
+# moment each 1-minute NIFTY-future candle closes. Those live in the module-level
+# ``market_state`` dict (refreshed every publish beat by _refresh_market_state), so
+# a cheap provider closure reads them directly from the CVD worker thread.
+_fib_engine: "FibonacciSwingEngine | None" = None
+
+
+def _day_gamma_trend() -> str:
+    """Day Gamma direction from the live Net GEX sign.
+
+    Returns ``"POSITIVE"`` when dealers are net long gamma (``net_gex`` > 0),
+    ``"NEGATIVE"`` when net short (``net_gex`` < 0), and ``"NEUTRAL"`` otherwise
+    (no data / flat). Falls back to the bounded ``net_gex_ratio`` when ``net_gex``
+    is unavailable.
+    """
+    gex = market_state.get("net_gex")
+    if gex is None:
+        gex = market_state.get("net_gex_ratio", 0.0)
+    try:
+        value = float(gex)
+    except (TypeError, ValueError):
+        return "NEUTRAL"
+    if value > 0:
+        return "POSITIVE"
+    if value < 0:
+        return "NEGATIVE"
+    return "NEUTRAL"
+
+
+def _fib_context() -> dict:
+    """Return the live score/momentum/day-gamma for the Fibonacci swing filters."""
+    return {
+        "score": market_state.get("score", 50.0),
+        "momentum": market_state.get("momentum", 0.0),
+        "day_gamma_trend": _day_gamma_trend(),
+    }
+
+
+def _route_fib_candle(candle: dict) -> None:
+    """Route a closed 1-minute NIFTY-future candle to the Fibonacci swing engine."""
+    if _fib_engine is None or not isinstance(candle, dict):
+        return
+    try:
+        _fib_engine.on_candle(candle)
+    except Exception:
+        logger.exception("Fibonacci swing engine on_candle failed")
+
+
+# ── First-Candle base backfill (historical REST) ───────────────────────────────
+# When the worker starts after the 09:15-09:16 opening candle has closed, the live
+# tick stream can never reconstruct it (Upstox does not replay ticks). Fetch the
+# closed 1-minute candle for 09:15-09:16 IST from the historical-candle endpoint and
+# install it as the engine's immutable base, so the fib levels anchor to the TRUE
+# opening range instead of whatever candle happens to close first after startup.
+HISTORICAL_CANDLE_URL = "https://api.upstox.com/v2/historical-candle"
+OPENING_CANDLE_INTERVAL = "1minute"
+OPENING_CANDLE_HOUR = 9
+OPENING_CANDLE_MINUTE = 15
+
+
+def fetch_opening_base_candle(
+    token: str,
+    instrument_key: str = INDEX_INSTRUMENT_KEY,
+    session_date: date | None = None,
+) -> tuple[float, float, date] | None:
+    """Fetch the 09:15-09:16 IST 1-minute candle for ``session_date`` (default today).
+
+    Returns ``(high, low, session_date)``, or ``None`` when the candle is not yet
+    available (pre-open), today is a holiday, or the API errors. This is a blocking
+    ``requests`` call — run it via an executor, never on the asyncio event loop.
+    """
+    if session_date is None:
+        session_date = datetime.now(IST).date()
+    safe_key = urllib.parse.quote(instrument_key, safe="")
+    # Fetch from the prior day through ``session_date`` so a single-day request never
+    # returns an empty window; the exact 09:15 candle is selected below.
+    start_date = session_date - timedelta(days=1)
+    url = (
+        f"{HISTORICAL_CANDLE_URL}/{safe_key}/{OPENING_CANDLE_INTERVAL}/"
+        f"{session_date.isoformat()}/{start_date.isoformat()}"
+    )
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        logger.warning("⚠️ Opening base candle backfill request failed: %s", exc)
+        return None
+
+    candles = ((payload or {}).get("data") or {}).get("candles") if isinstance(payload, dict) else None
+    if not candles:
+        return None
+
+    for candle in candles:
+        if not isinstance(candle, (list, tuple)) or len(candle) < 5:
+            continue
+        try:
+            ts = datetime.fromisoformat(str(candle[0]))
+        except (TypeError, ValueError):
+            continue
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=IST)
+        else:
+            ts = ts.astimezone(IST)
+        if ts.date() != session_date:
+            continue
+        if ts.hour != OPENING_CANDLE_HOUR or ts.minute != OPENING_CANDLE_MINUTE:
+            continue
+        try:
+            high = float(candle[2])
+            low = float(candle[3])
+        except (TypeError, ValueError):
+            continue
+        if high > low:
+            logger.info(
+                "📥 Backfilled opening base candle %s: high=%.2f low=%.2f",
+                candle[0], high, low,
+            )
+            return high, low, ts.date()
+    return None
+
+
 def _compute_macro_metrics(instrument_data=None) -> dict:
     """Whole-chain OI / volume aggregates for the ``TOTAL OPTION CHAIN (MACRO)`` panel.
 
@@ -2342,7 +2642,7 @@ def _parse_cvd_symbols():
     return {s.strip() for s in raw.split(",") if s.strip()}
 
 
-def build_streamer(token: str, instrument_keys: list[str], expiry_date: date, loop: asyncio.AbstractEventLoop, cvd_engine=None, future_key=None) -> MarketDataStreamerV3:
+def build_streamer(token: str, instrument_keys: list[str], expiry_date: date, loop: asyncio.AbstractEventLoop, cvd_engine=None, future_key=None, ai_option_cvd=None, fib_cvd=None) -> MarketDataStreamerV3:
     config = Configuration()
     config.access_token = token
     api_client = ApiClient(configuration=config)
@@ -2392,6 +2692,14 @@ def build_streamer(token: str, instrument_keys: list[str], expiry_date: date, lo
         # CVD: parse the same envelope and enqueue ticks (non-blocking, WS-thread safe).
         if cvd_engine is not None:
             cvd_engine.ingest_upstox_message(message)
+        # AI Trade Setups: feed the SAME envelope into the option-candle engine so the
+        # ATM CE/PE premiums are bucketed into 1-minute candles for confirmation.
+        if ai_option_cvd is not None:
+            ai_option_cvd.ingest_upstox_message(message)
+        # First-Candle Fibonacci Swing: feed the SAME envelope into its dedicated
+        # 1-minute NIFTY-future candle engine.
+        if fib_cvd is not None:
+            fib_cvd.ingest_upstox_message(message)
         asyncio.run_coroutine_threadsafe(update_live_state_from_message(message), loop)
 
     def on_error(*args):
@@ -2576,7 +2884,70 @@ async def run_streamer(instrument_keys: list[str], expiry_date: date) -> None:
     else:
         logger.info("📊 CVD engine started — tracking ALL instruments.")
 
-    streamer = build_streamer(token, instrument_keys, expiry_date, loop, cvd_engine=cvd_engine, future_key=nifty_future_key)
+    # ── AI Trade Setup option-candle confirmation engine ───────────────────────
+    # A second CVDEngine instance dedicated to the ATM CE/PE option premiums. It
+    # reuses the proven worker-thread + 1-minute Pandas resampling, but publishes
+    # nothing to Redis (publish=False) and routes each closed option candle to the
+    # CandleConfirmationEngine instances instead of recording cumulative CVD.
+    ai_option_cvd = CVDEngine(
+        candle_seconds=AI_SETUP_CANDLE_SECONDS,
+        trend_periods=3,
+        symbol_allowlist=set(),
+        on_candle=_route_ai_option_candle,
+        publish=False,
+    )
+    ai_option_cvd.start()
+    _refresh_ai_engines(ai_option_cvd)
+    logger.info("🤖 AI Trade Setup confirmation engine started (1m option candles).")
+
+    # ── First-Candle Fibonacci Swing engine ─────────────────────────────────────
+    # A third CVDEngine instance dedicated to the NIFTY index spot at 1-minute
+    # granularity, so the 09:15-09:16 opening candle becomes the base range. Each
+    # closed index candle is routed to FibonacciSwingEngine, which evaluates the fib
+    # levels and dispatches trade_triggers through the existing ai:trade_trigger
+    # Redis channel (via dispatch_trade_trigger()).
+    global _fib_engine
+    _fib_engine = FibonacciSwingEngine(
+        symbol=INDEX_INSTRUMENT_KEY,
+        context_provider=_fib_context,
+        dispatch=True,
+    )
+    # Backfill the TRUE 09:15-09:16 opening candle when the worker started after
+    # market open. The live tick stream cannot replay it, so this is the only way to
+    # anchor the fib levels to the real first-candle range on a late start. When the
+    # candle isn't available yet (pre-open / holiday / API error) the engine falls
+    # back to capturing the first live candle exactly as before, so startup never
+    # blocks or fails on a backfill problem.
+    try:
+        backfill = await loop.run_in_executor(
+            None,
+            fetch_opening_base_candle,
+            token,
+            INDEX_INSTRUMENT_KEY,
+            datetime.now(IST).date(),
+        )
+        if backfill is not None:
+            base_high, base_low, base_day = backfill
+            _fib_engine.set_base(base_high, base_low, base_day)
+        else:
+            logger.info("📭 Opening base candle not available yet — awaiting live first-candle capture.")
+    except Exception as exc:
+        logger.warning("⚠️ Opening base candle backfill failed (%s); falling back to live capture.", exc)
+
+    fib_cvd = CVDEngine(
+        candle_seconds=FIB_SWING_CANDLE_SECONDS,
+        trend_periods=3,
+        symbol_allowlist={INDEX_INSTRUMENT_KEY},
+        on_candle=_route_fib_candle,
+        publish=False,
+    )
+    fib_cvd.start()
+    logger.info(
+        "📈 Fibonacci swing engine started (1m candles over index spot %s).",
+        INDEX_INSTRUMENT_KEY,
+    )
+
+    streamer = build_streamer(token, instrument_keys, expiry_date, loop, cvd_engine=cvd_engine, ai_option_cvd=ai_option_cvd, future_key=nifty_future_key, fib_cvd=fib_cvd)
     logger.info(f"🔌 Connecting to Upstox live feed for {len(instrument_keys) + 1} instruments (options + index spot)...")
     streamer.connect()
 
@@ -2585,6 +2956,10 @@ async def run_streamer(instrument_keys: list[str], expiry_date: date) -> None:
     try:
         while not is_shutdown_requested():
             await asyncio.sleep(1)
+
+            # Keep the ATM CE/PE engines + option-candle allowlist in sync as the
+            # spot drifts (cheap + idempotent; engines retain their candle history).
+            _refresh_ai_engines(ai_option_cvd)
 
             # --- NIFTY future rollover watch (monthly contract swap) ----------
             if time.monotonic() - last_future_check >= FUTURE_ROLLOVER_CHECK_SECONDS:
@@ -2643,6 +3018,8 @@ async def run_streamer(instrument_keys: list[str], expiry_date: date) -> None:
             except Exception:
                 pass
         cvd_engine.stop()
+        ai_option_cvd.stop()
+        fib_cvd.stop()
 
 
 async def main() -> None:

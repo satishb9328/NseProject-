@@ -7,8 +7,9 @@ heavy MTF/parquet calculations owned by ``build_daily_trend_setups``.
     python manage.py update_live_sniper
 """
 from django.core.management.base import BaseCommand
+from django.utils import timezone
 
-from Nse_Project.funda_fetch.models import TrendSetup
+from Nse_Project.funda_fetch.models import LiveSignal, TrendSetup
 
 # Live 2H "Sniper" bridge (live_ml_scanner.py in this same app). Imported
 # defensively so the command still runs if the scanner is missing.
@@ -18,21 +19,27 @@ except Exception:  # noqa: BLE001
     run_live_scanner = None
 
 
-def get_live_sniper_alerts() -> dict:
-    """Return a ``{SYMBOL: pattern_label}`` map from the 2H live sniper bot."""
+def get_live_sniper_result() -> dict:
+    """Return the scanner result, including both 2H and Mega Reversal signals."""
     if run_live_scanner is None:
         return {}
 
     try:
         result = run_live_scanner()
-        signals = result.get("signals", []) if isinstance(result, dict) else []
-        return {
-            str(a.get("symbol", "")).strip().upper(): a.get("pattern")
-            for a in signals
-            if a.get("symbol") and a.get("pattern")
-        }
+        return result if isinstance(result, dict) else {}
     except Exception:  # noqa: BLE001
         return {}
+
+
+def get_live_sniper_alerts() -> dict:
+    """Return a ``{SYMBOL: pattern_label}`` map from the 2H live sniper bot."""
+    result = get_live_sniper_result()
+    signals = result.get("signals", [])
+    return {
+        str(alert.get("symbol", "")).strip().upper(): alert.get("pattern")
+        for alert in signals
+        if alert.get("symbol") and alert.get("pattern")
+    }
 
 
 class Command(BaseCommand):
@@ -41,7 +48,14 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         self.stdout.write("Scanning live 2H sniper patterns (Upstox) ...")
-        live_alerts = get_live_sniper_alerts()
+        result = get_live_sniper_result()
+        signals = result.get("signals", [])
+        mega_signals = result.get("mega_reversal_signals", [])
+        live_alerts = {
+            str(alert.get("symbol", "")).strip().upper(): alert.get("pattern")
+            for alert in signals
+            if alert.get("symbol") and alert.get("pattern")
+        }
         self.stdout.write(f"  -> {len(live_alerts)} live sniper patterns found.")
 
         changed = []
@@ -57,3 +71,19 @@ class Command(BaseCommand):
                 f"Updated live_sniper_pattern on {len(changed)} rows."))
         else:
             self.stdout.write("No live sniper pattern changes.")
+
+        today = timezone.localdate()
+        created_count = 0
+        for signal in mega_signals:
+            _, created = LiveSignal.objects.get_or_create(
+                stock_symbol=str(signal["symbol"]).strip().upper(),
+                signal_type=signal.get("signal_type", "Mega Reversal"),
+                date=today,
+                defaults={
+                    "trigger_price": signal["trigger_price"],
+                    "weekly_midline": signal["weekly_midline"],
+                },
+            )
+            created_count += int(created)
+
+        self.stdout.write(f"  -> {created_count} new Mega Reversal signals saved.")

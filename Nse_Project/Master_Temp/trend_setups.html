@@ -41,6 +41,32 @@
     </div>
     {% endfor %}
   </section>
+  <section class="mb-8">
+    <button
+      id="show-live-signals"
+      type="button"
+      class="rounded-lg border border-neon-green/40 bg-neon-green/10 px-4 py-2 text-sm font-semibold text-neon-green hover:bg-neon-green/20"
+      aria-expanded="false"
+      aria-controls="live-signals-panel">
+      Show Live Signals
+    </button>
+
+    <div id="live-signals-panel" class="glass mt-4 hidden overflow-x-auto rounded-2xl border border-ink-700/60">
+      <p id="live-signals-message" class="px-4 py-4 text-sm text-slate-400" role="status"></p>
+      <table id="live-signals-table" class="hidden w-full text-sm">
+        <thead>
+          <tr class="border-b border-ink-700/70 text-left text-[11px] uppercase tracking-wider text-slate-500">
+            <th class="px-4 py-3">Symbol</th>
+            <th class="px-4 py-3">Signal</th>
+            <th class="px-4 py-3 text-right">Trigger Price</th>
+            <th class="px-4 py-3 text-right">Weekly Midline</th>
+            <th class="px-4 py-3">Time</th>
+          </tr>
+        </thead>
+        <tbody id="live-signals-body"></tbody>
+      </table>
+    </div>
+  </section>
   <!-- Grouped tables -->
   {% for section in sections %}
   <section id="table-{{ section.category|slugify }}" class="mb-10 scroll-mt-24">
@@ -131,6 +157,60 @@
       });
     });
   })();
+
+  document.getElementById("show-live-signals").addEventListener("click", async function () {
+    var panel = document.getElementById("live-signals-panel");
+    var message = document.getElementById("live-signals-message");
+    var table = document.getElementById("live-signals-table");
+    var body = document.getElementById("live-signals-body");
+
+    panel.classList.remove("hidden");
+    this.setAttribute("aria-expanded", "true");
+    message.textContent = "Loading today's live signals...";
+    table.classList.add("hidden");
+    body.replaceChildren();
+
+    try {
+      var response = await fetch("{% url 'live_signals_today' %}", {
+        headers: { "Accept": "application/json" }
+      });
+      if (!response.ok) {
+        throw new Error("Request failed (" + response.status + ")");
+      }
+
+      var data = await response.json();
+      var rows = data.signals || [];
+      if (rows.length === 0) {
+        message.textContent = "No live signals have been recorded today.";
+        return;
+      }
+
+      rows.forEach(function (signal) {
+        var row = document.createElement("tr");
+        row.className = "border-b border-ink-800/60";
+        [
+          signal.stock_symbol,
+          signal.signal_type,
+          signal.trigger_price,
+          signal.weekly_midline,
+          new Date(signal.created_at).toLocaleTimeString()
+        ].forEach(function (value, index) {
+          var cell = document.createElement("td");
+          cell.className = index === 2 || index === 3
+            ? "px-4 py-3 text-right font-mono text-slate-200"
+            : "px-4 py-3 text-slate-200";
+          cell.textContent = value;
+          row.appendChild(cell);
+        });
+        body.appendChild(row);
+      });
+
+      message.textContent = "";
+      table.classList.remove("hidden");
+    } catch (error) {
+      message.textContent = "Could not load live signals. Please try again.";
+      console.error("Live signals request failed:", error);
+    }
+  });
 </script>
 {% endblock %}
-

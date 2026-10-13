@@ -346,10 +346,93 @@ class PreopenTrapConsumer(AsyncWebsocketConsumer):
         )
 
 
+# ---------------------------------------------------------------------------
+# AI TRADE SETUP bridge + consumer
+# ---------------------------------------------------------------------------
+# The AI candle-confirmation engine (wired into the standalone feed worker
+# ``upstox_live_feed.py``) publishes each BUY_NOW trigger to the raw Redis channel
+# ``ai:trade_trigger``. This mirrors the CVD / pre-open bridges: one lightweight
+# thread subscribes to that channel and re-broadcasts every payload into the
+# Channels group ``ai_trade_setups``, which ``AITradeTriggerConsumer`` joins.
+AI_TRADE_REDIS_URL = os.getenv("AI_TRADE_REDIS_URL", "redis://127.0.0.1:6379/0")
+AI_TRADE_REDIS_CHANNEL = os.getenv("AI_TRADE_REDIS_CHANNEL", "ai:trade_trigger")
+
+_ai_trade_bridge_started = False
+_ai_trade_bridge_lock = threading.Lock()
+
+
+def _dispatch_ai_trade_to_group(trigger: dict) -> None:
+    """Forward a parsed AI trade trigger into the Channels broadcast group."""
+    layer = get_channel_layer()
+    if layer is None:
+        return
+    async_to_sync(layer.group_send)(
+        AI_TRADE_GROUP, {"type": "trade.trigger", "trigger": trigger}
+    )
+
+
+def _ai_trade_bridge_loop() -> None:
+    """Subscribe to the raw Redis channel and re-publish into the Channels group."""
+    if redis is None:
+        logger.warning("redis-py is not installed; AI trade bridge disabled.")
+        return
+    while True:
+        client = None
+        try:
+            client = redis.Redis.from_url(
+                AI_TRADE_REDIS_URL,
+                decode_responses=True,
+                health_check_interval=REDIS_HEALTH_CHECK_INTERVAL,
+                socket_timeout=REDIS_SOCKET_TIMEOUT,
+                socket_connect_timeout=REDIS_SOCKET_CONNECT_TIMEOUT,
+                socket_keepalive=True,
+            )
+            pubsub = client.pubsub()
+            pubsub.subscribe(AI_TRADE_REDIS_CHANNEL)
+            for message in pubsub.listen():
+                if message.get("type") != "message":
+                    continue
+                raw = message.get("data")
+                try:
+                    trigger = json.loads(raw) if isinstance(raw, str) else {}
+                except (TypeError, ValueError):
+                    continue
+                if trigger:
+                    _dispatch_ai_trade_to_group(trigger)
+        except redis.exceptions.TimeoutError:
+            logger.warning("AI trade Redis bridge timed out; reconnecting in 2s...")
+        except redis.exceptions.RedisError as exc:
+            logger.warning("AI trade Redis bridge error (%s); reconnecting in 2s...", exc)
+        except Exception:
+            logger.exception("AI trade Redis bridge unexpected error; reconnecting in 2s...")
+        finally:
+            if client is not None:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+        time.sleep(2)
+
+
+def start_ai_trade_bridge() -> None:
+    """Start the AI trade bridge thread once per process (idempotent)."""
+    global _ai_trade_bridge_started
+    with _ai_trade_bridge_lock:
+        if _ai_trade_bridge_started:
+            return
+        _ai_trade_bridge_started = True
+    thread = threading.Thread(target=_ai_trade_bridge_loop, name="ai-trade-redis-bridge", daemon=True)
+    thread.start()
+    logger.info("AI trade Redis bridge thread started.")
+
+
 class AITradeTriggerConsumer(AsyncWebsocketConsumer):
     """Streams AI trade-setup BUY_NOW triggers to the dashboard over WebSocket."""
 
     async def connect(self):
+        # Ensure the raw-Redis -> group bridge is running (single instance per process).
+        start_ai_trade_bridge()
+
         if self.channel_layer is not None:
             await self.channel_layer.group_add(AI_TRADE_GROUP, self.channel_name)
         await self.accept()

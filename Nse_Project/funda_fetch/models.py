@@ -6,6 +6,7 @@ background. The web view only reads this table, so the dashboard renders in
 sub-seconds.
 """
 from django.db import models
+from django.utils import timezone
 
 
 class TrendSetup(models.Model):
@@ -46,3 +47,19 @@ class TrendSetup(models.Model):
 
     def __str__(self):
         return f"{self.symbol} — {self.setup_category}"
+
+
+class LiveSignal(models.Model):
+    stock_symbol = models.CharField(max_length=50)
+    signal_type = models.CharField(max_length=64, default="Mega Reversal")
+    trigger_price = models.DecimalField(max_digits=12, decimal_places=2)
+    weekly_midline = models.DecimalField(max_digits=12, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+    date = models.DateField(default=timezone.localdate, db_index=True)
+
+    class Meta:
+        unique_together = ("stock_symbol", "signal_type", "date")
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.stock_symbol} — {self.signal_type} — {self.date}"

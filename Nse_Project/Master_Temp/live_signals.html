@@ -365,6 +365,19 @@
               <div id="suppres-signal-box" class="col-span-2 mt-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-center text-xs font-bold uppercase tracking-wider text-amber-300">🟡 WAITING</div>
             </div>
           </div>
+          <div class="rounded-lg border border-fuchsia-500/30 bg-fuchsia-950/20 p-3 lg:col-span-2">
+            <p class="mb-2 text-sm font-bold uppercase tracking-wider text-fuchsia-300">📐 FIRST CANDLE FIB SWING</p>
+            <div class="grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm sm:grid-cols-4">
+              <span class="uppercase tracking-wider text-slate-500">Entry</span><span id="fib-entry" class="text-right font-mono font-semibold text-slate-50">--</span>
+              <span class="uppercase tracking-wider text-slate-500">SL</span><span id="fib-sl" class="text-right font-mono font-semibold text-rose-300">--</span>
+              <span class="uppercase tracking-wider text-slate-500">Target 1</span><span id="fib-t1" class="text-right font-mono font-semibold text-emerald-300">--</span>
+              <span class="uppercase tracking-wider text-slate-500">Target 2</span><span id="fib-t2" class="text-right font-mono font-semibold text-emerald-300">--</span>
+            </div>
+            <div class="mt-2 flex items-center justify-between gap-3">
+              <span id="fib-setup-label" class="text-xs uppercase tracking-wider text-slate-500">Setup: --</span>
+              <div id="fib-signal-box" class="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-center text-xs font-bold uppercase tracking-wider text-amber-300">🟡 WAITING</div>
+            </div>
+          </div>
         </div>
         <div id="math-console" class="mt-1.5 min-h-[120px] rounded-lg border border-cyan-800/50 bg-black/50 p-2 font-mono text-[11px] leading-5">
           <div class="mb-0.5 flex items-center justify-between border-b border-slate-800 pb-0.5">
@@ -1515,6 +1528,11 @@
   const resolveBox = (setupType) => {
     const t = String(setupType || "").toLowerCase();
     if (t.includes("momentum")) return "momentum-signal-box";
+    // First-Candle Fibonacci Swing: "Day Low Rejection" (CE), "Fib Extension
+    // Trap" (PE) and the gamma-gated Trend Retracement setups ("Bullish Bounce" /
+    // "Bearish Reject") all map to the dedicated fib card. Check BEFORE the generic
+    // "trap" fallback below so "Fib Extension Trap" doesn't land on Supp/Res.
+    if (t.includes("fib") || t.includes("day low rejection") || t.includes("bounce") || t.includes("reject")) return "fib-signal-box";
     if (t.includes("supp") || t.includes("trap")) return "suppres-signal-box";
     return null;
   };
@@ -1535,6 +1553,33 @@
     box.textContent = label;
     [...WAITING_CLASSES, ...CE_CLASSES, ...PE_CLASSES].forEach((cls) => box.classList.remove(cls));
     classes.forEach((cls) => box.classList.add(cls));
+  }
+
+  function setFibText(id, value) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (value === null || value === undefined || value === "") { el.textContent = "--"; return; }
+    const n = Number(value);
+    el.textContent = Number.isFinite(n) ? n.toFixed(2) : String(value);
+  }
+
+  // The fib card carries full trade math (entry / SL / T1 / T2) from the payload.
+  function setFibSignal(msg) {
+    const box = document.getElementById("fib-signal-box");
+    const side = String(msg.option_side || "CE").toUpperCase();
+    const label = side === "PE" ? BUY_PE : BUY_CE;
+    const classes = side === "PE" ? PE_CLASSES : CE_CLASSES;
+    if (box) {
+      box.textContent = label;
+      [...WAITING_CLASSES, ...CE_CLASSES, ...PE_CLASSES].forEach((cls) => box.classList.remove(cls));
+      classes.forEach((cls) => box.classList.add(cls));
+    }
+    setFibText("fib-entry", msg.entry_price);
+    setFibText("fib-sl", msg.stop_loss);
+    setFibText("fib-t1", msg.target_1);
+    setFibText("fib-t2", msg.target_2);
+    const labelEl = document.getElementById("fib-setup-label");
+    if (labelEl) labelEl.textContent = msg.setup_type ? ("Setup: " + msg.setup_type) : "Setup: --";
   }
 
   let audioCtx = null;
@@ -1567,7 +1612,11 @@
       if (!msg || msg.action !== "trade_trigger" || msg.status !== "BUY_NOW") return;
       const boxId = resolveBox(msg.setup_type);
       if (!boxId) return;
-      setSignal(boxId, true, msg.option_side);
+      if (boxId === "fib-signal-box") {
+        setFibSignal(msg);
+      } else {
+        setSignal(boxId, true, msg.option_side);
+      }
       beep();
     };
     ws.onclose = () => {

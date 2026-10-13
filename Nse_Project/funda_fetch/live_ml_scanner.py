@@ -41,9 +41,132 @@ warnings.filterwarnings("ignore")
 TOKEN_FILE_PATH = r"C:\Users\ADMIN\Desktop\MyProject2\Nse_Project\Brokers\upstox\upstox_v3_token.json"
 HISTORY_DIR = r"D:\Api data\ML_HISTO_DATA\Upstox Data\5M Data"
 MASTER_CSV_PATH = r"C:\Users\ADMIN\Desktop\MyProject2\Nse_Project\funda_fetch\master_trend_setups.csv"
+WEEKLY_HISTORY_DIR = r"D:\Api data\ML_HISTO_DATA\Upstox Data\Weeks Data"
+ISIN_MAP_PATH = os.path.join(os.path.dirname(MASTER_CSV_PATH), "ind_nifty500list.csv")
 
 EMA_SPAN = 50        # 2H_EMA_50
 EMA_MARGIN = 0.015   # ±1.5% proximity band around the EMA (support zone)
+WEEKLY_BB20_PERIOD = 20
+
+
+def load_symbol_isin_map() -> dict[str, str]:
+    """Load the symbol-to-ISIN map used to locate weekly Upstox history."""
+    if not os.path.exists(ISIN_MAP_PATH):
+        return {}
+
+    universe = pd.read_csv(ISIN_MAP_PATH)
+    universe.columns = [str(column).strip() for column in universe.columns]
+    symbol_col = next(
+        (column for column in universe.columns if column.lower() == "symbol"),
+        None,
+    )
+    isin_col = next(
+        (column for column in universe.columns if "isin" in column.lower()),
+        None,
+    )
+    if symbol_col is None or isin_col is None:
+        return {}
+
+    return {
+        str(symbol).strip().upper(): str(isin).strip()
+        for symbol, isin in zip(universe[symbol_col], universe[isin_col])
+        if pd.notna(symbol) and pd.notna(isin)
+    }
+
+
+def load_weekly_bb20_midline(
+    symbol: str,
+    isin_map: dict[str, str],
+    as_of: datetime.date | None = None,
+) -> float | None:
+    """Calculate the 20-week SMA using completed weekly candles only."""
+    isin = isin_map.get(symbol.upper())
+    candidates = []
+    if isin:
+        candidates.extend([
+            os.path.join(WEEKLY_HISTORY_DIR, f"NSE_EQ_{isin}.parquet"),
+            os.path.join(WEEKLY_HISTORY_DIR, f"NSE_EQ_{isin}.csv"),
+            os.path.join(WEEKLY_HISTORY_DIR, f"{isin}.parquet"),
+            os.path.join(WEEKLY_HISTORY_DIR, f"{isin}.csv"),
+        ])
+    candidates.extend([
+        os.path.join(WEEKLY_HISTORY_DIR, f"{symbol}.parquet"),
+        os.path.join(WEEKLY_HISTORY_DIR, f"{symbol}.csv"),
+    ])
+    weekly_path = next((path for path in candidates if os.path.exists(path)), None)
+    if weekly_path is None:
+        return None
+
+    weekly = (
+        pd.read_parquet(weekly_path)
+        if weekly_path.lower().endswith(".parquet")
+        else pd.read_csv(weekly_path)
+    )
+    weekly.columns = [
+        str(column).strip().split("(")[0].strip().lower()
+        for column in weekly.columns
+    ]
+    close_col = next(
+        (column for column in ("close", "c", "last", "ltp") if column in weekly.columns),
+        None,
+    )
+    date_col = next(
+        (column for column in ("timestamp", "date", "datetime", "time")
+         if column in weekly.columns),
+        None,
+    )
+    if close_col is None or date_col is None:
+        return None
+
+    weekly[date_col] = pd.to_datetime(weekly[date_col], errors="coerce")
+    weekly[close_col] = pd.to_numeric(weekly[close_col], errors="coerce")
+    weekly = weekly.dropna(subset=[date_col, close_col]).sort_values(date_col)
+    if weekly.empty:
+        return None
+
+    as_of = as_of or datetime.date.today()
+    week_periods = weekly[date_col].dt.to_period("W-SUN")
+    current_period = pd.Timestamp(as_of).to_period("W-SUN")
+    if as_of.weekday() >= 5:
+        completed_closes = weekly.loc[week_periods <= current_period, close_col]
+    else:
+        completed_closes = weekly.loc[week_periods < current_period, close_col]
+    if len(completed_closes) < WEEKLY_BB20_PERIOD:
+        return None
+
+    midline = completed_closes.rolling(WEEKLY_BB20_PERIOD).mean().iloc[-1]
+    return float(midline) if pd.notna(midline) else None
+
+
+def previous_session_close(
+    df: pd.DataFrame,
+    session_date: datetime.date,
+) -> float | None:
+    """Return the final available close before the current trading date."""
+    if df.empty or "Datetime" not in df.columns or "Close" not in df.columns:
+        return None
+
+    timestamps = pd.to_datetime(df["Datetime"], errors="coerce")
+    previous_rows = df.loc[timestamps.dt.date < session_date]
+    if previous_rows.empty:
+        return None
+    return float(previous_rows["Close"].iloc[-1])
+
+
+def qualifies_mega_reversal(
+    prev_close: float,
+    live_ltp: float,
+    weekly_midline: float,
+) -> bool:
+    """Check the previous-close reclaim and 3% maximum-extension conditions."""
+    values = (prev_close, live_ltp, weekly_midline)
+    if not all(np.isfinite(value) for value in values) or weekly_midline <= 0:
+        return False
+    return (
+        prev_close < weekly_midline
+        and live_ltp >= weekly_midline
+        and live_ltp <= weekly_midline * 1.03
+    )
 
 # =====================================================================
 # UPSTOX AUTH / INSTRUMENTS
@@ -280,6 +403,7 @@ def main() -> dict:
         _print_table([])
         return {"signals": [], "total_count": 0}
 
+    isin_map = load_symbol_isin_map()
     files = sorted(
         f for f in os.listdir(HISTORY_DIR)
         if f.endswith("_5m.parquet")
@@ -289,6 +413,8 @@ def main() -> dict:
           f"(EMA50 ±{EMA_MARGIN * 100:.1f}% support zone)...\n")
 
     alerts: list[dict] = []
+    mega_reversal_signals: list[dict] = []
+    today = datetime.date.today()
 
     for file in files:
         symbol = file.replace("_5m.parquet", "")
@@ -309,6 +435,39 @@ def main() -> dict:
                 df_combined = df_hist
 
             df_combined = df_combined.sort_values("Datetime").reset_index(drop=True)
+
+            # Mega Reversal uses the latest fetched 1-minute close as the live
+            # price; the existing 2H pattern scan below remains unchanged.
+            if not df_live_1m.empty:
+                latest_live_time = pd.to_datetime(
+                    df_live_1m["Datetime"].iloc[-1], errors="coerce"
+                )
+                live_ltp = (
+                    float(df_live_1m["Close"].iloc[-1])
+                    if pd.notna(latest_live_time) and latest_live_time.date() == today
+                    else None
+                )
+            else:
+                live_ltp = None
+
+            prev_close = previous_session_close(df_combined, today)
+            try:
+                weekly_midline = load_weekly_bb20_midline(symbol, isin_map, today)
+            except Exception as exc:  # Keep weekly-data failures from skipping 2H scans.
+                print(f"[WARN] {symbol}: could not load weekly BB20 data: {exc}")
+                weekly_midline = None
+            if (
+                live_ltp is not None
+                and prev_close is not None
+                and weekly_midline is not None
+                and qualifies_mega_reversal(prev_close, live_ltp, weekly_midline)
+            ):
+                mega_reversal_signals.append({
+                    "symbol": symbol,
+                    "signal_type": "Mega Reversal",
+                    "trigger_price": live_ltp,
+                    "weekly_midline": weekly_midline,
+                })
 
             df_2h = build_2h_frame(df_combined)
             if df_2h.empty:
@@ -338,7 +497,11 @@ def main() -> dict:
 
     _print_table(alerts)
 
-    return {"signals": alerts, "total_count": len(alerts)}
+    return {
+        "signals": alerts,
+        "total_count": len(alerts),
+        "mega_reversal_signals": mega_reversal_signals,
+    }
 
 
 if __name__ == "__main__":

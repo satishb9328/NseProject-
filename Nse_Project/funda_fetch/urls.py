@@ -6,4 +6,5 @@ from . import views
 # sidebar can reference the view directly with ``{% url 'trend_setups' %}``.
 urlpatterns = [
     path("", views.trend_setups_view, name="trend_setups"),
+    path("live-signals/", views.live_signals_today, name="live_signals_today"),
 ]

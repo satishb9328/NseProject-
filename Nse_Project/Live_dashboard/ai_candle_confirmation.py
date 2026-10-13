@@ -35,6 +35,7 @@ The pure detectors are stdlib-only and safe to unit-test without Django.
 from __future__ import annotations
 
 import logging
+import os
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
@@ -54,6 +55,10 @@ BEAR_PIN_BAR_LOWER_WICK_FRAC = 0.35  # lower wick <= 35% of the whole range
 # Django Channels group + message type (must match the consumer + routing).
 AI_TRADE_GROUP = "ai_trade_setups"
 TRIGGER_MESSAGE_TYPE = "trade.trigger"
+# Redis Pub/Sub the feed worker publishes trade triggers to. A bridge thread in
+# ``Live_dashboard.consumers`` re-broadcasts them into the AI_TRADE_GROUP group.
+AI_TRADE_REDIS_URL = os.getenv("AI_TRADE_REDIS_URL", "redis://127.0.0.1:6379/0")
+AI_TRADE_REDIS_CHANNEL = os.getenv("AI_TRADE_REDIS_CHANNEL", "ai:trade_trigger")
 
 __all__ = [
     "ConfirmationResult",
@@ -333,23 +338,27 @@ def evaluate_confirmation(
 
 # ── WebSocket dispatch ────────────────────────────────────────────────────────
 def dispatch_trade_trigger(trigger: Dict[str, Any]) -> bool:
-    """Push a trade trigger to every browser in the ``ai_trade_setups`` group."""
+    """Publish a trade trigger for the AI Trade Setups card.
+
+    The feed worker (``upstox_live_feed.py``) is a STANDALONE process, so it cannot
+    use Django Channels' in-process ``group_send`` (``get_channel_layer`` would
+    raise ``ImproperlyConfigured`` there). It instead publishes to a raw Redis
+    Pub/Sub channel; a bridge thread inside the Django ASGI process
+    (``Live_dashboard.consumers``) re-broadcasts the payload into the
+    ``ai_trade_setups`` group, which ``AITradeTriggerConsumer`` forwards to every
+    connected browser as ``{action: trade_trigger, status: BUY_NOW, ...}``.
+    """
+    import json as _json
+
     try:
-        from channels.layers import get_channel_layer
-        from asgiref.sync import async_to_sync
+        import redis as _redis
     except ImportError:
-        logger.warning("Django Channels unavailable; trigger not dispatched: %s", trigger)
-        return False
-
-    layer = get_channel_layer()
-    if layer is None:
-        logger.warning("No channel layer configured; trigger not dispatched: %s", trigger)
+        logger.warning("redis-py unavailable; trigger not dispatched: %s", trigger)
         return False
 
     try:
-        async_to_sync(layer.group_send)(
-            AI_TRADE_GROUP, {"type": TRIGGER_MESSAGE_TYPE, "trigger": trigger}
-        )
+        client = _redis.Redis.from_url(AI_TRADE_REDIS_URL, decode_responses=True)
+        client.publish(AI_TRADE_REDIS_CHANNEL, _json.dumps(trigger, default=str))
         return True
     except Exception:
         logger.exception("Failed to dispatch AI trade trigger")
