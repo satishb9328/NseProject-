@@ -15,7 +15,7 @@ django.setup()
 from Preopen.models import PreopenSummary
 
 # CSV directory path (update as needed)
-csv_directory = r"C:\Users\ADMIN\Desktop\preopen"
+csv_directory = os.path.join(os.getcwd(), "preopen")
 
 IST = timezone(timedelta(hours=5, minutes=30))
 

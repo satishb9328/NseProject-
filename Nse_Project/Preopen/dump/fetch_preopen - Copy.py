@@ -14,7 +14,7 @@ def download_graph_csv():
 
     # Path to save the file. Keep this in sync with Live_dashboard.views.PREOPEN_TBT_DIR
     # via the shared PREOPEN_TBT_DIR env var so the backend always reads where we write.
-    save_dir = os.getenv("PREOPEN_TBT_DIR", r"C:\Users\ADMIN\Desktop\preopen")
+    save_dir = os.getenv("PREOPEN_TBT_DIR", os.path.join(os.getcwd(), "preopen"))
 
     # Create the folder if it doesn't exist
     if not os.path.exists(save_dir):

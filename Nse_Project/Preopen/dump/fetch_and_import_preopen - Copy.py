@@ -13,7 +13,7 @@ import pandas as pd
 
 # --- settings  ---
 project_root = r"C:\Users\ADMIN\Desktop\Api Project V SYNTH V\Api Project V 1" # మీ ప్రాజెక్ట్ రూట్ పాత్
-PREOPEN_CSV_DIR = r"C:\Users\ADMIN\Desktop\preopen"
+PREOPEN_CSV_DIR = os.path.join(os.getcwd(), "preopen")
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'myproject.settings') # మీ ప్రాజెక్ట్ పేరు ఇక్కడ ఇవ్వండి
 django.setup()
 
@@ -46,7 +46,7 @@ def import_preopen_data_to_db():
     # Ensure project root is in sys.path and set working directory
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     # Central location for preopen CSVs
-    PREOPEN_CSV_DIR = r"C:\Users\ADMIN\Desktop\preopen"
+    PREOPEN_CSV_DIR = os.path.join(os.getcwd(), "preopen")
     os.chdir(project_root)
     sys.path.insert(0, project_root)
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'myproject.settings')

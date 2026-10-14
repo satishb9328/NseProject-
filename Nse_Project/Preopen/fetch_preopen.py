@@ -32,7 +32,7 @@ except ImportError as exc:  # pragma: no cover - only hit if curl_cffi isn't ins
 
 # Keep this in sync with Live_dashboard.views.PREOPEN_TBT_DIR and
 # import_preopen_to_db.PREOPEN_CSV_DIR so the backend always reads where we write.
-SAVE_DIR = os.getenv("PREOPEN_TBT_DIR", r"C:\Users\ADMIN\Desktop\preopen")
+SAVE_DIR = os.getenv("PREOPEN_TBT_DIR", os.path.join(os.getcwd(), "preopen"))
 CSV_NAME = "nifty50_graph_data.csv"
 # Dated history copies are kept in this subfolder so the main folder stays clean
 # (only the active file) while every day's data is retained.

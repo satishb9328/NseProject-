@@ -9,7 +9,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 repository_root = os.path.dirname(project_root)
 # Central location for preopen CSVs (same env var the fetcher and dashboard use,
 # so the three can never point at different folders again).
-PREOPEN_CSV_DIR = os.getenv("PREOPEN_TBT_DIR", r"C:\Users\ADMIN\Desktop\preopen")
+PREOPEN_CSV_DIR = os.getenv("PREOPEN_TBT_DIR", os.path.join(os.getcwd(), "preopen"))
 os.chdir(project_root)
 sys.path.insert(0, repository_root)
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Nse_Project.settings')
