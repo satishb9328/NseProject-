@@ -14,7 +14,7 @@ from pathlib import Path
 import pandas as pd
 from dateutil import parser as dateutil_parser
 
-SOURCE_DIR = Path(os.path.join(os.getcwd(), "preopen"))
+SOURCE_DIR = Path(__file__).resolve().parent / "preopen"
 TARGET_DIR = Path(r"C:\Users\ADMIN\Desktop\Fari Preopen")
 FILE_EXTENSIONS = (".csv", ".txt")
 ENCODINGS_TO_TRY = ("utf-8-sig", "utf-8", "latin1")

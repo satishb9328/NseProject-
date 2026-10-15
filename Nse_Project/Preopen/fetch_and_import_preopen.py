@@ -11,13 +11,16 @@ import argparse
 import asyncio
 import os
 import sys
+from pathlib import Path
 
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+# Repository root (the folder that holds manage.py and the top-level preopen dir).
+# Derived from __file__ so it resolves identically on Windows (local) and Linux (Render).
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 os.chdir(PROJECT_ROOT)
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Nse_Project.settings')
 

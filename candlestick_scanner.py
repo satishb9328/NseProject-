@@ -338,7 +338,7 @@ class MTFCandleScanner:
         )
         if lookback < 1:
             raise ValueError("candlestick_scanner: lookback_days must be >= 1")
-
+        
         ema50 = self.daily_ema
         ema200 = self.daily_ema_200
 
@@ -461,26 +461,21 @@ def detect_fresh_golden_cross(
         lookback_days=lookback_days
     )
 
-
 def detect_weekly_hammer(df: pd.DataFrame, **kwargs) -> pd.Series:
     """Return a boolean Series of Weekly Bullish Hammer signals for ``df``."""
     return MTFCandleScanner(df, **kwargs).weekly_hammer()
-
 
 def detect_weekly_bullish_engulfing(df: pd.DataFrame, **kwargs) -> pd.Series:
     """Return a boolean Series of Weekly Bullish Engulfing signals for ``df``."""
     return MTFCandleScanner(df, **kwargs).weekly_bullish_engulfing()
 
-
 def detect_weekly_bearish_engulfing(df: pd.DataFrame, **kwargs) -> pd.Series:
     """Return a boolean Series of Weekly Bearish Engulfing signals for ``df``."""
     return MTFCandleScanner(df, **kwargs).weekly_bearish_engulfing()
 
-
 def scan_mtf_patterns(df: pd.DataFrame, **kwargs) -> pd.DataFrame:
     """Return a DataFrame of boolean pattern columns aligned to ``df.index``."""
     return MTFCandleScanner(df, **kwargs).scan()
-
 
 # ────────────────────────────────────────────────────────────────────────────────
 # SELF-TEST (run:  python candlestick_scanner.py)

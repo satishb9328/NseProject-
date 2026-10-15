@@ -2,6 +2,7 @@ import os
 import csv
 import django
 import sys
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import glob
 
@@ -14,8 +15,9 @@ django.setup()
 
 from Preopen.models import PreopenSummary
 
-# CSV directory path (update as needed)
-csv_directory = os.path.join(os.getcwd(), "preopen")
+# CSV directory path — anchored to the repo root so it works on Windows and Linux
+# regardless of the working directory.
+csv_directory = str(Path(__file__).resolve().parents[2] / "preopen")
 
 IST = timezone(timedelta(hours=5, minutes=30))
 

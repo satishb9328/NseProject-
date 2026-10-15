@@ -241,15 +241,41 @@ def calculate_net_volume(data_dict: dict) -> dict:
     return results
 
 
-def get_tomorrow_matrix(fii_oi_npf: float, fii_net_vol: float) -> tuple[str, str, str]:
-    """The core logic merging OI stance with Volume aggression."""
-    if fii_oi_npf < 0 and fii_net_vol > 0:
+def get_tomorrow_matrix(
+        fii_oi: float,
+        fii_vol: float,
+        pro_oi: float,
+        pro_vol: float,
+) -> tuple[str, str, str]:
+    """Merge FII/PRO positioning and volume, flagging material divergence."""
+    if fii_oi * pro_oi < 0:
+        smaller_position = min(abs(fii_oi), abs(pro_oi))
+        larger_position = max(abs(fii_oi), abs(pro_oi))
+        balanced_positions = (
+            smaller_position >= CFG.extreme_oi_threshold
+            and smaller_position / larger_position >= 0.5
+        )
+        if balanced_positions:
+            volume_context = (
+                " Both volume flows confirm their respective positions."
+                if fii_oi * fii_vol > 0 and pro_oi * pro_vol > 0
+                else " Volume does not fully confirm the opposing OI positions."
+            )
+            return (
+                "MIXED POSITIONING",
+                "⚖️ MIXED / NEUTRAL (FII/PRO divergence)",
+                "FII and PRO hold substantial opposing positions."
+                f"{volume_context} Avoid a directional trade until "
+                "positioning aligns.",
+            )
+
+    if fii_oi < 0 and fii_vol > 0:
         return "SHORT COVERING", "🟢 STRONG BULLISH (Gap-Up/Squeeze)", "FII were Short but bought heavily today. Trapped! Expect panic buying tomorrow. Buy CE at open/dips."
-    elif fii_oi_npf > 0 and fii_net_vol > 0:
+    elif fii_oi > 0 and fii_vol > 0:
         return "LONG BUILD-UP", "🟢 BULLISH (Continuation)", "Fresh buying alongside existing longs. Trend is strong. Buy CE on dips."
-    elif fii_oi_npf > 0 and fii_net_vol < 0:
+    elif fii_oi > 0 and fii_vol < 0:
         return "LONG UNWINDING", "🔴 BEARISH (Topping/Reversal)", "FII booking profits on longs. Upside capped. Buy PE on rallies."
-    elif fii_oi_npf < 0 and fii_net_vol < 0:
+    elif fii_oi < 0 and fii_vol < 0:
         return "ADDING SHORTS", "🔴 STRONG BEARISH (Breakdown)", "Fresh shorting alongside existing shorts. Do NOT buy CE. Buy PE on rallies."
     return "NEUTRAL / CHOPPY", "⚖️ SIDEWAYS", "No clear institutional aggression. Avoid directional option buying."
 
@@ -814,6 +840,11 @@ class SwingEngine:
         prev = sigs[1] if len(sigs) > 1 else None
         fii_row = db.latest_participant('FII', 1)
         fii = fii_row[0] if fii_row else {}
+        pro_rows = db.latest_participant('PRO', 1)
+        pro = pro_rows[0] if pro_rows else {}
+        if pro.get('date') != latest['date']:
+            pro = {}
+        pro_total_oi = (pro.get('nopo') or 0) + (pro.get('npf') or 0)
 
         # Reconstruct DaySignals from DB row
         day = DaySignals(
@@ -846,7 +877,7 @@ class SwingEngine:
         tomorrow_note = "Download today's volume CSV to predict tomorrow."
         if vol_data:
             action, tomorrow_bias, tomorrow_note = get_tomorrow_matrix(
-                day.fii_npf, fii_net_vol)
+                day.fii_npf, fii_net_vol, pro_total_oi, pro_net_vol)
 
         lines = [
             '╔═══════════════════════════════════════════════════════╗',
@@ -858,7 +889,7 @@ class SwingEngine:
             '',
             '  ── PARTICIPANT POSITIONS ─────────────────────────',
             f'  FII    NPF : {day.fii_npf:>+12,.0f}   (short {day.fii_short_pct:.1f}%)',
-            f'  PRO   NOPO : {day.pro_nopo:>+12,.0f}',
+            f'  PRO Net OI  : {pro_total_oi:>+12,.0f}',
             f'  DII  Net   : {day.dii_combined:>+12,.0f}',
             f'  CLIENT NFNO: {day.client_nfno:>+12,.0f}',
             '',
@@ -867,11 +898,12 @@ class SwingEngine:
             '  Participant  │   Net OI (Pos)   │  Net Vol (Aggr)  │ Role',
             '  ─────────────┼──────────────────┼──────────────────┼───────────────',
             f'  FII          │ {day.fii_npf:>+15,.0f} │ {fii_net_vol:>+15,.0f} │ Trend Driver',
-            f'  PRO          │ {day.pro_nopo:>+15,.0f} │ {pro_net_vol:>+15,.0f} │ Smart Snipers',
+            f'  PRO          │ {pro_total_oi:>+15,.0f} │ {pro_net_vol:>+15,.0f} │ Smart Snipers',
             f'  DII          │ {day.dii_combined:>+15,.0f} │ {dii_net_vol:>+15,.0f} │ Hedgers',
             f'  CLIENT       │ {day.client_nfno:>+15,.0f} │ {cli_net_vol:>+15,.0f} │ Contrarian',
             '  ─────────────┴──────────────────┴──────────────────┴───────────────',
-            f'  Matrix Logic : FII OI ({day.fii_npf:+,.0f}) vs FII Vol ({fii_net_vol:+,.0f})',
+            f'  Matrix Logic : FII OI ({day.fii_npf:+,.0f}) / Vol ({fii_net_vol:+,.0f}) '
+            f'vs PRO OI ({pro_total_oi:+,.0f}) / Vol ({pro_net_vol:+,.0f})',
             f'  Action       : {action}',
             f'  Bias         : {tomorrow_bias}',
             f'  Advice       : {tomorrow_note}',

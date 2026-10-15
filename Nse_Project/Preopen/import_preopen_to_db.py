@@ -3,13 +3,15 @@ import sys
 import django
 import shutil
 import json
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 # Ensure project root is in sys.path and set working directory
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 repository_root = os.path.dirname(project_root)
 # Central location for preopen CSVs (same env var the fetcher and dashboard use,
-# so the three can never point at different folders again).
-PREOPEN_CSV_DIR = os.getenv("PREOPEN_TBT_DIR", os.path.join(os.getcwd(), "preopen"))
+# so the three can never point at different folders again). Anchored to the repo
+# root via __file__ so it works on Windows (local) and Linux (Render).
+PREOPEN_CSV_DIR = os.getenv("PREOPEN_TBT_DIR", str(Path(__file__).resolve().parents[2] / "preopen"))
 os.chdir(project_root)
 sys.path.insert(0, repository_root)
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Nse_Project.settings')

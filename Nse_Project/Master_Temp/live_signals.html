@@ -103,8 +103,8 @@
   .hwm-cell { position: relative; min-width: 60px; padding-bottom: 8px !important; }
   .hwm-track { position: absolute; left: 0; right: 0; bottom: 1px; height: 4px; border-radius: 999px; background: rgba(148, 163, 184, .16); overflow: hidden; }
   .hwm-fill { height: 100%; width: 0; border-radius: inherit; will-change: width; }
-  .hwm-fill.call { background: linear-gradient(90deg, rgba(34, 211, 238, .35), rgba(59, 130, 246, .9)); }
-  .hwm-fill.put  { background: linear-gradient(90deg, rgba(251, 191, 36, .35), rgba(249, 115, 22, .9)); }
+  .hwm-fill.call { background: linear-gradient(90deg, rgba(34, 211, 238, .06), rgba(59, 130, 246, .10)); }
+  .hwm-fill.put  { background: linear-gradient(90deg, rgba(251, 191, 36, .06), rgba(249, 115, 22, .10)); }
   .hwm-marker { position: absolute; bottom: 1px; height: 4px; width: 2px; transform: translateX(-50%); background: #fff; box-shadow: 0 0 4px #fff, 0 0 9px rgba(255, 255, 255, .85); z-index: 2; pointer-events: none; }
   .hwm-text { position: relative; z-index: 3; text-shadow: 0 1px 2px rgba(2, 6, 23, .95), 0 0 6px rgba(2, 6, 23, .6); }
 
@@ -154,6 +154,30 @@
   .pulse-red {
     animation: pulse-red 1.2s ease-in-out infinite;
     border-color: rgba(239, 68, 68, 0.9);
+  }
+
+  /* ---- Deadly Combo signal row highlight (subtle pulsing glow) ----
+     Applied to a compact-chain <tr> when a backend deadly_combo_signal
+     matches its strike. Green = CE side, red = PE side. Low-alpha
+     background + inset ring keeps every cell's text clearly readable. */
+  .ce-signal-glow {
+    animation: ce-signal-glow 3.0s ease-in-out infinite;
+  }
+  .pe-signal-glow {
+    animation: pe-signal-glow 3.0s ease-in-out infinite;
+  }
+  @keyframes ce-signal-glow {
+    0%, 100% { background-color: rgba(0, 255, 128, 0.03); box-shadow: inset 0 0 0 1px rgba(0, 255, 128, 0.06); }
+    50%      { background-color: rgba(0, 255, 128, 0.14); box-shadow: inset 0 0 0 1px rgba(0, 255, 128, 0.15); }
+  }
+  @keyframes pe-signal-glow {
+    0%, 100% { background-color: rgba(239, 68, 68, 0.03); box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.06); }
+    50%      { background-color: rgba(239, 68, 68, 0.12); box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.14); }
+  }
+  /* Keep row text (LTP / COI) at full contrast through the soft pulse. */
+  .ce-signal-glow td, .pe-signal-glow td { text-shadow: 0 1px 2px rgba(2, 6, 23, .85); }
+  @media (prefers-reduced-motion: reduce) {
+    .ce-signal-glow, .pe-signal-glow { animation: none; }
   }
 
   /* ---- PRE-OPEN MARKET (CASH): nearest-IEP blink (minimalist glow) ----
@@ -365,19 +389,7 @@
               <div id="suppres-signal-box" class="col-span-2 mt-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-center text-xs font-bold uppercase tracking-wider text-amber-300">🟡 WAITING</div>
             </div>
           </div>
-          <div class="rounded-lg border border-fuchsia-500/30 bg-fuchsia-950/20 p-3 lg:col-span-2">
-            <p class="mb-2 text-sm font-bold uppercase tracking-wider text-fuchsia-300">📐 FIRST CANDLE FIB SWING</p>
-            <div class="grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm sm:grid-cols-4">
-              <span class="uppercase tracking-wider text-slate-500">Entry</span><span id="fib-entry" class="text-right font-mono font-semibold text-slate-50">--</span>
-              <span class="uppercase tracking-wider text-slate-500">SL</span><span id="fib-sl" class="text-right font-mono font-semibold text-rose-300">--</span>
-              <span class="uppercase tracking-wider text-slate-500">Target 1</span><span id="fib-t1" class="text-right font-mono font-semibold text-emerald-300">--</span>
-              <span class="uppercase tracking-wider text-slate-500">Target 2</span><span id="fib-t2" class="text-right font-mono font-semibold text-emerald-300">--</span>
-            </div>
-            <div class="mt-2 flex items-center justify-between gap-3">
-              <span id="fib-setup-label" class="text-xs uppercase tracking-wider text-slate-500">Setup: --</span>
-              <div id="fib-signal-box" class="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-center text-xs font-bold uppercase tracking-wider text-amber-300">🟡 WAITING</div>
-            </div>
-          </div>
+          
         </div>
         <div id="math-console" class="mt-1.5 min-h-[120px] rounded-lg border border-cyan-800/50 bg-black/50 p-2 font-mono text-[11px] leading-5">
           <div class="mb-0.5 flex items-center justify-between border-b border-slate-800 pb-0.5">
@@ -472,7 +484,7 @@
           </div>
         </div>
         <div class="mt-auto flex w-full justify-end gap-1.5 pt-2">
-          <button id="scalper-playground-open" type="button" class="scalper-playground-trigger shrink-0 rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1 text-xs font-bold uppercase tracking-[.12em] text-cyan-300 transition hover:bg-slate-700/60" aria-haspopup="dialog" aria-controls="scalper-playground-modal">🎮 Scalper</button>
+          
           <button id="audio-toggle" type="button" class="rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1 text-xs font-bold uppercase tracking-[.12em] text-slate-300 transition hover:bg-slate-700/60" aria-pressed="false">🔇 ALERTS OFF</button>
         </div>
 
@@ -495,37 +507,7 @@
 
   </div>
 </section>
-
-<!-- SCALPER'S PLAYGROUND: standalone removable component -->
-<style>
-  .scalper-playground-trigger { animation: scalper-playground-pulse 2.4s ease-in-out infinite; }
-  @keyframes scalper-playground-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(34, 211, 238, .18); } 50% { box-shadow: 0 0 0 5px rgba(34, 211, 238, 0); } }
-  .scalper-playground-track { background: repeating-linear-gradient(90deg, rgba(148, 163, 184, .12) 0 1px, transparent 1px 24px); }
-  .scalper-playground-ball { animation: scalper-playground-bounce 3.2s ease-in-out infinite alternate; bottom: var(--scalper-ball-bottom, 46%); }
-  @keyframes scalper-playground-bounce { from { transform: translateY(0); } to { transform: translateY(var(--scalper-ball-travel, -100px)); } }
-</style>
-<div id="scalper-playground-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="scalper-playground-title">
-  <div class="w-full max-w-lg rounded-2xl border border-cyan-400/25 bg-ink-950 p-5 shadow-2xl shadow-cyan-950/40">
-    <div class="flex items-start justify-between gap-4">
-      <div><p class="text-[10px] uppercase tracking-[.24em] text-cyan-300">Action Zone</p><h2 id="scalper-playground-title" class="mt-1 font-display text-xl font-bold text-slate-50">Scalper</h2></div>
-      <button id="scalper-playground-close" type="button" class="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-300 transition hover:border-slate-500 hover:text-white" aria-label="Close Scalper's Playground">Close [X]</button>
-    </div>
-    <div class="scalper-playground-track relative mt-5 h-56 rounded-xl border border-slate-800 px-3 py-4">
-      <div class="absolute inset-x-3 top-3 flex items-center justify-between rounded-lg border border-sky-400/30 bg-sky-400/10 px-3 py-2 text-xs font-semibold text-sky-300"><span>CALL WALL</span><span id="scalper-call-wall">24400</span></div>
-      <div class="scalper-playground-ball absolute left-1/2 h-4 w-4 -translate-x-1/2 rounded-full bg-cyan-300 shadow-[0_0_16px_rgba(103,232,249,.9)]" style="--scalper-ball-travel: 120px;" aria-label="NIFTY spot"></div>
-      <div class="absolute inset-x-3 bottom-3 flex items-center justify-between rounded-lg border border-orange-400/30 bg-orange-400/10 px-3 py-2 text-xs font-semibold text-orange-300"><span>PUT WALL</span><span id="scalper-put-wall">24200</span></div>
-      <span class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[10px] uppercase tracking-[.18em] text-slate-600">NIFTY <span id="scalper-spot">--</span></span>
-    </div>
-    <div class="mt-4 rounded-xl border border-rose-400/25 bg-rose-400/5 p-3">
-      <div class="flex items-center justify-between text-xs"><span class="font-semibold text-rose-200">⏱ Charm / Vanna time risk</span><span id="scalper-decay-label" class="font-mono text-rose-300">Heavy decay</span></div>
-      <div class="mt-2 h-2 overflow-hidden rounded-full bg-slate-800"><div id="scalper-decay-bar" class="h-full w-full rounded-full bg-rose-400 transition-[width] duration-1000"></div></div>
-      <p class="mt-2 text-[10px] text-slate-500">Negative Charm can erode option premium while you wait.</p>
-    </div>
-    <div class="mt-4 rounded-xl border border-cyan-400/20 bg-cyan-400/5 p-3"><p class="text-[10px] uppercase tracking-[.18em] text-cyan-300">Scalping Signal</p><p id="scalper-signal" class="mt-1 text-sm font-semibold text-slate-100">Waiting for live spot...</p></div>
-  </div>
-</div>
 {% endblock %}
-
 {% block extra_js %}
 <script>
 (() => {
@@ -544,11 +526,11 @@
   // once per CE/PE/NO_TRADE transition, never on every 1 Hz poll.
   let audioAlertsEnabled = false;
   let previousTradeState = 'NO_TRADE';
-  // Client-side High-Water Mark cache — sticky absolute extreme per metric (sign
-  // preserved). Seeded from the Redis-backed market state injected by views.py so
-  // a hard refresh keeps the accumulated peaks. A peak only advances when a new
-  // value breaks the previous ABSOLUTE record, so it never retreats with the live
-  // value (a SCORE peak of 94 stays at 94 when the live score pulls back to 66).
+  // Client-side High-Water Mark cache — seeded from the Redis-backed market state
+  // injected by views.py so a hard refresh keeps the accumulated peaks. A peak now
+  // decays exponentially toward its `center` with a 5-minute half-life, so a peak
+  // that is no longer re-confirmed retreats to the live value instead of freezing
+  // (a SCORE peak of 99 drains back toward the live score over ~5 minutes).
   const peakCache = {
     bias: Number({{ peak_bias|default:"0"|floatformat:0 }}) || 0,
     momentum: Number({{ peak_momentum|default:"0"|floatformat:0 }}) || 0,
@@ -559,15 +541,29 @@
     'total-vol-skew': Number({{ peak_total_vol_skew|default:"0"|floatformat:1 }}) || 0,
     'total-pcr': Number({{ peak_total_pcr|default:"1.0"|floatformat:2 }}) || 1.0
   };
+  // Last-update epoch (ms) per peak key — the decay clock. Unseeded keys start
+  // un-decayed on their first tick.
+  const peakTimes = {};
 
-  // Advance the HWM for `key` only when `value` breaks the previous record
-  // (measured as absolute distance from `center`). Returns the sticky peak.
+  // Advance the HWM for `key` when `value` breaks the previous record (absolute
+  // distance from `center`); otherwise decay the stored peak toward `center` with a
+  // 5-minute half-life: decayFactor = exp(-0.693 * elapsed_sec / 300).
   function bumpPeak(key, value, center = 0) {
+    const now = Date.now();
     const prev = peakCache[key];
-    if (prev === undefined || Math.abs(value - center) > Math.abs(prev - center)) {
-      peakCache[key] = value;
+    const last = peakTimes[key];
+    const elapsed = last ? (now - last) / 1000 : 0;
+    const decayFactor = Math.exp(-0.693 * elapsed / 300.0);
+    let current;
+    if (prev === undefined) {
+      current = value;
+    } else {
+      const decayed = center + (prev - center) * decayFactor;
+      current = Math.abs(value - center) > Math.abs(decayed - center) ? value : decayed;
     }
-    return peakCache[key];
+    peakCache[key] = current;
+    peakTimes[key] = now;
+    return current;
   }
 
   const number = value => { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : 0; };
@@ -1056,9 +1052,6 @@
     } catch (e) { /* speech engine unavailable — ignore */ }
   }
   function updateAITrades() {
-    const spot = Number.isFinite(currentSpot) ? currentSpot : 0;
-    const callWall = aiParsePrice(document.getElementById('weekly-call-wall'));
-    const putWall = aiParsePrice(document.getElementById('weekly-put-wall'));
     const atm = aiAtmRow();
     const atmStrike = atm ? number(atm.strike) : 0;
     const px = value => `₹${value.toFixed(2)}`;
@@ -1103,16 +1096,20 @@
 
     // Card A — Momentum pullback: buy a 15% dip off the ATM premium.
     const aEntry = ltp > 0 ? ltp * 0.85 : 0;
-    const aSl = aEntry * 0.8;
-    const aTarget = aEntry * 1.4;
+    // Direction-aware SL/Target: SL sits against the trade, Target with the trade,
+    // so the geometry is logical for BOTH CE (bullish) and PE (bearish).
+    const aSl = bearish ? aEntry * 1.20 : aEntry * 0.80;
+    const aTarget = bearish ? aEntry * 0.60 : aEntry * 1.40;
 
-    // Card B — Supp/Res trap: price fades toward the wall, premium drops by
-    // half the distance, so we stage the entry that much lower (never < 0).
-    const distance = bullish ? Math.max(0, spot - putWall) : bearish ? Math.max(0, callWall - spot) : 0;
-    const expectedDrop = distance * 0.5;
-    const bEntry = ltp > 0 ? Math.max(0, ltp - expectedDrop) : 0;
-    const bSl = bEntry * 0.8;
-    const bTarget = bEntry * 1.4;
+    // Card B — Supp/Res trap: fade the break of the support/resistance wall.
+    // Entry is the LIVE ATM option premium (call premium for CE, put premium for PE).
+    // SL and Target are sized around it so the risk:reward is a fixed 1:2 and the
+    // direction is always correct:
+    //   CE (bullish): SL = entry * 0.80 (below), Target = entry * 1.40 (above)
+    //   PE (bearish): SL = entry * 1.20 (above), Target = entry * 0.60 (below)
+    const bEntry = ltp > 0 ? ltp : 0;
+    const bSl = bearish ? bEntry * 1.20 : bEntry * 0.80;
+    const bTarget = bearish ? bEntry * 0.60 : bEntry * 1.40;
 
     // NO_TRADE: blank the card instead of pretending a CE/PE edge exists.
     // Otherwise render the correct CE/PE strike and the staged entry/SL/target.
@@ -1137,7 +1134,7 @@
     updateMathConsole(currentTradeState);
   }
 
-  async function refreshOptions() { try { const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); updateSpotPrice(data); allRows = Array.isArray(data.option_chain) ? data.option_chain.sort((a, b) => number(a.strike) - number(b.strike)) : []; updateSentiment(data); updateScalperPlayground(); updateAITrades(); renderAdvancedMetrics(data); renderMacroMetrics(data); } catch (error) { console.warn('Option-chain fetch failed:', error); } }
+  async function refreshOptions() { try { const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); updateSpotPrice(data); allRows = Array.isArray(data.option_chain) ? data.option_chain.sort((a, b) => number(a.strike) - number(b.strike)) : []; updateSentiment(data); updateAITrades(); renderAdvancedMetrics(data); renderMacroMetrics(data); } catch (error) { console.warn('Option-chain fetch failed:', error); } }
   async function refreshGamma() { try { const response = await fetch('/gamma/status/', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); const status = data?.status || data; if (status?.last_profile) renderProfile(status.last_profile); if (Array.isArray(status?.gamma_alerts)) status.gamma_alerts.forEach(renderSignal); if (status?.last_signal != null) renderSignal(status.last_signal); } catch (error) { console.warn('Gamma status fetch failed:', error); } }
 
   // Blink whichever of MAX/MIN IEP the Final IEP settled closest to.
@@ -1216,38 +1213,6 @@
     audioToggleBtn.addEventListener('click', applyAudioState);
   }
 
-  // SCALPER'S PLAYGROUND: standalone removable interaction.
-  const scalperModal = document.getElementById('scalper-playground-modal');
-  const scalperOpen = document.getElementById('scalper-playground-open');
-  const scalperClose = document.getElementById('scalper-playground-close');
-  let scalperDecay = 100;
-  function updateScalperPlayground() {
-    // Use the numeric currentSpot global (set by renderProfile). Reading the
-    // comma-formatted #live-spot text ("24,168.45") makes Number() return NaN.
-    const spot = Number.isFinite(currentSpot) ? currentSpot : 0;
-    // Walls are also rendered via fmt() (comma-formatted), so strip non-numeric
-    // characters before parsing to avoid silently falling back to hardcoded walls.
-    const parsePrice = value => {
-      const parsed = Number(String(value ?? '').replace(/[^0-9.-]/g, ''));
-      return Number.isFinite(parsed) ? parsed : 0;
-    };
-    const callWall = parsePrice(document.getElementById('weekly-call-wall')?.textContent) || 24400;
-    const putWall = parsePrice(document.getElementById('weekly-put-wall')?.textContent) || 24200;
-    document.getElementById('scalper-call-wall').textContent = fmt(callWall);
-    document.getElementById('scalper-put-wall').textContent = fmt(putWall);
-    document.getElementById('scalper-spot').textContent = spot ? fmt(spot) : '--';
-    const signal = document.getElementById('scalper-signal');
-    if (!spot) signal.textContent = 'Waiting for live spot...';
-    else if (Math.abs(spot - putWall) <= 50) signal.textContent = 'Spot near Support - Quick CE Scalp';
-    else if (Math.abs(spot - callWall) <= 50) signal.textContent = 'Spot near Resistance - Quick PE Scalp';
-    else signal.textContent = 'Spot between walls - Wait for a clean setup';
-  }
-  function closeScalperPlayground() { scalperModal.classList.add('hidden'); scalperModal.classList.remove('flex'); }
-  scalperOpen.addEventListener('click', () => { updateScalperPlayground(); scalperModal.classList.remove('hidden'); scalperModal.classList.add('flex'); scalperClose.focus(); });
-  scalperClose.addEventListener('click', closeScalperPlayground);
-  scalperModal.addEventListener('click', event => { if (event.target === scalperModal) closeScalperPlayground(); });
-  document.addEventListener('keydown', event => { if (event.key === 'Escape' && !scalperModal.classList.contains('hidden')) closeScalperPlayground(); });
-  setInterval(() => { if (!scalperModal.classList.contains('hidden')) { scalperDecay = scalperDecay <= 8 ? 100 : scalperDecay - 1; document.getElementById('scalper-decay-bar').style.width = `${scalperDecay}%`; updateScalperPlayground(); } }, 1000);
 })();
 </script>
 <script>
@@ -1378,7 +1343,7 @@
       if (preopenWs) { try { preopenWs.close(); } catch (e) {} }
     };
   }
-
+  
   connectPreopen();
 })();
 </script>
@@ -1455,11 +1420,22 @@
       return td;
     }
 
-    function renderCompactChain(rows, spot) {
+    function renderCompactChain(rows, spot, signals = []) {
       if (!Array.isArray(rows) || !rows.length) {
         compactBody.innerHTML = '<tr><td colspan="7" class="px-1 py-2 text-[11px] text-slate-500">No option chain data yet…</td></tr>';
         return;
       }
+
+      // Deadly Combo strike -> glow class lookup. String-normalized keys mean
+      // an integer strike (22700) and a string strike ("22700") match the same row.
+      const signalClassByStrike = new Map();
+      (Array.isArray(signals) ? signals : []).forEach((s) => {
+        if (s && s.strike != null) {
+          signalClassByStrike.set(String(s.strike),
+            (s.type === 'CE_JACKPOT' || s.type === 'CE_REVERSAL') ? 'ce-signal-glow' : 'pe-signal-glow');
+        }
+      });
+
       const sorted = rows.slice().sort((a, b) => toNumber(a.strike) - toNumber(b.strike));
 
       // Fold this tick into the session high-water marks and derive a stable,
@@ -1490,6 +1466,8 @@
         const peak = peakMap.get(strike) || { call: 0, put: 0 };
         const tr = document.createElement('tr');
         if (strike === atmStrike) tr.className = 'atm-row';
+        const signalGlow = signalClassByStrike.get(String(row.strike));
+        if (signalGlow) tr.classList.add(signalGlow);
         tr.appendChild(coiCell(fmtCoi(row.call_coi_pct), 'call', Math.abs(toNumber(row.call_coi_pct)), peak.call, callMax));
         tr.appendChild(compactCell(fmtLtp(row.call_ltp), 'call-side font-mono'));
         tr.appendChild(compactCell(fmtCoiRel(row.call_coi_rel_pct), 'call-side font-mono'));
@@ -1508,7 +1486,11 @@
         if (!response.ok) throw new Error(response.statusText);
         const data = await response.json();
         const spot = toNumber(data.spot_price);
-        renderCompactChain(Array.isArray(data.option_chain) ? data.option_chain : [], spot);
+        renderCompactChain(
+          Array.isArray(data.option_chain) ? data.option_chain : [],
+          spot,
+          Array.isArray(data.deadly_combo_signals) ? data.deadly_combo_signals : []
+        );
       } catch (error) {
         console.warn('Compact option-chain fetch failed:', error);
       }
@@ -1528,11 +1510,6 @@
   const resolveBox = (setupType) => {
     const t = String(setupType || "").toLowerCase();
     if (t.includes("momentum")) return "momentum-signal-box";
-    // First-Candle Fibonacci Swing: "Day Low Rejection" (CE), "Fib Extension
-    // Trap" (PE) and the gamma-gated Trend Retracement setups ("Bullish Bounce" /
-    // "Bearish Reject") all map to the dedicated fib card. Check BEFORE the generic
-    // "trap" fallback below so "Fib Extension Trap" doesn't land on Supp/Res.
-    if (t.includes("fib") || t.includes("day low rejection") || t.includes("bounce") || t.includes("reject")) return "fib-signal-box";
     if (t.includes("supp") || t.includes("trap")) return "suppres-signal-box";
     return null;
   };
@@ -1553,34 +1530,7 @@
     box.textContent = label;
     [...WAITING_CLASSES, ...CE_CLASSES, ...PE_CLASSES].forEach((cls) => box.classList.remove(cls));
     classes.forEach((cls) => box.classList.add(cls));
-  }
-
-  function setFibText(id, value) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    if (value === null || value === undefined || value === "") { el.textContent = "--"; return; }
-    const n = Number(value);
-    el.textContent = Number.isFinite(n) ? n.toFixed(2) : String(value);
-  }
-
-  // The fib card carries full trade math (entry / SL / T1 / T2) from the payload.
-  function setFibSignal(msg) {
-    const box = document.getElementById("fib-signal-box");
-    const side = String(msg.option_side || "CE").toUpperCase();
-    const label = side === "PE" ? BUY_PE : BUY_CE;
-    const classes = side === "PE" ? PE_CLASSES : CE_CLASSES;
-    if (box) {
-      box.textContent = label;
-      [...WAITING_CLASSES, ...CE_CLASSES, ...PE_CLASSES].forEach((cls) => box.classList.remove(cls));
-      classes.forEach((cls) => box.classList.add(cls));
-    }
-    setFibText("fib-entry", msg.entry_price);
-    setFibText("fib-sl", msg.stop_loss);
-    setFibText("fib-t1", msg.target_1);
-    setFibText("fib-t2", msg.target_2);
-    const labelEl = document.getElementById("fib-setup-label");
-    if (labelEl) labelEl.textContent = msg.setup_type ? ("Setup: " + msg.setup_type) : "Setup: --";
-  }
+  } 
 
   let audioCtx = null;
   function beep() {
@@ -1612,11 +1562,7 @@
       if (!msg || msg.action !== "trade_trigger" || msg.status !== "BUY_NOW") return;
       const boxId = resolveBox(msg.setup_type);
       if (!boxId) return;
-      if (boxId === "fib-signal-box") {
-        setFibSignal(msg);
-      } else {
-        setSignal(boxId, true, msg.option_side);
-      }
+      setSignal(boxId, true, msg.option_side);
       beep();
     };
     ws.onclose = () => {

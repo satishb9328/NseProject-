@@ -43,11 +43,9 @@ from Nse_Project.graceful_shutdown import is_shutdown_requested, setup_signal_ha
 from Nse_Project.expiry_utils import belongs_to_expiry, normalize_expiry, resolve_row_expiry
 from Nse_Project.Brokers.cvd_engine import CVDEngine
 from Nse_Project.Live_dashboard.ai_candle_confirmation import CandleConfirmationEngine
-from Nse_Project.Live_dashboard.fib_swing_engine import FibonacciSwingEngine
 from Nse_Project.Live_dashboard.market_state import (
     load_market_state,
-    market_state_key,
-    save_market_state,
+    market_state_key,    save_market_state,
 )
 # Real Black-Scholes Gamma engine, reused read-only so the live score's gamma boost is
 # driven by the SAME Net GEX that powers the Day Gamma card (not the old OI-skew proxy).
@@ -264,6 +262,10 @@ _sentiment_extremes = {
     "score_max": 50.0,
     "score_min": 50.0,
 }
+# Monotonic timestamp of the last score-peak update. Drives the 5-minute half-life
+# decay so the session High-Water Mark retreats toward the live score instead of
+# freezing at a stale extreme.
+_score_peak_updated_at = None
 # Latest cumulative CVD, fed by CVDEngine's on_candle callback (a separate worker
 # thread) and folded into the Redis market state on the next publish beat.
 _latest_cumulative_cvd = 0.0
@@ -287,6 +289,10 @@ _FLIP_ZONE_PCT = 0.2           # |spot - flip| / spot < 0.2% => explosive flip z
 _FLIP_ZONE_MULTIPLIER = 1.5    # multiplier applied to the blend inside the flip zone
 _ACCEL_GAIN = 0.5              # scale COI acceleration into momentum points
 _ACCEL_CAP = 15.0              # clamp the acceleration boost to ±15 momentum points
+# Score High-Water Mark decay: the session peak loses half its distance-to-neutral
+# every SCORE_PEAK_HALF_LIFE_SECONDS, using decayFactor = exp(-0.693 * t / half_life).
+SCORE_PEAK_HALF_LIFE_SECONDS = 300.0   # 5 minutes
+SCORE_PEAK_DECAY_RATE = 0.693          # ln(2)
 
 state_lock = asyncio.Lock()
 live_state = {
@@ -1832,7 +1838,12 @@ def _compute_live_sentiment_full(instrument_data=None) -> dict:
     if call_iv_n and put_iv_n:
         iv_skew_est = (put_iv_sum / put_iv_n) - (call_iv_sum / call_iv_n)
 
-    score = max(0.0, min(100.0, 50.0 + weighted_bias * 0.5 + momentum + gamma_boost_val))
+    # Non-linear logistic sigmoid (0-100) replaces the hard linear clamp. Neutral
+    # raw_delta (0) maps to exactly 50; extremes asymptote toward 100/0 with no hard
+    # ceiling, so any drop in bias/momentum/gamma immediately lowers the score instead
+    # of staying pinned at a saturated ceiling.
+    raw_delta = weighted_bias * 0.5 + momentum + gamma_boost_val
+    score = 100.0 / (1.0 + math.exp(-0.025 * raw_delta))
     # ATM time decay (₹/hr): reverse-solved IV -> annual theta -> hourly theta.
     theta_decay_per_hour = _compute_atm_theta_decay(
         instrument_data, spot, active_expiry_iso()
@@ -1882,9 +1893,6 @@ AI_SETUP_CANDLE_SECONDS = 60                 # 1-minute option candles
 MOMENTUM_PULLBACK_DIP = 0.85                 # Momentum Pullback entry = LTP * 0.85 (15% dip)
 SUPP_RES_TRAP_DIP = 0.85                     # Supp/Res Trap fade entry = LTP * 0.85
 AI_SETUP_ENTRY_REFRESH_DRIFT = 0.01          # re-arm an engine only when its entry drifts > 1%
-# First-Candle Fibonacci Swing: a dedicated 1-minute CVDEngine over the NIFTY future.
-# 60s is required so the base range is the 09:15-09:16 opening candle.
-FIB_SWING_CANDLE_SECONDS = 60                # 1-minute index-future candles
 
 # setup_type strings MUST match live_signals.html resolveBox():
 #   contains "momentum" -> momentum-signal-box ; contains "supp"/"trap" -> suppres-signal-box
@@ -2027,183 +2035,10 @@ def _route_ai_option_candle(candle: dict) -> None:
             logger.exception("AI setup engine on_candle failed for %s", key)
 
 
-# ── First-Candle Fibonacci Swing wiring ────────────────────────────────────────
-# The FibonacciSwingEngine needs the live "Math Console Score" + "Momentum" at the
-# moment each 1-minute NIFTY-future candle closes. Those live in the module-level
-# ``market_state`` dict (refreshed every publish beat by _refresh_market_state), so
-# a cheap provider closure reads them directly from the CVD worker thread.
-_fib_engine: "FibonacciSwingEngine | None" = None
-
-
-def _day_gamma_trend() -> str:
-    """Day Gamma direction from the live Net GEX sign.
-
-    Returns ``"POSITIVE"`` when dealers are net long gamma (``net_gex`` > 0),
-    ``"NEGATIVE"`` when net short (``net_gex`` < 0), and ``"NEUTRAL"`` otherwise
-    (no data / flat). Falls back to the bounded ``net_gex_ratio`` when ``net_gex``
-    is unavailable.
-    """
-    gex = market_state.get("net_gex")
-    if gex is None:
-        gex = market_state.get("net_gex_ratio", 0.0)
-    try:
-        value = float(gex)
-    except (TypeError, ValueError):
-        return "NEUTRAL"
-    if value > 0:
-        return "POSITIVE"
-    if value < 0:
-        return "NEGATIVE"
-    return "NEUTRAL"
-
-
-def _fib_context() -> dict:
-    """Return the live score/momentum/day-gamma for the Fibonacci swing filters."""
-    return {
-        "score": market_state.get("score", 50.0),
-        "momentum": market_state.get("momentum", 0.0),
-        "day_gamma_trend": _day_gamma_trend(),
-    }
-
-
-def _route_fib_candle(candle: dict) -> None:
-    """Route a closed 1-minute NIFTY-future candle to the Fibonacci swing engine."""
-    if _fib_engine is None or not isinstance(candle, dict):
-        return
-    try:
-        _fib_engine.on_candle(candle)
-    except Exception:
-        logger.exception("Fibonacci swing engine on_candle failed")
-
-
-# ── First-Candle base backfill (historical REST) ───────────────────────────────
-# When the worker starts after the 09:15-09:16 opening candle has closed, the live
-# tick stream can never reconstruct it (Upstox does not replay ticks). Fetch the
-# closed 1-minute candle for 09:15-09:16 IST from the historical-candle endpoint and
-# install it as the engine's immutable base, so the fib levels anchor to the TRUE
-# opening range instead of whatever candle happens to close first after startup.
-HISTORICAL_CANDLE_URL = "https://api.upstox.com/v2/historical-candle"
-OPENING_CANDLE_INTERVAL = "1minute"
-OPENING_CANDLE_HOUR = 9
-OPENING_CANDLE_MINUTE = 15
-
-
-def fetch_opening_base_candle(
-    token: str,
-    instrument_key: str = INDEX_INSTRUMENT_KEY,
-    session_date: date | None = None,
-) -> tuple[float, float, date] | None:
-    """Fetch the 09:15-09:16 IST 1-minute candle for ``session_date`` (default today).
-
-    Returns ``(high, low, session_date)``, or ``None`` when the candle is not yet
-    available (pre-open), today is a holiday, or the API errors. This is a blocking
-    ``requests`` call — run it via an executor, never on the asyncio event loop.
-    """
-    if session_date is None:
-        session_date = datetime.now(IST).date()
-    safe_key = urllib.parse.quote(instrument_key, safe="")
-    # Fetch from the prior day through ``session_date`` so a single-day request never
-    # returns an empty window; the exact 09:15 candle is selected below.
-    start_date = session_date - timedelta(days=1)
-    url = (
-        f"{HISTORICAL_CANDLE_URL}/{safe_key}/{OPENING_CANDLE_INTERVAL}/"
-        f"{session_date.isoformat()}/{start_date.isoformat()}"
-    )
-    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        response.raise_for_status()
-        payload = response.json()
-    except Exception as exc:
-        logger.warning("⚠️ Opening base candle backfill request failed: %s", exc)
-        return None
-
-    candles = ((payload or {}).get("data") or {}).get("candles") if isinstance(payload, dict) else None
-    if not candles:
-        return None
-
-    for candle in candles:
-        if not isinstance(candle, (list, tuple)) or len(candle) < 5:
-            continue
-        try:
-            ts = datetime.fromisoformat(str(candle[0]))
-        except (TypeError, ValueError):
-            continue
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=IST)
-        else:
-            ts = ts.astimezone(IST)
-        if ts.date() != session_date:
-            continue
-        if ts.hour != OPENING_CANDLE_HOUR or ts.minute != OPENING_CANDLE_MINUTE:
-            continue
-        try:
-            high = float(candle[2])
-            low = float(candle[3])
-        except (TypeError, ValueError):
-            continue
-        if high > low:
-            logger.info(
-                "📥 Backfilled opening base candle %s: high=%.2f low=%.2f",
-                candle[0], high, low,
-            )
-            return high, low, ts.date()
-    return None
-
-
-def _compute_macro_metrics(instrument_data=None) -> dict:
-    """Whole-chain OI / volume aggregates for the ``TOTAL OPTION CHAIN (MACRO)`` panel.
-
-    Returns ``net_oi_bias``, ``total_vol_skew`` and ``total_pcr``. These are ratios, so
-    the internal share-scaled OI/volume is fine (the scale cancels out).
-
-    Sign convention matches the score's ``weighted_bias``: NEGATIVE == bearish
-    (call-heavy OI / volume = heavy call writing during a crash).
-    """
-    if instrument_data is None:
-        instrument_data = live_state.get("instrument_data", {})
-
-    total_call_oi = total_put_oi = 0.0
-    total_call_vol = total_put_vol = 0.0
-
-    for item in instrument_data.values():
-        if not isinstance(item, dict):
-            continue
-        side = (item.get("option_type") or "").upper()
-        oi = item.get("oi")
-        oi = float(oi) if isinstance(oi, (int, float)) else 0.0
-        volume = item.get("volume")
-        volume = float(volume) if isinstance(volume, (int, float)) else 0.0
-
-        if side == "CE":
-            total_call_oi += oi
-            total_call_vol += volume
-        elif side == "PE":
-            total_put_oi += oi
-            total_put_vol += volume
-
-    oi_sum = total_call_oi + total_put_oi
-    vol_sum = total_call_vol + total_put_vol
-
-    # BEARISH SIGN CONVENTION: negative == bearish. Indian-market crashes are driven
-    # by heavy CALL WRITING, so call-heavy OI / volume maps NEGATIVE (red).
-    net_oi_bias = ((total_put_oi - total_call_oi) / oi_sum) * 100.0 if oi_sum else 0.0
-    total_vol_skew = ((total_put_vol - total_call_vol) / vol_sum) * 100.0 if vol_sum else 0.0
-    total_pcr = (total_put_oi / total_call_oi) if total_call_oi > 0 else 0.0
-
-    # Cap the bipolar metrics to ±50 to match the frontend's -50..+50 bar scale.
-    net_oi_bias = max(-50.0, min(50.0, net_oi_bias))
-    total_vol_skew = max(-50.0, min(50.0, total_vol_skew))
-
-    return {
-        "net_oi_bias": round(net_oi_bias, 2),
-        "total_vol_skew": round(total_vol_skew, 2),
-        "total_pcr": round(total_pcr, 4),
-    }
-
-
 def _refresh_market_state(instrument_data=None) -> None:
     """Fold the latest CVD + live sentiment peaks into the in-memory market state."""
+    global _score_peak_updated_at
+
     sentiment = _compute_live_sentiment_full(instrument_data)
     bias, momentum, score = sentiment["bias"], sentiment["momentum"], sentiment["score"]
 
@@ -2212,8 +2047,16 @@ def _refresh_market_state(instrument_data=None) -> None:
     ex["bias_min"] = min(ex["bias_min"], bias)
     ex["mom_max"] = max(ex["mom_max"], momentum)
     ex["mom_min"] = min(ex["mom_min"], momentum)
-    ex["score_max"] = max(ex["score_max"], score)
-    ex["score_min"] = min(ex["score_min"], score)
+    # Score HWM now decays toward the neutral centre (50) with a 5-minute half-life
+    # instead of holding the session extreme forever. Each tick re-derives the peak as
+    # max(current_score, decayed_peak) on the bullish side and min(...) on the bearish
+    # side, so a pull-back in the live score drains the stale peak over ~300 s.
+    now = time.monotonic()
+    elapsed = 0.0 if _score_peak_updated_at is None else max(0.0, now - _score_peak_updated_at)
+    decay_factor = math.exp(-SCORE_PEAK_DECAY_RATE * elapsed / SCORE_PEAK_HALF_LIFE_SECONDS)
+    ex["score_max"] = max(score, 50.0 + (ex["score_max"] - 50.0) * decay_factor)
+    ex["score_min"] = min(score, 50.0 - (50.0 - ex["score_min"]) * decay_factor)
+    _score_peak_updated_at = now
 
     market_state["cumulative_cvd"] = _latest_cumulative_cvd
     market_state["peak_bias"] = ex["bias_max"] if bias >= 0 else ex["bias_min"]
@@ -2642,7 +2485,7 @@ def _parse_cvd_symbols():
     return {s.strip() for s in raw.split(",") if s.strip()}
 
 
-def build_streamer(token: str, instrument_keys: list[str], expiry_date: date, loop: asyncio.AbstractEventLoop, cvd_engine=None, future_key=None, ai_option_cvd=None, fib_cvd=None) -> MarketDataStreamerV3:
+def build_streamer(token: str, instrument_keys: list[str], expiry_date: date, loop: asyncio.AbstractEventLoop, cvd_engine=None, future_key=None, ai_option_cvd=None) -> MarketDataStreamerV3:
     config = Configuration()
     config.access_token = token
     api_client = ApiClient(configuration=config)
@@ -2696,10 +2539,6 @@ def build_streamer(token: str, instrument_keys: list[str], expiry_date: date, lo
         # ATM CE/PE premiums are bucketed into 1-minute candles for confirmation.
         if ai_option_cvd is not None:
             ai_option_cvd.ingest_upstox_message(message)
-        # First-Candle Fibonacci Swing: feed the SAME envelope into its dedicated
-        # 1-minute NIFTY-future candle engine.
-        if fib_cvd is not None:
-            fib_cvd.ingest_upstox_message(message)
         asyncio.run_coroutine_threadsafe(update_live_state_from_message(message), loop)
 
     def on_error(*args):
@@ -2900,54 +2739,7 @@ async def run_streamer(instrument_keys: list[str], expiry_date: date) -> None:
     _refresh_ai_engines(ai_option_cvd)
     logger.info("🤖 AI Trade Setup confirmation engine started (1m option candles).")
 
-    # ── First-Candle Fibonacci Swing engine ─────────────────────────────────────
-    # A third CVDEngine instance dedicated to the NIFTY index spot at 1-minute
-    # granularity, so the 09:15-09:16 opening candle becomes the base range. Each
-    # closed index candle is routed to FibonacciSwingEngine, which evaluates the fib
-    # levels and dispatches trade_triggers through the existing ai:trade_trigger
-    # Redis channel (via dispatch_trade_trigger()).
-    global _fib_engine
-    _fib_engine = FibonacciSwingEngine(
-        symbol=INDEX_INSTRUMENT_KEY,
-        context_provider=_fib_context,
-        dispatch=True,
-    )
-    # Backfill the TRUE 09:15-09:16 opening candle when the worker started after
-    # market open. The live tick stream cannot replay it, so this is the only way to
-    # anchor the fib levels to the real first-candle range on a late start. When the
-    # candle isn't available yet (pre-open / holiday / API error) the engine falls
-    # back to capturing the first live candle exactly as before, so startup never
-    # blocks or fails on a backfill problem.
-    try:
-        backfill = await loop.run_in_executor(
-            None,
-            fetch_opening_base_candle,
-            token,
-            INDEX_INSTRUMENT_KEY,
-            datetime.now(IST).date(),
-        )
-        if backfill is not None:
-            base_high, base_low, base_day = backfill
-            _fib_engine.set_base(base_high, base_low, base_day)
-        else:
-            logger.info("📭 Opening base candle not available yet — awaiting live first-candle capture.")
-    except Exception as exc:
-        logger.warning("⚠️ Opening base candle backfill failed (%s); falling back to live capture.", exc)
-
-    fib_cvd = CVDEngine(
-        candle_seconds=FIB_SWING_CANDLE_SECONDS,
-        trend_periods=3,
-        symbol_allowlist={INDEX_INSTRUMENT_KEY},
-        on_candle=_route_fib_candle,
-        publish=False,
-    )
-    fib_cvd.start()
-    logger.info(
-        "📈 Fibonacci swing engine started (1m candles over index spot %s).",
-        INDEX_INSTRUMENT_KEY,
-    )
-
-    streamer = build_streamer(token, instrument_keys, expiry_date, loop, cvd_engine=cvd_engine, ai_option_cvd=ai_option_cvd, future_key=nifty_future_key, fib_cvd=fib_cvd)
+    streamer = build_streamer(token, instrument_keys, expiry_date, loop, cvd_engine=cvd_engine, ai_option_cvd=ai_option_cvd, future_key=nifty_future_key)
     logger.info(f"🔌 Connecting to Upstox live feed for {len(instrument_keys) + 1} instruments (options + index spot)...")
     streamer.connect()
 
@@ -3019,7 +2811,6 @@ async def run_streamer(instrument_keys: list[str], expiry_date: date) -> None:
                 pass
         cvd_engine.stop()
         ai_option_cvd.stop()
-        fib_cvd.stop()
 
 
 async def main() -> None:

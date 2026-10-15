@@ -440,8 +440,16 @@ class GammaProcessor:
     def _metrics_for(strikes: List[OptionStrike], call_field: str, put_field: str, gex_field: str, charm_field: str, vanna_field: str, spot: float, absolute_pcr: bool = False) -> GammaMetrics:
         call_total = sum(getattr(strike, call_field) for strike in strikes)
         put_total = sum(getattr(strike, put_field) for strike in strikes)
-        pcr_call = abs(call_total) if absolute_pcr else call_total
-        pcr_put = abs(put_total) if absolute_pcr else put_total
+        if absolute_pcr:
+            # Gross absolute flow per leg: sum |coi| per strike so signed build/unwind
+            # flows can't cancel into a near-zero denominator (which produced absurd
+            # day PCRs like 95.566). call_total/put_total above stay signed for
+            # call_flow/put_flow below.
+            pcr_call = sum(abs(getattr(strike, call_field)) for strike in strikes)
+            pcr_put = sum(abs(getattr(strike, put_field)) for strike in strikes)
+        else:
+            pcr_call = call_total
+            pcr_put = put_total
         call_wall_strike = max(strikes, key=lambda strike: getattr(strike, call_field)).strike if strikes else None
         put_wall_strike = max(strikes, key=lambda strike: getattr(strike, put_field)).strike if strikes else None
         metrics = GammaMetrics(

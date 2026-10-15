@@ -18,6 +18,7 @@ It raises on ANY failure and returns non-zero from the CLI — it never silently
 
 import csv
 import os
+from pathlib import Path
 
 from datetime import datetime, timezone, timedelta
 
@@ -32,7 +33,9 @@ except ImportError as exc:  # pragma: no cover - only hit if curl_cffi isn't ins
 
 # Keep this in sync with Live_dashboard.views.PREOPEN_TBT_DIR and
 # import_preopen_to_db.PREOPEN_CSV_DIR so the backend always reads where we write.
-SAVE_DIR = os.getenv("PREOPEN_TBT_DIR", os.path.join(os.getcwd(), "preopen"))
+# Anchored to the repository root via __file__ so it resolves to <repo_root>/preopen
+# on Windows (local) and Linux (Render), regardless of the working directory.
+SAVE_DIR = os.getenv("PREOPEN_TBT_DIR", str(Path(__file__).resolve().parents[2] / "preopen"))
 CSV_NAME = "nifty50_graph_data.csv"
 # Dated history copies are kept in this subfolder so the main folder stays clean
 # (only the active file) while every day's data is retained.

@@ -70,12 +70,17 @@ def _load_daily_report():
 	db = SwingDB(FNO_DATABASE_PATH)
 	signals = db.latest_signals(1)
 	fii_rows = db.latest_participant("FII", 1)
+	pro_rows = db.latest_participant("PRO", 1)
 	db.close()
 	if not signals:
 		return None
 
 	latest = signals[0]
 	fii_row = fii_rows[0] if fii_rows else {}
+	pro_row = pro_rows[0] if pro_rows else {}
+	if pro_row.get("date") != latest["date"]:
+		pro_row = {}
+	pro_total_oi = (pro_row.get("nopo") or 0) + (pro_row.get("npf") or 0)
 	day = DaySignals(
 		date=datetime.date.fromisoformat(latest["date"]),
 		fii_npf=latest["fii_npf"],
@@ -96,13 +101,20 @@ def _load_daily_report():
 	volume_data, volume_date = load_latest_volume_csv()
 	volume_net = calculate_net_volume(volume_data) if volume_data else {}
 	fii_net_vol = volume_net.get("FII", 0)
-	action, bias, advice = get_tomorrow_matrix(day.fii_npf, fii_net_vol) if volume_data else (
-		"N/A", "VOLUME DATA MISSING", "Download today's volume CSV to predict tomorrow."
-	)
+	pro_net_vol = volume_net.get("PRO", 0)
+	if volume_data:
+		action, bias, advice = get_tomorrow_matrix(
+			day.fii_npf, fii_net_vol, pro_total_oi, pro_net_vol
+		)
+	else:
+		action, bias, advice = (
+			"N/A", "VOLUME DATA MISSING",
+			"Download today's volume CSV to predict tomorrow.",
+		)
 
 	participants = {
 		"FII": {"net_oi": day.fii_npf, "net_vol": volume_net.get("FII", 0)},
-		"PRO": {"net_oi": day.pro_nopo, "net_vol": volume_net.get("PRO", 0)},
+		"PRO": {"net_oi": pro_total_oi, "net_vol": pro_net_vol},
 		"DII": {"net_oi": day.dii_combined, "net_vol": volume_net.get("DII", 0)},
 		"CLIENT": {"net_oi": day.client_nfno, "net_vol": volume_net.get("CLIENT", 0)},
 	}

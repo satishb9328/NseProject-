@@ -317,9 +317,12 @@ def dashboard_view(request):
 # --- Real Tick-By-Tick (TBT) Pre-Open data loader ---------------------------
 
 # Directory containing the daily pre-open TBT CSV/TXT files.
+# Anchored to the repository root (the folder that holds manage.py) via
+# Path(__file__).resolve() so it resolves to <repo_root>/preopen on both Windows
+# (local) and Linux (Render), regardless of the process working directory.
 PREOPEN_TBT_DIR = os.getenv(
     "PREOPEN_TBT_DIR",
-    os.path.join(os.getcwd(), "preopen"),
+    str(Path(__file__).resolve().parents[2] / "preopen"),
 )
 PREOPEN_TBT_FILE_EXTENSIONS = (".csv", ".txt")
 PREOPEN_TBT_ENCODINGS = ("utf-8-sig", "utf-8", "latin1")
@@ -1141,6 +1144,63 @@ def build_option_chain_rows(
     return filtered
 
 
+def detect_deadly_combo_signals(options_chain_data, spot_price=None):
+    """Scans Compact Options Chain rows for 'Deadly Combo' intraday scalping setups.
+
+    Only strikes within the ATM proximity zone (ATM +/- 200 pts, ~4 strikes) are
+    evaluated, and only massive OI additions / fast unwinding trigger a signal.
+    """
+    signals = []
+
+    if not options_chain_data or not isinstance(options_chain_data, list):
+        return signals
+
+    # Find the closest ATM strike if spot_price is available.
+    atm_strike = None
+    if spot_price:
+        try:
+            # Assumes a 50-point strike interval for NIFTY.
+            atm_strike = round(float(spot_price) / 50.0) * 50
+        except (ValueError, TypeError):
+            atm_strike = None
+
+    # Scalping-optimized thresholds.
+    WALL_STRENGTH = 65.0      # ATM walls are still forming, so 65% is enough
+    STRONG_ADDITION = 80.0    # capture only massive OI spikes
+    PANIC_UNWINDING = -25.0   # captures fast short-covering
+    SCALPER_WINDOW = 200      # ATM +/- 200 points (approx 4 strikes)
+
+    for row in options_chain_data:
+        strike = _to_number(row.get('strike')) or 0
+
+        # Apply ATM filter: ignore far OTM / deep ITM strikes.
+        if atm_strike and abs(strike - atm_strike) > SCALPER_WINDOW:
+            continue
+
+        call_rel = _to_number(row.get('call_coi_rel_pct')) or 0
+        call_chg = _to_number(row.get('call_coi_pct')) or 0
+        put_rel = _to_number(row.get('put_coi_rel_pct')) or 0
+        put_chg = _to_number(row.get('put_coi_pct')) or 0
+
+        # Rule 1: CE JACKPOT BREAKOUT (Call Resistance Breaking)
+        if call_rel >= WALL_STRENGTH and call_chg <= PANIC_UNWINDING:
+            signals.append({"type": "CE_JACKPOT", "strike": strike, "msg": f"🚀 [CE BREAKOUT] {strike}"})
+
+        # Rule 2: PE REVERSAL (Call Resistance Holding)
+        elif call_rel >= WALL_STRENGTH and call_chg >= STRONG_ADDITION:
+            signals.append({"type": "PE_REVERSAL", "strike": strike, "msg": f"🔻 [PE REVERSAL] {strike}"})
+
+        # Rule 3: PE JACKPOT BREAKOUT (Put Support Breaking)
+        if put_rel >= WALL_STRENGTH and put_chg <= PANIC_UNWINDING:
+            signals.append({"type": "PE_JACKPOT", "strike": strike, "msg": f"🩸 [PE BREAKOUT] {strike}"})
+
+        # Rule 4: CE REVERSAL (Put Support Holding)
+        elif put_rel >= WALL_STRENGTH and put_chg >= STRONG_ADDITION:
+            signals.append({"type": "CE_REVERSAL", "strike": strike, "msg": f"🟢 [CE REVERSAL] {strike}"})
+
+    return signals
+
+
 def _json_safe_row(row: dict) -> dict:
     return {key: _json_safe_value(value) for key, value in row.items()}
 
@@ -1194,6 +1254,7 @@ def live_option_chain_api(request):
             "total_pcr": 1.0,
             "strike_bounds": None,
             "option_chain": [],
+            "deadly_combo_signals": [],
             # Surfaced deliberately: the browser console/network tab then names the fault
             # instead of showing an opaque 500, and the traceback is in the Django log.
             "error": f"{type(exc).__name__}: {exc}",
@@ -1213,15 +1274,9 @@ def _build_live_option_chain_payload() -> dict:
         strike_bounds=strike_bounds,
         expiry_date=active_expiry,
     )
-    chain = [_json_safe_row(row) for row in chain]
 
-    # Advanced-quant diagnostics + whole-chain macro metrics, persisted by the feed
-    # worker to the date-scoped Redis market_state key and read here so they refresh
-    # at the same 1 Hz cadence as the option chain itself.
-    market_state = _read_market_state_for_today()
-
-    # Live index spot. This is what the dashboard polls for the SPOT readout, so it
-    # MUST be part of this response — previously it was written to
+    # Live index spot. This is what the dashboard polls for the SPOT readout, and it
+    # anchors the Deadly Combo ATM-proximity filter. Previously it was written to
     # live_options_data.json by the feed but never forwarded here, which left the UI
     # depending on the much slower /gamma/status/ round-trip and looking frozen.
     spot_price = None
@@ -1230,6 +1285,18 @@ def _build_live_option_chain_payload() -> dict:
         if isinstance(candidate, (int, float)) and candidate > 0:
             spot_price = candidate
             break
+
+    # "Deadly Combo" anomaly scan — captured on the finalized compact rows, filtered
+    # to the ATM +/- 4-strike zone, and surfaced to the frontend under
+    # `deadly_combo_signals` (root-level, additive).
+    combo_signals = detect_deadly_combo_signals(chain, spot_price=spot_price)
+
+    chain = [_json_safe_row(row) for row in chain]
+
+    # Advanced-quant diagnostics + whole-chain macro metrics, persisted by the feed
+    # worker to the date-scoped Redis market_state key and read here so they refresh
+    # at the same 1 Hz cadence as the option chain itself.
+    market_state = _read_market_state_for_today()
 
     return {
         # Which IPC path served this response: "redis" (live) or "cold_json" (fallback).
@@ -1277,6 +1344,8 @@ def _build_live_option_chain_payload() -> dict:
         "total_pcr": _json_safe_value(market_state.get("total_pcr")),
         "strike_bounds": list(strike_bounds) if strike_bounds else None,
         "option_chain": chain,
+        # "Deadly Combo" anomaly signals for the live dashboard (root-level, additive).
+        "deadly_combo_signals": combo_signals,
         "error": None,
     }
 

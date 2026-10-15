@@ -33,7 +33,6 @@ Usage
 from __future__ import annotations
 
 from pathlib import Path
-
 import numpy as np
 import pandas as pd
 
@@ -82,7 +81,6 @@ _OHLC_ALIASES = {"open": "Open", "high": "High", "low": "Low", "close": "Close"}
 def _ema(series: pd.Series, span: int) -> pd.Series:
     """Exponential moving average; NaN until ``span`` bars exist (warm-up)."""
     return series.ewm(span=span, adjust=False, min_periods=span).mean()
-
 
 def _rsi(close: pd.Series, period: int = RSI_PERIOD) -> pd.Series:
     """Wilder's RSI. NaN during the ``period``-bar warm-up (then dropped)."""
