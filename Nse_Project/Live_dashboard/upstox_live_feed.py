@@ -2035,6 +2035,49 @@ def _route_ai_option_candle(candle: dict) -> None:
             logger.exception("AI setup engine on_candle failed for %s", key)
 
 
+def _compute_macro_metrics(instrument_data=None) -> dict:
+    """Whole-chain macro metrics for the left "TOTAL OPTION CHAIN (MACRO)" panel.
+
+    Net OI Bias and Total Vol Skew are bipolar percentages (negative = call-heavy
+    = bearish, positive = put-heavy = bullish), while Total PCR is unipolar with a
+    1.0 neutral centre. Volume arrives from the V3 feed as a numeric string
+    (``vtt``), so it is coerced via ``_first_numeric`` rather than a strict
+    int/float guard — the old guard silently dropped those string volumes and left
+    ``total_vol_skew`` frozen at 0. Every field degrades to its neutral default
+    (0.0 / 0.0 / 1.0) when the chain is empty, so a disconnected feed renders as a
+    neutral zero-state instead of raising.
+    """
+    call_oi = put_oi = 0.0
+    call_vol = put_vol = 0.0
+
+    for item in (instrument_data or {}).values():
+        if not isinstance(item, dict):
+            continue
+        side = (item.get("option_type") or "").upper()
+        oi = _first_numeric(item.get("oi")) or 0.0
+        volume = _first_numeric(item.get("volume")) or 0.0
+
+        if side == "CE":
+            call_oi += oi
+            call_vol += volume
+        elif side == "PE":
+            put_oi += oi
+            put_vol += volume
+
+    total_oi = call_oi + put_oi
+    total_vol = call_vol + put_vol
+
+    net_oi_bias = ((put_oi - call_oi) / total_oi) * 100.0 if total_oi > 0 else 0.0
+    total_vol_skew = ((put_vol - call_vol) / total_vol) * 100.0 if total_vol > 0 else 0.0
+    total_pcr = (put_oi / call_oi) if call_oi > 0 else 1.0
+
+    return {
+        "net_oi_bias": net_oi_bias,
+        "total_vol_skew": total_vol_skew,
+        "total_pcr": total_pcr,
+    }
+
+
 def _refresh_market_state(instrument_data=None) -> None:
     """Fold the latest CVD + live sentiment peaks into the in-memory market state."""
     global _score_peak_updated_at
@@ -2182,6 +2225,11 @@ async def publish_live_state(force: bool = False) -> None:
         _persist_market_state()
     except redis.RedisError as exc:
         logger.warning(f"⚠️ Failed to publish live state to Redis: {exc}")
+    except Exception as exc:
+        # A non-Redis failure (e.g. a NameError from a missing helper inside
+        # _refresh_market_state) must not silently kill the whole publish/persist
+        # beat. Log the full traceback and keep the worker alive for the next tick.
+        logger.exception(f"⚠️ Non-Redis failure while publishing/persisting live state: {exc}")
 
 
 async def write_live_state(force_publish: bool = False) -> None:

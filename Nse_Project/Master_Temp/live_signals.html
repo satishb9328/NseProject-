@@ -414,7 +414,7 @@
             <div class="math-metric-row">
               <div class="math-metric-copy">
                 <span class="math-metric-label">Momentum</span>
-                <span id="math-momentum" class="math-metric-value"><span class="math-text">{{ math_momentum|default:'+34.8%' }} (Peak: {{ math_momentum_peak|default:'+42%' }})</span><span class="math-metric-badge">(EXPLOSIVE!)</span></span>
+                <span id="math-momentum" class="math-metric-value"><span class="math-text">{{ math_momentum|default:'+34.8%' }} (Peak: {{ math_momentum_peak|default:'+42%' }})</span><span id="math-momentum-badge" class="math-metric-badge" style="display: none;">(EXPLOSIVE!)</span></span>
               </div>
               <div class="math-progress">
                 <div class="math-progress-track">
@@ -949,6 +949,20 @@
     }
   }
 
+  // The (EXPLOSIVE!) badge next to Momentum is DATA-DRIVEN. It was previously a
+  // hardcoded static <span>, so it lingered on the UI even when momentum flatlined
+  // at +0.0% (the exact "0.0% (EXPLOSIVE!)" logic anomaly). It now renders only when
+  // |momentum| clears this threshold, and is hidden on the zero-state payload.
+  const EXPLOSIVE_MOMENTUM_THRESHOLD = 30;
+  function updateMomentumBadge(momentum) {
+    const badge = document.getElementById('math-momentum-badge');
+    if (!badge) return;
+    const mag = Math.abs(Number.isFinite(Number(momentum)) ? Number(momentum) : 0);
+    // Inline style (not the `hidden` attribute) because .math-metric-badge sets
+    // display:inline-block, which overrides the UA `[hidden]` rule.
+    badge.style.display = mag >= EXPLOSIVE_MOMENTUM_THRESHOLD ? 'inline-block' : 'none';
+  }
+
   function updateMathConsole(tradeState) {
     const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
     const signed = value => (Number.isFinite(value) ? `${value >= 0 ? '+' : ''}${value.toFixed(1)}%` : '--');
@@ -966,6 +980,7 @@
     }
     renderMathHwm('math-bias', currentBias, signed(currentBias));
     renderMathHwm('math-momentum', currentMomentum, signed(currentMomentum));
+    updateMomentumBadge(currentMomentum);
     // Surface the effective decision so the console mirrors the CE/PE/NO_TRADE card.
     const stateEl = document.getElementById('math-trade-state');
     if (stateEl) {
