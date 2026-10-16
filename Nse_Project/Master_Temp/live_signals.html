@@ -418,10 +418,11 @@
               </div>
               <div class="math-progress">
                 <div class="math-progress-track">
-                  <span id="math-momentum-fill" class="math-fill pos" style="width: 69.6%;"></span>
+                  <span class="math-zero"></span>
+                  <span id="math-momentum-fill" class="math-fill" style="left: 50%; width: 0%;"></span>
                   <span class="math-marker"></span>
                 </div>
-                <div class="math-scale"><span>0</span><span>10</span><span>20</span><span>30</span><span>40</span><span>50</span></div>
+                <div class="math-scale"><span>-30</span><span>-15</span><span>0</span><span>15</span><span>30</span></div>
               </div>
             </div>
             <div class="math-metric-row">
@@ -430,12 +431,14 @@
                 <span id="math-delta-wt" class="math-metric-value green"><span class="math-text">{{ math_delta_wt|default:'+6.6' }}</span></span>
               </div>
               <div class="math-progress">
-                <div class="math-progress-track hatched">
-                  <span id="math-delta-wt-fill" class="math-fill delta" style="width: 66%;"></span>
+                <div class="math-progress-track">
+                  <span class="math-zero"></span>
+                  <span id="math-delta-wt-fill" class="math-fill" style="left: 50%; width: 0%;"></span>
                   <span class="math-marker"></span>
                 </div>
-                <div class="math-scale"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span></div>
+                <div class="math-scale"><span>-20</span><span>-10</span><span>0</span><span>5</span><span>10</span></div>
               </div>
+
             </div>
           </div>
           <div class="space-y-1">
@@ -463,7 +466,7 @@
                   <span class="math-fill neg" style="width: 38%;"></span>
                   <span class="math-marker"></span>
                 </div>
-                <div class="math-scale"><span>-5</span><span>0</span><span>+5</span></div>
+                <div class="math-scale"><span>-10</span><span>0</span><span>+10</span></div>
               </div>
             </div>
             <div class="math-metric-row">
@@ -919,9 +922,9 @@
   // ---- Math Console metric config (bipolar = center-origin) ---- //
   const MATH_METRICS = {
     'math-bias':        { bipolar: true,  min: -20, max: 20, peakKey: 'bias' },
-    'math-momentum':    { bipolar: false, min: 0,   max: 50, peakKey: 'momentum' },
-    'math-delta-wt':    { bipolar: false, min: 0,   max: 10, peakKey: 'delta-wt' },
-    'math-iv-skew':     { bipolar: true,  min: -5,  max: 5,  peakKey: 'iv-skew' },
+    'math-momentum':    { bipolar: true,  min: -30, max: 30, peakKey: 'momentum' },
+    'math-delta-wt':    { bipolar: true,  min: -20, max: 20, peakKey: 'delta-wt' },
+    'math-iv-skew':     { bipolar: true,  min: -10,  max: 10,  peakKey: 'iv-skew' },
     'math-gamma-boost': { bipolar: true,  min: -20, max: 20, peakKey: 'gamma-boost' }
   };
 

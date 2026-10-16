@@ -1891,8 +1891,7 @@ def _on_cvd_candle(payload: dict) -> None:
 # WebSocket payload.
 AI_SETUP_CANDLE_SECONDS = 60                 # 1-minute option candles
 MOMENTUM_PULLBACK_DIP = 0.85                 # Momentum Pullback entry = LTP * 0.85 (15% dip)
-SUPP_RES_TRAP_DIP = 0.85                     # Supp/Res Trap fade entry = LTP * 0.85
-AI_SETUP_ENTRY_REFRESH_DRIFT = 0.01          # re-arm an engine only when its entry drifts > 1%
+SUPP_RES_TRAP_DIP = 1.00                     # Supp/Res Trap fade = LIVE ATM premium (no dip)
 
 # setup_type strings MUST match live_signals.html resolveBox():
 #   contains "momentum" -> momentum-signal-box ; contains "supp"/"trap" -> suppres-signal-box
@@ -1904,6 +1903,11 @@ _AI_SETUP_TYPES = (MOMENTUM_PULLBACK_SETUP, SUPP_RES_TRAP_SETUP)
 # asyncio loop, read from the option-CVD worker thread, hence the lock.
 _ai_engines: dict[tuple, "CandleConfirmationEngine"] = {}
 _ai_engines_lock = threading.Lock()
+# Anchored reference premium per (instrument_key, setup_type). The 15%-dip entry is
+# derived from this ONCE and held until the ATM strike rolls. Re-anchoring to the live
+# LTP every tick made the entry an unreachable moving target (close ≈ 0.85*close ±1.5%
+# is never satisfied).
+_ai_ref_premium: dict[tuple, float] = {}
 
 
 def _ai_entry_factor(setup_type: str) -> float:
@@ -1963,11 +1967,12 @@ def _resolve_atm_option_keys(spot: float | None, instrument_data: dict) -> tuple
 
 
 def _refresh_ai_engines(ai_option_cvd: "CVDEngine") -> None:
-    """(Re)create CandleConfirmationEngine instances for the ATM CE/PE options.
+    """(Re)create / refresh CandleConfirmationEngine instances for the ATM CE/PE.
 
-    Runs from the asyncio loop. Idempotent: an engine is only replaced when its
-    option side or entry price changes meaningfully (ATM strike roll / >1% LTP
-    drift), so each engine's rolling candle history survives across ticks.
+    The entry price is derived from a STABLE reference premium (anchored once per
+    (key, setup_type)), not the live LTP, so the "15% dip" target is actually
+    reachable. Engines are re-used (history preserved) on ordinary premium drift and
+    only replaced on an ATM strike roll or option-side flip.
     """
     spot = live_state.get("spot_price")
     if isinstance(spot, bool):
@@ -1991,23 +1996,27 @@ def _refresh_ai_engines(ai_option_cvd: "CVDEngine") -> None:
         entry_data = instrument_data.get(key) or {}
         side = str(meta.get("option_type") or entry_data.get("option_type") or "CE").strip().upper() or "CE"
         for setup_type in _AI_SETUP_TYPES:
-            entry = round(ltp * _ai_entry_factor(setup_type), 2)
-            desired[(key, setup_type)] = (side, entry)
+            desired[(key, setup_type)] = (side, ltp)
 
     with _ai_engines_lock:
-        # Drop engines for keys/setups no longer tracked.
+        # Drop engines for keys/setups no longer tracked (ATM strike roll).
         for k in list(_ai_engines.keys()):
             if k not in desired:
                 del _ai_engines[k]
+                _ai_ref_premium.pop(k, None)
 
-        # Re-arm only when the side or entry price changed beyond the drift band.
-        for (key, setup_type), (side, entry) in desired.items():
+        for (key, setup_type), (side, ltp) in desired.items():
+            # Anchor the reference premium once; keep it until the key changes.
+            ref = _ai_ref_premium.get((key, setup_type))
+            if ref is None:
+                ref = ltp
+                _ai_ref_premium[(key, setup_type)] = ref
+            entry = round(ref * _ai_entry_factor(setup_type), 2)
+
             eng = _ai_engines.get((key, setup_type))
-            if (
-                eng is not None
-                and eng.option_side == side
-                and abs(eng.entry_price - entry) <= max(0.05, eng.entry_price * AI_SETUP_ENTRY_REFRESH_DRIFT)
-            ):
+            if eng is not None and eng.option_side == side:
+                # Same engine: refresh entry in place so rolling history survives.
+                eng.update_entry(entry, option_side=side)
                 continue
             _ai_engines[(key, setup_type)] = CandleConfirmationEngine(
                 setup_type, entry, symbol=key, option_side=side, dispatch=True

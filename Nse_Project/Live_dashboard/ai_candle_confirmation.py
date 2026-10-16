@@ -395,6 +395,17 @@ class CandleConfirmationEngine:
         self.option_side = (option_side or "CE").upper()
         self._history: deque = deque(maxlen=max(3, int(history_size)))
 
+    def update_entry(self, entry_price: float, *, option_side: Optional[str] = None) -> None:
+        """Refresh the entry reference WITHOUT discarding the rolling candle history.
+
+        The feed re-arms engines on ATM strike rolls / side flips; recreating the
+        engine there would empty ``_history`` and starve the engulfing + 3-candle
+        CVD-trend gates of their ``prev_candle`` context.
+        """
+        self.entry_price = float(entry_price)
+        if option_side:
+            self.option_side = (option_side or "CE").upper()
+
     def on_candle(self, candle: Dict[str, Any]) -> Optional[ConfirmationResult]:
         """Handle a closed candle: evaluate + dispatch when all gates pass."""
         if not isinstance(candle, dict):
