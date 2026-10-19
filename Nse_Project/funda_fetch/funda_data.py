@@ -20,7 +20,9 @@ import json
 import os
 import random
 import re
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, asdict, field
 from datetime import date
 from typing import Any, Dict, List, Optional
@@ -62,7 +64,8 @@ FINANCIAL_INDUSTRY = "Financial Services"
 REQUEST_TIMEOUT  = 15
 MAX_RETRIES      = 3
 BACKOFF_429      = [20, 45, 90]                       # escalating cooldowns
-SLEEP_RANGE      = (1.2, 2.5)                         # politeness between symbols
+SLEEP_RANGE      = (1.2, 2.5)                         # politeness jitter before a fetch
+MAX_WORKERS      = 10                                 # concurrent fetch threads
 INCREMENT_EVERY  = 25                                 # crash-safe partial saves
 
 
@@ -92,8 +95,20 @@ class StockProfile:
 
 
 def _num(text: str) -> Optional[float]:
-    m = re.search(r"-?[\d,]+(?:\.\d+)?", text)
-    return float(m.group().replace(",", "")) if m else None
+    """Coerce a scraped metric to float, tolerating N/A, commas, NBSP and
+    accounting-style parentheses for negatives."""
+    if not text:
+        return None
+    text = text.replace("\xa0", "").replace(",", "")
+    negative = text.strip().startswith("(") and text.strip().endswith(")")
+    m = re.search(r"-?\d+(?:\.\d+)?", text)
+    if not m:
+        return None
+    try:
+        value = float(m.group())
+    except (TypeError, ValueError):
+        return None
+    return -value if negative else value
 
 
 def _match_num(value: str) -> Optional[float]:
@@ -102,16 +117,24 @@ def _match_num(value: str) -> Optional[float]:
 
 class IndianStockScreener:
     def __init__(self, refresh: bool = False):
-        self.session = requests.Session()
-        self.session.headers.update(HEADERS)
         self.refresh = refresh
+        self._local = threading.local()                # per-thread persistent Session
         os.makedirs(CACHE_DIR, exist_ok=True)
+
+    def _session(self) -> requests.Session:
+        """Persistent Session per worker thread (requests.Session is not thread-safe)."""
+        sess = getattr(self._local, "session", None)
+        if sess is None:
+            sess = requests.Session()
+            sess.headers.update(HEADERS)
+            self._local.session = sess
+        return sess
 
     # ── transport with escalating 429 handling ─────────────────────────────────
     def _get(self, url: str) -> Optional[requests.Response]:
         for attempt in range(1, MAX_RETRIES + 1):
             try:
-                r = self.session.get(url, timeout=REQUEST_TIMEOUT)
+                r = self._session().get(url, timeout=REQUEST_TIMEOUT)
             except requests.RequestException as e:
                 print(f"    network error: {e}")
                 return None
@@ -244,30 +267,42 @@ class IndianStockScreener:
         return {"symbol": symbol, "name": name, "ratios": ratios}
 
     # ── fetch + disk cache ─────────────────────────────────────────────────────
+    def _cache_hit(self, symbol: str) -> bool:
+        cache_path = os.path.join(CACHE_DIR, f"{symbol}.json")
+        if self.refresh or not os.path.exists(cache_path):
+            return False
+        return (time.time() - os.path.getmtime(cache_path)) / 86400 < CACHE_TTL_DAYS
+
     def get_fundamental_data(self, symbol: str) -> Optional[Dict[str, Any]]:
         cache_path = os.path.join(CACHE_DIR, f"{symbol}.json")
-        if not self.refresh and os.path.exists(cache_path):
-            age_days = (time.time() - os.path.getmtime(cache_path)) / 86400
-            if age_days < CACHE_TTL_DAYS:
-                try:
-                    with open(cache_path, encoding="utf-8") as fh:
-                        return json.load(fh)
-                except Exception:
-                    pass
+        if self._cache_hit(symbol):
+            try:
+                with open(cache_path, encoding="utf-8") as fh:
+                    return json.load(fh)
+            except (OSError, json.JSONDecodeError):
+                pass                                        # stale/corrupt -> re-fetch
 
         data = None
-        for url in self._candidate_urls(symbol):             # consolidated, then plain
-            r = self._get(url)
-            if r is None:
-                return None                                  # network dead — stop early
-            if r.status_code == 200:
-                data = self._parse_page(r.text, symbol)
-                if data:
-                    break
-            # 404 -> try next variant
+        try:
+            for url in self._candidate_urls(symbol):        # consolidated, then plain
+                r = self._get(url)
+                if r is None:
+                    break                                   # network dead — stop early
+                if r.status_code == 200:
+                    data = self._parse_page(r.text, symbol)
+                    if data:
+                        break
+                # 404 -> try next variant
+        except Exception as exc:                            # HTML changed / BS4 blew up
+            print(f"    parse error for {symbol}: {exc}")
+            data = None
+
         if data:
-            with open(cache_path, "w", encoding="utf-8") as fh:
-                json.dump(data, fh)
+            try:
+                with open(cache_path, "w", encoding="utf-8") as fh:
+                    json.dump(data, fh)
+            except OSError:
+                pass                                        # cache write is best-effort
         return data
 
     def parse_ratios(self, data: Dict) -> StockProfile:
@@ -298,41 +333,70 @@ class IndianStockScreener:
             return False
         return True
 
+    def _process_symbol(self, symbol: str, industry: str) -> Dict[str, Any]:
+        """Fetch/parse one symbol and apply the sector-aware gates.
+
+        Touches only its own cache file and a thread-local Session, so it is
+        safe to run concurrently across many worker threads.
+        """
+        cached = self._cache_hit(symbol)
+        if not cached:
+            time.sleep(random.uniform(*SLEEP_RANGE))        # politeness jitter
+        data = self.get_fundamental_data(symbol)
+        if not data:
+            return {"symbol": symbol, "cached": cached, "ok": False,
+                    "failed": True, "reason": "fetch_or_parse_failed"}
+
+        p = self.parse_ratios(data)
+        p.industry = industry
+        p.financial = (industry == FINANCIAL_INDUSTRY)
+        ok = self.passes(p)
+        return {
+            "symbol": symbol, "cached": cached, "ok": ok, "failed": False,
+            "financial": p.financial, "profile": asdict(p) if ok else None,
+            "pe": p.pe_ratio, "roe": p.roe,
+            "sales_g": p.qtr_sales_growth, "profit_g": p.qtr_profit_growth,
+        }
+
     def screen(self, symbols: List[str], industry_map: Dict[str, str]) -> pd.DataFrame:
         results, failed = [], []
         n_fin = 0
-        print(f"\n🔍 Screening {len(symbols)} stocks "
-              f"(cache hits are instant; new fetches ~{SLEEP_RANGE[0]}-{SLEEP_RANGE[1]}s apart)")
-        for i, symbol in enumerate(symbols, 1):
-            p_ind = industry_map.get(symbol, "")
-            cached_only = (not self.refresh and
-                           os.path.exists(os.path.join(CACHE_DIR, f"{symbol}.json")) and
-                           (time.time() - os.path.getmtime(
-                               os.path.join(CACHE_DIR, f"{symbol}.json"))) / 86400
-                           < CACHE_TTL_DAYS)
-            print(f"[{i:3d}/{len(symbols)}] {symbol:12s} {'(cache)' if cached_only else 'fetch '}",
-                  end="", flush=True)
-            data = self.get_fundamental_data(symbol)
-            if not data:
-                print("  ❌ FAILED")
-                failed.append({"symbol": symbol, "reason": "fetch_or_parse_failed"})
-                continue
+        total = len(symbols)
+        print(f"\n🔍 Screening {total} stocks "
+              f"(cache hits are instant; new fetches up to {MAX_WORKERS} concurrent)")
 
-            p = self.parse_ratios(data)
-            p.industry = p_ind
-            p.financial = (p_ind == FINANCIAL_INDUSTRY)
-            ok = self.passes(p)
-            print(f"  PE {p.pe_ratio:6.1f} ROE {p.roe:5.1f} "
-                  f"salesG {p.qtr_sales_growth:6.1f} profG {p.qtr_profit_growth:6.1f} "
-                  f"{'✅ MATCH' if ok else ''}")
-            if ok:
-                results.append(asdict(p))
-                n_fin += int(p.financial)
+        def run_one(symbol: str) -> Dict[str, Any]:
+            try:
+                return self._process_symbol(symbol, industry_map.get(symbol, ""))
+            except Exception as exc:                        # never kill the batch
+                return {"symbol": symbol, "cached": False, "ok": False,
+                        "failed": True, "reason": f"unhandled: {exc}"}
 
-            if i % INCREMENT_EVERY == 0 and results:         # crash-safe partial save
-                pd.DataFrame(results).to_csv(PARTIAL_CSV, index=False)
-            if not cached_only:
-                time.sleep(random.uniform(*SLEEP_RANGE))
+        done = 0
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+            futures = [pool.submit(run_one, s) for s in symbols]
+            for fut in as_completed(futures):
+                out = fut.result()
+                done += 1
+                if out["ok"]:
+                    results.append(out["profile"])
+                    n_fin += int(out["financial"])
+                    print(f"[{done:3d}/{total}] {out['symbol']:12s} "
+                          f"{'(cache)' if out['cached'] else 'fetch '}"
+                          f"  PE {out['pe']:6.1f} ROE {out['roe']:5.1f} "
+                          f"salesG {out['sales_g']:6.1f} profG {out['profit_g']:6.1f} ✅ MATCH")
+                elif out["failed"]:
+                    failed.append({"symbol": out["symbol"], "reason": out["reason"]})
+                    print(f"[{done:3d}/{total}] {out['symbol']:12s} "
+                          f"{'(cache)' if out['cached'] else 'fetch '}  ❌ FAILED")
+                else:
+                    print(f"[{done:3d}/{total}] {out['symbol']:12s} "
+                          f"{'(cache)' if out['cached'] else 'fetch '}"
+                          f"  PE {out['pe']:6.1f} ROE {out['roe']:5.1f} "
+                          f"salesG {out['sales_g']:6.1f} profG {out['profit_g']:6.1f}")
+
+                if done % INCREMENT_EVERY == 0 and results:  # crash-safe partial save
+                    pd.DataFrame(results).to_csv(PARTIAL_CSV, index=False)
 
         # coverage report — the "can I trust this pool?" answer
         print("\n" + "─" * 74)
@@ -382,13 +446,20 @@ def main():
     ap.add_argument("--refresh", action="store_true", help="ignore disk cache")
     args = ap.parse_args()
 
-    print(f"📊 Reading {UNIVERSE_CSV} ...")
-    uni = pd.read_csv(UNIVERSE_CSV)
-    uni.columns = [c.strip() for c in uni.columns]
-    symbols = [str(s).strip().upper() for s in uni["Symbol"].tolist()]
-    ind_col = next((c for c in uni.columns if c.lower() == "industry"), None)
-    industry_map = ({str(r["Symbol"]).strip().upper(): str(r[ind_col]).strip()
-                     for _, r in uni.iterrows()} if ind_col else {})
+    print(f"📊 Streaming {UNIVERSE_CSV} ...")
+    symbols: List[str] = []
+    industry_map: Dict[str, str] = {}
+    ind_col = None
+    for chunk in pd.read_csv(UNIVERSE_CSV, chunksize=1000):
+        chunk.columns = [c.strip() for c in chunk.columns]
+        if ind_col is None:
+            ind_col = next((c for c in chunk.columns if c.lower() == "industry"), None)
+        symbols.extend(chunk["Symbol"].astype(str).str.strip().str.upper().tolist())
+        if ind_col:
+            industry_map.update({
+                str(r["Symbol"]).strip().upper(): str(r[ind_col]).strip()
+                for _, r in chunk.iterrows()
+            })
     print(f"✅ {len(symbols)} symbols loaded"
           f"{f' | industry column: {ind_col}' if ind_col else ' | NO industry column'}")
 

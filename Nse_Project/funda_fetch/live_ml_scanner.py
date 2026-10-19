@@ -34,6 +34,11 @@ import requests
 
 warnings.filterwarnings("ignore")
 
+# Indian Standard Time (UTC+5:30) — the exchange timezone. All "today"/session
+# date math MUST use IST so candle stitching and date comparisons stay correct
+# regardless of the host machine's local timezone.
+IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+
 # =====================================================================
 # CONFIGURATION
 # =====================================================================
@@ -54,7 +59,10 @@ def load_symbol_isin_map() -> dict[str, str]:
     if not os.path.exists(ISIN_MAP_PATH):
         return {}
 
-    universe = pd.read_csv(ISIN_MAP_PATH)
+    try:
+        universe = pd.read_csv(ISIN_MAP_PATH)
+    except Exception:
+        return {}
     universe.columns = [str(column).strip() for column in universe.columns]
     symbol_col = next(
         (column for column in universe.columns if column.lower() == "symbol"),
@@ -97,11 +105,14 @@ def load_weekly_bb20_midline(
     if weekly_path is None:
         return None
 
-    weekly = (
-        pd.read_parquet(weekly_path)
-        if weekly_path.lower().endswith(".parquet")
-        else pd.read_csv(weekly_path)
-    )
+    try:
+        weekly = (
+            pd.read_parquet(weekly_path)
+            if weekly_path.lower().endswith(".parquet")
+            else pd.read_csv(weekly_path)
+        )
+    except Exception:
+        return None
     weekly.columns = [
         str(column).strip().split("(")[0].strip().lower()
         for column in weekly.columns
@@ -124,7 +135,7 @@ def load_weekly_bb20_midline(
     if weekly.empty:
         return None
 
-    as_of = as_of or datetime.date.today()
+    as_of = as_of or datetime.datetime.now(IST).date()
     week_periods = weekly[date_col].dt.to_period("W-SUN")
     current_period = pd.Timestamp(as_of).to_period("W-SUN")
     if as_of.weekday() >= 5:
@@ -193,13 +204,18 @@ def get_access_token() -> str | None:
 def get_upstox_instrument_dict() -> dict:
     """Build {trading_symbol: instrument_key} from Upstox's NSE instrument dump."""
     url = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.csv.gz"
-    df = pd.read_csv(url)
+    try:
+        # Only the two columns we need — the NSE instrument dump is huge.
+        df = pd.read_csv(url, usecols=["instrument_key", "tradingsymbol"])
+    except Exception as exc:  # noqa: BLE001
+        print(f"[ERROR] Could not fetch Upstox instrument list: {exc}")
+        return {}
     return pd.Series(df.instrument_key.values, index=df.tradingsymbol).to_dict()
 
 
 def fetch_latest_1m_data(instrument_key: str, headers: dict) -> pd.DataFrame:
     """Fetch the latest 1-minute candles for ``instrument_key`` (last 5 days)."""
-    end_date = datetime.date.today()
+    end_date = datetime.datetime.now(IST).date()
     start_date = end_date - datetime.timedelta(days=5)
 
     interval = "1minute"
@@ -346,7 +362,7 @@ def _print_table(alerts: list[dict]) -> None:
     print("=" * width)
     print("  🎯 UNIVERSAL 2H LIVE SNIPER BOT  —  Bullish Reversals @ 2H_EMA_50 Support")
     print("=" * width)
-    print(f"  Scanned @ {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"  Scanned @ {datetime.datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S IST')}")
     print(f"  Support zone : 2H_EMA_50 ± {EMA_MARGIN * 100:.1f}%")
     print(f"  Alerts found : {len(alerts)}")
     print("-" * width)
@@ -386,6 +402,9 @@ def main() -> dict:
     except Exception as exc:  # noqa: BLE001
         print(f"[ERROR] Could not fetch the Upstox instrument list: {exc}")
         return {"signals": [], "total_count": 0}
+    if not upstox_keys:
+        print("[ERROR] Upstox instrument list is empty — cannot scan.")
+        return {"signals": [], "total_count": 0}
 
     # Load the VIP universe (master_trend_setups.csv) and only scan those symbols.
     vip_symbols: set[str] = set()
@@ -414,7 +433,7 @@ def main() -> dict:
 
     alerts: list[dict] = []
     mega_reversal_signals: list[dict] = []
-    today = datetime.date.today()
+    today = datetime.datetime.now(IST).date()
 
     for file in files:
         symbol = file.replace("_5m.parquet", "")
@@ -423,7 +442,10 @@ def main() -> dict:
             continue
 
         try:
-            df_hist = pd.read_parquet(os.path.join(HISTORY_DIR, file))
+            df_hist = pd.read_parquet(
+                os.path.join(HISTORY_DIR, file),
+                columns=["Datetime", "Open", "High", "Low", "Close", "Volume", "OI"],
+            )
             df_live_1m = fetch_latest_1m_data(inst_key, headers)
 
             if not df_live_1m.empty:

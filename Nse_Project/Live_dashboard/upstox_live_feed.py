@@ -9,13 +9,10 @@ import logging
 import math
 import os
 import pathlib
-import re
-import signal
 import sys
 import tempfile
 import threading
 import time
-import urllib.parse
 from collections import deque
 from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
@@ -42,7 +39,11 @@ from Nse_Project.graceful_shutdown import is_shutdown_requested, setup_signal_ha
 # they consider it to be.
 from Nse_Project.expiry_utils import belongs_to_expiry, normalize_expiry, resolve_row_expiry
 from Nse_Project.Brokers.cvd_engine import CVDEngine
-from Nse_Project.Live_dashboard.ai_candle_confirmation import CandleConfirmationEngine
+from Nse_Project.Live_dashboard.ai_candle_confirmation import (
+    CandleConfirmationEngine,
+    is_no_trade_zone,
+    set_market_no_trade_probe,
+)
 from Nse_Project.Live_dashboard.market_state import (
     load_market_state,
     market_state_key,    save_market_state,
@@ -685,21 +686,6 @@ def find_nifty_weekly_option_keys() -> tuple[date, list[str]]:
     return expiry_date, instrument_keys
 
 
-def flatten_payload(payload: object, prefix: str = "") -> dict:
-    flattened = {}
-    if isinstance(payload, dict):
-        for key, value in payload.items():
-            name = f"{prefix}.{key}" if prefix else str(key)
-            flattened.update(flatten_payload(value, name))
-    elif isinstance(payload, list):
-        for index, value in enumerate(payload):
-            name = f"{prefix}.{index}" if prefix else str(index)
-            flattened.update(flatten_payload(value, name))
-    else:
-        flattened[prefix] = payload
-    return flattened
-
-
 # ---------------------------------------------------------------------------
 # Cold-backup writer hardening (Windows)
 # ---------------------------------------------------------------------------
@@ -762,10 +748,6 @@ def atomic_write_json(path: str, data: dict) -> None:
         if os.path.exists(tmp_path):
             with contextlib.suppress(OSError):
                 os.remove(tmp_path)
-
-
-def get_local_today() -> date:
-    return datetime.now(timezone(timedelta(hours=5, minutes=30))).date()
 
 
 # Indian market session close, used to decide when an expiry stops being tradable.
@@ -1148,7 +1130,7 @@ def refresh_previous_oi(expiry_date: date) -> None:
 
     previous_oi_map = fresh
     live_state["poi_source"] = "upstox_option_chain_prev_oi"
-    live_state["poi_updated_at"] = datetime.now(timezone(timedelta(hours=5, minutes=30))).isoformat()
+    live_state["poi_updated_at"] = datetime.now(IST).isoformat()
     live_state["poi_instruments"] = len(fresh)
     persist_previous_oi(expiry_date, fresh)
 
@@ -1605,15 +1587,14 @@ def calculate_hourly_theta(spot_price, strike_price, option_ltp, expiry_date, op
         logger.debug("Hourly theta skipped: unrecognised expiry %r.", expiry_date)
         return 0.0
 
-    ist = timezone(timedelta(hours=5, minutes=30))
     expiry_dt = expiry_dt.replace(
         hour=THETA_EXPIRY_HOUR,
         minute=THETA_EXPIRY_MINUTE,
         second=0,
         microsecond=0,
-        tzinfo=ist,
+        tzinfo=IST,
     )
-    seconds_remaining = (expiry_dt - datetime.now(ist)).total_seconds()
+    seconds_remaining = (expiry_dt - datetime.now(IST)).total_seconds()
 
     # Safety guard: under 30 minutes to expiry the time value is numerically unstable.
     if seconds_remaining < THETA_MIN_SECONDS:
@@ -1735,6 +1716,10 @@ def _compute_live_sentiment_full(instrument_data=None) -> dict:
     call_iv_sum = put_iv_sum = 0.0
     call_iv_n = put_iv_n = 0
 
+    # Loop-invariant: the Gaussian moneyness band depends only on spot, so derive it
+    # once instead of recomputing `sigma = max(spot * 0.01, 1.0)` for every strike.
+    sigma = max(spot * 0.01, 1.0) if spot > 0 else 1.0
+
     for item in instrument_data.values():
         if not isinstance(item, dict):
             continue
@@ -1750,7 +1735,6 @@ def _compute_live_sentiment_full(instrument_data=None) -> dict:
 
         weight = 1.0
         if spot > 0 and strike > 0:
-            sigma = max(spot * 0.01, 1.0)  # 1% moneyness band
             weight = math.exp(-0.5 * ((strike - spot) / sigma) ** 2)
             weighted = True
 
@@ -2044,6 +2028,21 @@ def _route_ai_option_candle(candle: dict) -> None:
             logger.exception("AI setup engine on_candle failed for %s", key)
 
 
+def _ai_market_no_trade_probe() -> bool:
+    """Live no-trade gate for the AI candle-confirmation engine.
+
+    Reads the SAME authoritative sentiment the dashboard consumes (score /
+    momentum / whole-chain Net-OI bias) and mirrors the frontend tri-state, so a
+    candle BUY_NOW trigger is suppressed whenever the AI card would render
+    "🚫 NO TRADE ZONE".
+    """
+    return is_no_trade_zone(
+        market_state.get("score"),
+        market_state.get("momentum"),
+        market_state.get("net_oi_bias"),
+    )
+
+
 def _compute_macro_metrics(instrument_data=None) -> dict:
     """Whole-chain macro metrics for the left "TOTAL OPTION CHAIN (MACRO)" panel.
 
@@ -2220,12 +2219,16 @@ async def publish_live_state(force: bool = False) -> None:
         refresh_liveness_fields()
         payload, active_expiry = snapshot_for_publish()
         serialized_state = json.dumps(payload, default=str, separators=(",", ":"))
-        # Opt-in expiry-namespaced mirror FIRST so the primary key stays the last write
-        # (and therefore the last SET a consumer or a test observes) of the beat.
+        # Batch the Redis hop into ONE pipeline round-trip (mirror SET + primary SET +
+        # PUBLISH) instead of 2-3 sequential blocking calls per publish beat. The opt-in
+        # expiry-namespaced mirror is queued FIRST so the primary key stays the last write
+        # a consumer or a test observes.
+        pipe = redis_client.pipeline(transaction=False)
         if REDIS_EXPIRY_NAMESPACE and active_expiry:
-            redis_client.set(REDIS_DATA_KEY_TEMPLATE.format(expiry=active_expiry), serialized_state)
-        redis_client.set(REDIS_DATA_KEY, serialized_state)
-        redis_client.publish(REDIS_CHANNEL, "updated")
+            pipe.set(REDIS_DATA_KEY_TEMPLATE.format(expiry=active_expiry), serialized_state)
+        pipe.set(REDIS_DATA_KEY, serialized_state)
+        pipe.publish(REDIS_CHANNEL, "updated")
+        pipe.execute()
         _last_redis_publish_ts = now
         # Persist the cumulative / peak market metrics on every published update so
         # they survive a restart and stay fresh for views.py's initial render. Use
@@ -2362,7 +2365,7 @@ async def update_instrument_state(instrument: str, values: dict) -> None:
             # Backfill for entries restored from an older snapshot, which predate the
             # explicit expiry stamp and only carry it inside the tradingsymbol.
             entry['expiry'] = normalize_expiry(meta.get('expiry'))
-        entry["latest_tick_at"] = datetime.now(timezone(timedelta(hours=5, minutes=30))).isoformat()
+        entry["latest_tick_at"] = datetime.now(IST).isoformat()
         entry["raw_sample"] = values["raw"]
 
     # Publish OUTSIDE the lock, matching update_index_spot(). state_lock exists to
@@ -2403,7 +2406,7 @@ async def update_index_spot(values: dict) -> None:
         live_state["nifty_ltp"] = ltp
         live_state["spot_instrument_key"] = INDEX_INSTRUMENT_KEY
         live_state["spot_source"] = "index_tick_ltp"
-        live_state["spot_updated_at"] = datetime.now(timezone(timedelta(hours=5, minutes=30))).isoformat()
+        live_state["spot_updated_at"] = datetime.now(IST).isoformat()
         # Keep the last index tick in the published snapshot. Without this there is no
         # way to tell a frozen spot apart from a frozen feed after the fact.
         live_state["index_raw_sample"] = raw
@@ -2445,11 +2448,22 @@ async def update_live_state_from_message(message: dict) -> None:
 
     if feeds:
         for instrument, feed_payload in feeds.items():
-            values = extract_live_values(feed_payload, instrument_key=instrument)
-            if _is_index_key(instrument):
-                await update_index_spot(values)
-                continue
-            await update_instrument_state(instrument, values)
+            # Per-instrument guard: one malformed tick must not drop the rest of the
+            # batch (all 774 options arrive in one envelope, so a single bad payload
+            # would otherwise discard every other update in this message).
+            try:
+                values = extract_live_values(feed_payload, instrument_key=instrument)
+                if _is_index_key(instrument):
+                    await update_index_spot(values)
+                    continue
+                await update_instrument_state(instrument, values)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning(
+                    "Skipping a malformed tick for %s (feed continues).",
+                    instrument, exc_info=True,
+                )
         return
 
     payload = message.get("data") if isinstance(message.get("data"), (dict, list)) else message
@@ -2589,14 +2603,19 @@ def build_streamer(token: str, instrument_keys: list[str], expiry_date: date, lo
         if message is None:
             logger.warning("⚠️ Upstox feed MESSAGE received with no payload.")
             return
-        # CVD: parse the same envelope and enqueue ticks (non-blocking, WS-thread safe).
-        if cvd_engine is not None:
-            cvd_engine.ingest_upstox_message(message)
-        # AI Trade Setups: feed the SAME envelope into the option-candle engine so the
-        # ATM CE/PE premiums are bucketed into 1-minute candles for confirmation.
-        if ai_option_cvd is not None:
-            ai_option_cvd.ingest_upstox_message(message)
-        asyncio.run_coroutine_threadsafe(update_live_state_from_message(message), loop)
+        try:
+            # CVD: parse the same envelope and enqueue ticks (non-blocking, WS-thread safe).
+            if cvd_engine is not None:
+                cvd_engine.ingest_upstox_message(message)
+            # AI Trade Setups: feed the SAME envelope into the option-candle engine so the
+            # ATM CE/PE premiums are bucketed into 1-minute candles for confirmation.
+            if ai_option_cvd is not None:
+                ai_option_cvd.ingest_upstox_message(message)
+            asyncio.run_coroutine_threadsafe(update_live_state_from_message(message), loop)
+        except Exception:
+            # A malformed tick must never propagate out of the WebSocket callback thread:
+            # an unhandled raise here would tear down the connection (or the whole worker).
+            logger.exception("⚠️ Dropping a malformed tick in the feed callback.")
 
     def on_error(*args):
         error = args[-1] if args else None
@@ -2792,6 +2811,9 @@ async def run_streamer(instrument_keys: list[str], expiry_date: date) -> None:
         on_candle=_route_ai_option_candle,
         publish=False,
     )
+    # Wire the live no-trade gate so the candle-confirmation engine suppresses
+    # BUY_NOW triggers whenever the dashboard's tri-state is in a NO TRADE ZONE.
+    set_market_no_trade_probe(_ai_market_no_trade_probe)
     ai_option_cvd.start()
     _refresh_ai_engines(ai_option_cvd)
     logger.info("🤖 AI Trade Setup confirmation engine started (1m option candles).")

@@ -1,11 +1,9 @@
 import argparse
 import datetime as dt
-import io
 import os
 import re
 import time
 
-import pandas as pd
 import requests
 
 # రెండు ఫైల్స్ సేవ్ చేయడానికి అవసరమైన ఫోల్డర్ పాత్‌లు
@@ -27,6 +25,56 @@ SESSION_PRIME_URL = 'https://www.nseindia.com/'
 
 # Add or update NSE trading holidays for the current year here.
 NSE_HOLIDAYS = set()
+
+# ── Network resilience ──────────────────────────────────────────────
+REQUEST_TIMEOUT = 30
+MAX_RETRIES = 3
+BACKOFF_SECONDS = 2.0
+RETRYABLE_STATUS = {403, 408, 429, 500, 502, 503, 504}
+
+
+def _get_with_retry(session, url, timeout=REQUEST_TIMEOUT):
+    """GET with exponential backoff for NSE's flaky archive endpoints."""
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            resp = session.get(url, timeout=timeout)
+            if resp.status_code == 200:
+                return resp
+            if resp.status_code not in RETRYABLE_STATUS:
+                return resp
+            msg = f'HTTP {resp.status_code}'
+        except requests.RequestException as exc:
+            msg = str(exc)
+            if attempt >= MAX_RETRIES:
+                raise
+        if attempt >= MAX_RETRIES:
+            raise requests.RequestException(f'Exhausted retries: {msg}')
+        delay = BACKOFF_SECONDS * (2 ** (attempt - 1))
+        print(f'   -> {msg} (attempt {attempt}/{MAX_RETRIES}); retrying in {delay:.0f}s...')
+        time.sleep(delay)
+
+
+def _is_valid_participant_csv(content: bytes) -> bool:
+    """Confirm the payload is a real participant OI/Volume CSV.
+
+    Finds the header row (first cell starts with 'client') and requires at
+    least one data row after it. Works for both OI and Volume files.
+    """
+    text = content.decode('utf-8-sig', errors='replace')
+    if not text.strip():
+        return False
+    lines = text.splitlines()
+    header_idx = None
+    for i, line in enumerate(lines):
+        first = line.split(',', 1)[0].strip().lower()
+        if first.startswith('client'):
+            header_idx = i
+            break
+    if header_idx is None:
+        return False
+    return any(line.strip() for line in lines[header_idx + 1:])
 
 
 def format_ddmmyyyy(date_obj: dt.date) -> str:
@@ -91,7 +139,7 @@ def download_report(date_obj: dt.date, url_template: str, output_dir: str, file_
     print(f"డౌన్‌లోడ్ అవుతోంది: {url}")
 
     try:
-        response = session.get(url, timeout=30)
+        response = _get_with_retry(session, url)
     except requests.RequestException as exc:
         print(f"డౌన్‌లోడ్ అభ్యర్థన విఫలమైంది: {exc}")
         return
@@ -105,13 +153,14 @@ def download_report(date_obj: dt.date, url_template: str, output_dir: str, file_
         print(f"తప్పు ఫార్మాట్ ఫైల్ వచ్చింది: {file_name}")
         return
 
-    try:
-        df = pd.read_csv(io.BytesIO(content))
-    except Exception as e:
-        print(f"CSV parsing error: {e}")
+    # Data integrity: only save if it looks like a real participant CSV.
+    if not _is_valid_participant_csv(content):
+        print(f"Invalid CSV payload (bad header), skipping: {file_name}")
         return
 
-    df.to_csv(output_path, index=False)
+    # Save raw bytes unchanged so the engine's preamble-aware parser works.
+    with open(output_path, 'wb') as f:
+        f.write(content)
     print(f"Saved successfully: {output_path}")
 
 

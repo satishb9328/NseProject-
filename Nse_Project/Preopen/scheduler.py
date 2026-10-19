@@ -1,12 +1,20 @@
 """
 Scheduled wrapper script for fetch_preopen.py
-Checks if today is a trading day (weekday and not a holiday) before running.
+Checks if today (in IST) is a trading day (weekday and not a holiday) before running.
+
+The 09:00 AM trigger itself is owned by the Windows Task Scheduler
+(setup_scheduler.ps1); this script only decides *whether* to run once triggered.
 """
 import os
 import sys
 import json
 import logging
 from datetime import datetime, date
+
+import pytz
+
+# IST is the single source of truth for "today" — never rely on local system time.
+IST = pytz.timezone('Asia/Kolkata')
 
 # Configure logging
 log_file = os.path.join(os.path.dirname(__file__), 'scheduler.log')
@@ -19,22 +27,29 @@ logging.basicConfig(
     ]
 )
 
+# Cache the holiday list so it is only read from disk once per process.
+_holidays_cache = None
+
 
 def load_holidays():
-    """Load NSE holiday list from JSON file."""
+    """Load the NSE holiday list from JSON (cached after the first read)."""
+    global _holidays_cache
+    if _holidays_cache is not None:
+        return _holidays_cache
+
     holidays_file = os.path.join(os.path.dirname(__file__), 'nse_holidays.json')
     try:
         with open(holidays_file, 'r') as f:
             data = json.load(f)
-            # Convert string dates to date objects
-            holidays = [datetime.strptime(d, '%Y-%m-%d').date() for d in data['holidays']]
-            return holidays
+        # Convert string dates to date objects
+        _holidays_cache = [datetime.strptime(d, '%Y-%m-%d').date() for d in data['holidays']]
     except FileNotFoundError:
         logging.warning(f"Holidays file not found: {holidays_file}")
-        return []
+        _holidays_cache = []
     except Exception as e:
         logging.error(f"Error loading holidays: {e}")
-        return []
+        _holidays_cache = []
+    return _holidays_cache
 
 
 def is_trading_day(check_date=None):
@@ -44,7 +59,7 @@ def is_trading_day(check_date=None):
     Special case: February 1, 2026 is treated as trading day for budget announcement.
     """
     if check_date is None:
-        check_date = date.today()
+        check_date = datetime.now(IST).date()
 
     # Special case for budget announcement day
     if check_date == date(2026, 2, 1):
@@ -64,11 +79,11 @@ def is_trading_day(check_date=None):
 
 def main():
     """Main scheduler function."""
-    today = date.today()
-    now = datetime.now()
+    now = datetime.now(IST)
+    today = now.date()
 
     logging.info("="*70)
-    logging.info(f"Preopen Data Scheduler - Starting at {now.strftime('%Y-%m-%d %H:%M:%S')}")
+    logging.info(f"Preopen Data Scheduler - Starting at {now.strftime('%Y-%m-%d %H:%M:%S')} IST")
     logging.info("="*70)
 
     # Check if today is a trading day
@@ -119,6 +134,8 @@ def main():
 
 
 if __name__ == '__main__':
-    exit_code = main()
-    sys.exit(exit_code)
-
+    try:
+        sys.exit(main())
+    except Exception:
+        logging.exception("FATAL: unexpected error in scheduler")
+        sys.exit(1)

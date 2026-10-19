@@ -229,7 +229,7 @@
             <div class="col-span-3 mt-1 grid grid-cols-2 gap-2 border-t border-sky-500/20 pt-2 text-[11px]"><span class="font-medium text-orange-300">CALL WALL (Res): <span id="weekly-call-wall" class="font-mono">--</span></span><span class="text-right font-medium text-emerald-300">PUT WALL (Sup): <span id="weekly-put-wall" class="font-mono">--</span></span></div>
             <div class="col-span-3 grid grid-cols-2 gap-2 text-[11px]"><span class="font-medium text-slate-400">NET CHARM: <span id="weekly-net-charm" class="font-mono text-slate-200">--</span></span><span class="text-right font-medium text-slate-400">NET VANNA: <span id="weekly-net-vanna" class="font-mono text-slate-200">--</span></span></div>
           </div>
-          <p id="weekly-net-gex-summary" class="mt-auto pt-2 text-[11px] font-medium text-slate-400">--</p>
+          <p id="weekly-net-gex-summary" class="mt-auto pt-2  text-[11px] font-medium text-slate-400">--</p>
         </div>
         <div class="flex h-full flex-col rounded-xl border border-amber-500/30 bg-amber-950/20 p-3 lg:col-start-3 lg:row-start-1">
           <div class="mb-1 flex items-center justify-between"><h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-amber-300">NIFTY DAY GAMMA</h2><span class="text-[10px] uppercase tracking-wider text-slate-500">Today COI</span></div>
@@ -1099,6 +1099,28 @@
     let optionSide = 'NO_TRADE';
     if (!noTrade) optionSide = bearish ? 'PE' : 'CE';
 
+    // NO_TRADE must SUPPRESS the candle-confirmation signal badges too, not just the
+    // strike text. The WebSocket BUY_NOW handler (a separate <script> block) latches
+    // #suppres-signal-box and #momentum-signal-box to "BUY NOW (… Confirmed!)" and
+    // never clears them, so we force both back to their neutral WAITING state — and
+    // strip any CE/PE styling — whenever the tri-state lands in the no-trade dead-band.
+    if (noTrade) {
+      const signalBoxIds = ['suppres-signal-box', 'momentum-signal-box'];
+      const resetClasses = ['border-amber-500/40', 'bg-amber-500/10', 'text-amber-300'];
+      const activeClasses = [
+        'border-amber-500/40', 'bg-amber-500/10', 'text-amber-300',
+        'border-emerald-500/50', 'bg-emerald-500/15', 'text-emerald-300',
+        'border-rose-500/50', 'bg-rose-500/15', 'text-rose-300',
+      ];
+      signalBoxIds.forEach((id) => {
+        const box = document.getElementById(id);
+        if (!box) return;
+        box.textContent = '🟡 WAITING';
+        activeClasses.forEach((cls) => box.classList.remove(cls));
+        resetClasses.forEach((cls) => box.classList.add(cls));
+      });
+    }
+
     // 🔊 Voice alert on state TRANSITIONS only — speak once per CE/PE flip, never on
     // every 1 Hz poll. NO_TRADE transitions stay silent to avoid announcement spam.
     const currentTradeState = noTrade ? 'NO_TRADE' : optionSide;
@@ -1548,7 +1570,7 @@
     box.textContent = label;
     [...WAITING_CLASSES, ...CE_CLASSES, ...PE_CLASSES].forEach((cls) => box.classList.remove(cls));
     classes.forEach((cls) => box.classList.add(cls));
-  } 
+    } 
 
   let audioCtx = null;
   function beep() {

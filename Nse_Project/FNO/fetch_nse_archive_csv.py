@@ -4,7 +4,7 @@ import os
 import time
 import zipfile
 import glob
-from io import BytesIO
+import shutil
 
 import pandas as pd
 
@@ -31,12 +31,60 @@ HEADERS = {
 END_DATE = datetime.date.today()
 START_DATE = END_DATE - datetime.timedelta(days=30)  # Safe 30-day sliding window
 
+# ── Network resilience ──────────────────────────────────────────────
+REQUEST_TIMEOUT = 30
+MAX_RETRIES = 3
+BACKOFF_SECONDS = 2.0
+RETRYABLE_STATUS = {403, 408, 429, 500, 502, 503, 504}
+DOWNLOAD_DELAY = 1.0   # polite pause between daily downloads
+
+
+def _get_with_retry(session: requests.Session, url: str,
+                    timeout: int = REQUEST_TIMEOUT, stream: bool = False):
+    """GET with exponential backoff for NSE's flaky endpoints / WAF blocks.
+
+    Retries transient HTTP errors (WAF 403/429, timeouts and 5xx) and
+    connection errors. Non-retryable 4xx (e.g. 404 = no data that day) are
+    returned immediately so the caller can skip without delay.
+    """
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            resp = session.get(url, timeout=timeout, stream=stream)
+            if resp.status_code == 200:
+                return resp
+            if resp.status_code not in RETRYABLE_STATUS:
+                return resp
+            resp.close()
+            msg = f'HTTP {resp.status_code}'
+        except requests.RequestException as exc:
+            msg = str(exc)
+            if attempt >= MAX_RETRIES:
+                raise
+        if attempt >= MAX_RETRIES:
+            raise requests.RequestException(f'Exhausted retries: {msg}')
+        delay = BACKOFF_SECONDS * (2 ** (attempt - 1))
+        print(f'   -> {msg} (attempt {attempt}/{MAX_RETRIES}); retrying in {delay:.0f}s...')
+        time.sleep(delay)
+
 
 # ==========================================
 # STAGE 1: DOWNLOADER ENGINE
 # ==========================================
 def is_working_day(d: datetime.date):
     return d.weekday() < 5
+
+
+def _is_valid_bhav_header(header_bytes: bytes) -> bool:
+    """Confirm the first line of an FO bhavcopy looks like a real header."""
+    try:
+        header = header_bytes.decode('utf-8', errors='replace').lower()
+    except Exception:
+        return False
+    has_symbol = 'tckrsymb' in header or 'tsymb' in header
+    has_instr = 'fininstrmtp' in header or 'fininstrm_tp' in header
+    return has_symbol and has_instr
 
 
 def download_nse_bhavcopy(date: datetime.date, session: requests.Session):
@@ -49,26 +97,45 @@ def download_nse_bhavcopy(date: datetime.date, session: requests.Session):
     if os.path.exists(local_path):
         return True
 
+    tmp_path = local_path + '.part'
     try:
-        resp = session.get(url, timeout=30)
+        resp = _get_with_retry(session, url, stream=True)
         if resp.status_code != 200:
-            return False
+            resp.close()
+            return False  # 404 etc: no bhavcopy published for this day yet
 
-        z = zipfile.ZipFile(BytesIO(resp.content))
-        candidates = [name for name in z.namelist() if name.lower().endswith('.csv')]
-        if not candidates:
-            return False
+        # Stream the zip to a temp file instead of buffering it all in RAM.
+        with open(tmp_path, 'wb') as f:
+            for chunk in resp.iter_content(chunk_size=1 << 16):
+                f.write(chunk)
+        resp.close()
 
-        inner_name = candidates[0]
-        data = z.read(inner_name)
-        with open(local_path, 'wb') as f:
-            f.write(data)
+        # Stream-extract the inner CSV (avoids loading the ~50MB CSV into RAM).
+        with zipfile.ZipFile(tmp_path) as z:
+            candidates = [n for n in z.namelist() if n.lower().endswith('.csv')]
+            if not candidates:
+                return False
+            inner_name = candidates[0]
+            with z.open(inner_name) as src:
+                header_line = src.readline()
+                if not _is_valid_bhav_header(header_line):
+                    print(f'   -> Skipped {csv_name}: unrecognised bhavcopy header.')
+                    return False
+                with open(local_path, 'wb') as dst:
+                    dst.write(header_line)
+                    shutil.copyfileobj(src, dst, length=1 << 16)
 
         print(f'   -> Downloaded: {csv_name}')
         return True
-    except Exception as e:
+    except (requests.RequestException, zipfile.BadZipFile, OSError) as e:
         print(f'   -> Error downloading {date}: {e}')
         return False
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 
 def run_downloader_pipeline():
@@ -89,6 +156,7 @@ def run_downloader_pipeline():
 
         download_nse_bhavcopy(cur, session)
         cur += datetime.timedelta(days=1)
+        time.sleep(DOWNLOAD_DELAY)
     print("STAGE 1 COMPLETE: All missing files checked.")
 
 

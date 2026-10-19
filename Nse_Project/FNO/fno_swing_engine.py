@@ -26,6 +26,7 @@ import re
 import csv
 import glob
 import sqlite3
+import sys
 import datetime
 from datetime import timedelta
 from dataclasses import dataclass, field
@@ -52,11 +53,15 @@ class Config:
     db_path:        str = r'D:\FNO DATA\Participant data\Database\fno_swing.db'
     years_history:  int = 3          # Store 3 years (recommended sweet spot)
 
-    # ── Signal thresholds (tune based on your backtest) ──
-    fii_heavy_short_pct:  float = 60.0   # Retail trap: FII short >= this
-    fii_extreme_short:    float = 80.0   # Extreme danger zone
-    fii_extreme_long:     float = 20.0   # Extreme bullish zone
-    extreme_oi_threshold: int   = 100_000 # FII/PRO "extreme" position size
+    # ── Dynamic percentile thresholds (regime-adaptive, replaces static %) ──
+    percentile_window:    int   = 252       # 1-year rolling lookback for rank
+    heavy_short_rank:     float = 0.90      # FII short rank >= this → heavy short
+    extreme_short_rank:   float = 0.97      # FII short rank >= this → extreme short
+    extreme_long_rank:    float = 0.05      # FII short rank <= this → extreme long
+    extreme_oi_threshold: int   = 100_000   # FII/PRO "extreme" position size
+
+    # ── Volume kicker (net-aggression divergence) ──
+    volume_kicker_threshold: float = 40_000  # |net vol| beyond this triggers ±3
 
     # ── Smart money weights ──
     weight_fii:    int = 3    # Smartest money
@@ -114,30 +119,83 @@ def safe_float(v) -> float:
 # 1. CSV LOADER
 # ══════════════════════════════════════════════════════════════════════
 
-def load_participant_csvs(client_type: str,
-                          start_date: Optional[datetime.date] = None,
-                          end_date: Optional[datetime.date] = None) -> list[dict]:
-    """Load one participant's raw OI rows from participant_oi_*.csv files.
+def _date_from_filename(path: str) -> Optional[datetime.date]:
+    """Extract the trade date embedded in a participant OI CSV filename."""
+    match = re.search(r'(\d{8})', os.path.basename(path))
+    if not match:
+        return None
+    for fmt in ('%Y%m%d', '%d%m%Y'):
+        try:
+            return datetime.datetime.strptime(match.group(1), fmt).date()
+        except ValueError:
+            continue
+    return None
 
-    Returns rows sorted by date ascending. Handles the preamble lines
-    some NSE CSVs contain before the real header.
+
+def _read_participant_oi_rows(path: str,
+                              file_date: datetime.date) -> list[tuple[str, dict]]:
+    """Parse one participant OI CSV into ``(client, row)`` pairs.
+
+    Handles the preamble lines some NSE CSVs contain before the real header
+    and stops as soon as all four participants are found. Returns ``[]`` for
+    malformed files (mirroring the legacy silent-skip behaviour).
     """
+    try:
+        with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+            reader = csv.reader(f)
+
+            # Scan for the real header row (NSE sometimes prepends comments).
+            header = None
+            for candidate in reader:
+                if candidate and any(
+                    str(h).strip().lower().startswith('client')
+                    for h in candidate if h
+                ):
+                    header = [h.strip().lower() for h in candidate]
+                    break
+            if not header:
+                return []
+
+            idx = {h: i for i, h in enumerate(header) if h}
+            rows = []
+            seen = set()
+            for row in reader:
+                if not row or not row[0].strip():
+                    continue
+                client = str(row[0]).strip().upper()
+                if client not in PARTICIPANTS or client in seen:
+                    continue
+                seen.add(client)
+
+                rec = {'date': file_date}
+                for col in RAW_COLUMNS:
+                    header_name = ' '.join(
+                        w.capitalize() for w in col.split('_')).lower()
+                    i = idx.get(header_name)
+                    rec[col] = (safe_float(row[i])
+                                if i is not None and i < len(row) else 0.0)
+                rows.append((client, rec))
+                if len(seen) == len(PARTICIPANTS):
+                    break
+            return rows
+    except Exception:
+        return []
+
+
+def load_all_participants(start_date=None, end_date=None) -> dict[str, list[dict]]:
+    """Read every participant OI CSV **once** and bucket rows per participant.
+
+    The previous implementation called ``load_participant_csvs`` once per
+    participant, re-reading and re-parsing the entire directory 4×. This
+    single pass cuts CSV I/O and parse work by ~4×.
+    """
+    buckets = {p: [] for p in PARTICIPANTS}
     pattern = os.path.join(CFG.csv_dir, 'participant_oi_*.csv')
-    rows = []
 
     for path in sorted(glob.glob(pattern)):
-        date_match = re.search(r'(\d{8})', os.path.basename(path))
-        if not date_match:
+        file_date = _date_from_filename(path)
+        if file_date is None:
             continue
-        date_string = date_match.group(1)
-        try:
-            file_date = datetime.datetime.strptime(date_string, '%Y%m%d').date()
-        except ValueError:
-            try:
-                file_date = datetime.datetime.strptime(date_string, '%d%m%Y').date()
-            except ValueError:
-                continue
-
         if start_date and file_date < start_date:
             continue
         if end_date and file_date > end_date:
@@ -145,56 +203,73 @@ def load_participant_csvs(client_type: str,
         if not is_working_day(file_date):
             continue
 
+        for client, rec in _read_participant_oi_rows(path, file_date):
+            buckets[client].append(rec)
+
+    for client in buckets:
+        buckets[client].sort(key=lambda r: r['date'])
+    return buckets
+
+
+def load_participant_csvs(client_type: str,
+                          start_date: Optional[datetime.date] = None,
+                          end_date: Optional[datetime.date] = None) -> list[dict]:
+    """Load one participant's raw OI rows (thin wrapper over the single-pass loader)."""
+    return load_all_participants(start_date, end_date)[client_type]
+
+
+def _parse_volume_date(path: str) -> Optional[datetime.date]:
+    """Parse a participant volume CSV filename into its trade date.
+
+    NSE volume files are named ``participant_vol_DDMMYYYY.csv`` (day-month-
+    year, unlike the YYYYMMDD OI files). Try DDMMYYYY first, then fall back
+    to YYYYMMDD for any locally re-named files.
+    """
+    match = re.search(r'(\d{8})', os.path.basename(path))
+    if not match:
+        return None
+    digits = match.group(1)
+    for fmt in ('%d%m%Y', '%Y%m%d'):
         try:
-            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-                reader = csv.reader(f)
-
-                # ── Scan for header row ──
-                header = None
-                while True:
-                    header = next(reader, None)
-                    if header is None:
-                        break
-                    if header and any(
-                        str(h).strip().lower().startswith('client')
-                        for h in header if h
-                    ):
-                        break
-                if not header:
-                    continue
-
-                idx = {h.strip().lower(): i
-                       for i, h in enumerate(header) if h}
-
-                # ── Find the matching participant row ──
-                for row in reader:
-                    if not row:
-                        continue
-                    if str(row[0]).strip().upper() != client_type.upper():
-                        continue
-
-                    def get(col, _r=row, _i=idx):
-                        i = _i.get(col.lower())
-                        if i is None or i >= len(_r):
-                            return 0.0
-                        return safe_float(_r[i])
-
-                    rows.append({'date': file_date, **{
-                        col: get(' '.join(w.capitalize() for w in col.split('_')))
-                        for col in RAW_COLUMNS
-                    }})
-                    break  # One row per participant per file
-        except Exception:
+            return datetime.datetime.strptime(digits, fmt).date()
+        except ValueError:
             continue
-
-    rows.sort(key=lambda r: r['date'])
-    return rows
+    return None
 
 
-def load_all_participants(start_date=None, end_date=None) -> dict[str, list[dict]]:
-    """Load all 4 participants once. Reuse everywhere to avoid re-reading."""
-    return {p: load_participant_csvs(p, start_date, end_date)
-            for p in PARTICIPANTS}
+def _net_aggression(row: dict) -> float:
+    """Net aggression (buy − sell) for one participant's volume row.
+
+    Expects snake_case keys (``future_index_long``, …) as produced by
+    ``_read_participant_oi_rows`` and ``load_latest_volume_csv``.
+    """
+    net_fut = row.get('future_index_long', 0) - row.get('future_index_short', 0)
+    net_opt = ((row.get('option_index_call_long', 0) + row.get('option_index_put_short', 0))
+               - (row.get('option_index_put_long', 0) + row.get('option_index_call_short', 0)))
+    return net_fut + net_opt
+
+
+def load_all_volume_history() -> dict[str, dict[datetime.date, float]]:
+    """Parse every participant volume CSV into daily net aggression.
+
+    Returns ``{client: {date: net_volume}}``, where net aggression (buy −
+    sell) = (Future Index Long − Short) + (Call Long + Put Short)
+    − (Put Long + Call Short).
+    """
+    buckets: dict[str, dict[datetime.date, float]] = {p: {} for p in PARTICIPANTS}
+    pattern = os.path.join(CFG.vol_csv_dir, '*participant_vol_*.csv')
+    files = sorted(glob.glob(pattern))
+    if not files:
+        return buckets
+
+    for path in files:
+        file_date = _parse_volume_date(path)
+        if file_date is None or not is_working_day(file_date):
+            continue
+        for client, rec in _read_participant_oi_rows(path, file_date):
+            buckets[client][file_date] = _net_aggression(rec)
+
+    return buckets
 
 
 def load_latest_volume_csv() -> tuple[dict, Optional[str]]:
@@ -204,9 +279,13 @@ def load_latest_volume_csv() -> tuple[dict, Optional[str]]:
     if not files:
         return {}, None
 
-    latest_file = files[-1]
-    date_match = re.search(r'participant_vol_(\d{4})(\d{2})(\d{2})\.csv', os.path.basename(latest_file))
-    file_date_str = f"{date_match.group(3)}-{date_match.group(2)}-{date_match.group(1)}" if date_match else "Unknown"
+    # Sort by parsed trade date (DDMMYYYY filenames don't sort chronologically).
+    dated = [(f, _parse_volume_date(f)) for f in files]
+    dated = [(f, d) for f, d in dated if d is not None]
+    if not dated:
+        return {}, None
+    latest_file, file_date = max(dated, key=lambda x: x[1])
+    file_date_str = file_date.isoformat()
 
     data = {}
     try:
@@ -223,7 +302,7 @@ def load_latest_volume_csv() -> tuple[dict, Optional[str]]:
                     record = {}
                     for i, h in enumerate(headers):
                         if i < len(row):
-                            record[h] = safe_float(row[i])
+                            record[h.replace(' ', '_')] = safe_float(row[i])
                     data[client] = record
     except Exception:
         pass
@@ -232,13 +311,7 @@ def load_latest_volume_csv() -> tuple[dict, Optional[str]]:
 
 def calculate_net_volume(data_dict: dict) -> dict:
     """Calculates Net Aggression (Buy - Sell) from Volume CSV."""
-    results = {}
-    for client, row in data_dict.items():
-        net_fut = row.get('future index long', 0) - row.get('future index short', 0)
-        net_opt = (row.get('option index call long', 0) + row.get('option index put short', 0)) - \
-                  (row.get('option index put long', 0) + row.get('option index call short', 0))
-        results[client] = net_fut + net_opt
-    return results
+    return {client: _net_aggression(row) for client, row in data_dict.items()}
 
 
 def get_tomorrow_matrix(
@@ -345,6 +418,16 @@ def compute_derived(rows: list[dict]) -> list[dict]:
     df['nfno_5d_avg'] = df['nfno'].rolling(window=n5).mean()
     df['nfno_5d_mom'] = df['nfno'] - df['nfno_5d_avg']
 
+    # ── Tier 4: dynamic percentile rank of short_pct (1-year lookback) ──
+    # Vectorized rolling percentile rank: for each day, the rank of today's
+    # short_pct within its trailing window (0..1, method='max' → P(X <= x)).
+    # NaN until the window fills, which downstream treats as neutral (0.5).
+    df['short_percentile'] = (
+        df['short_pct'].rolling(window=CFG.percentile_window,
+                                min_periods=CFG.percentile_window)
+        .rank(method='max', pct=True)
+    )
+
     # ── Convert back to the legacy ``list[dict]`` shape ──
     # Residual NaN → None so downstream dict/SQLite code sees the same
     # "not yet available" sentinel as before.
@@ -390,20 +473,28 @@ class DaySignals:
     client_nfno: float = 0
     fii_short_pct: float = 0.0
 
+    fii_net_vol: float = 0.0      # net aggression (buy - sell)
+    pro_net_vol: float = 0.0
+    dii_net_vol: float = 0.0
+    client_net_vol: float = 0.0
+
     smart_money_score: int = 0
     retail_trap: bool = False
     fii_pro_aligned: bool = False
     alignment_direction: str = 'NEUTRAL'   # BULLISH / BEARISH / NEUTRAL
     fii_client_diverged: bool = False
     institutional_strength: float = 0
-    retail_vulnerability: float = 0
 
     ai_sentiment: str = '⚖️ NEUTRAL'
     ai_confidence: int = 55
 
 
 def compute_day_signals(fii: dict, dii: dict, pro: dict,
-                        client: dict) -> DaySignals:
+                        client: dict,
+                        fii_net_vol: float = 0.0,
+                        pro_net_vol: float = 0.0,
+                        dii_net_vol: float = 0.0,
+                        client_net_vol: float = 0.0) -> DaySignals:
     """Compute all cross-participant signals for one date.
 
     All inputs are derived-row dicts for that date (may be empty dicts).
@@ -427,6 +518,17 @@ def compute_day_signals(fii: dict, dii: dict, pro: dict,
     s.dii_combined = dii_combined
     s.client_nfno = client_nfno
 
+    s.fii_net_vol = fii_net_vol
+    s.pro_net_vol = pro_net_vol
+    s.dii_net_vol = dii_net_vol
+    s.client_net_vol = client_net_vol
+
+    # Dynamic percentile rank of FII short% (1-year lookback); neutral (0.5)
+    # until enough history exists to compute it.
+    fii_short_rank = fii.get('short_percentile')
+    if fii_short_rank is None:
+        fii_short_rank = 0.5
+
     # ── Alignment detection ──
     fii_dir = (fii_npf > 0) - (fii_npf < 0)      # +1 / 0 / -1
     pro_dir = (pro_nopo > 0) - (pro_nopo < 0)
@@ -440,7 +542,7 @@ def compute_day_signals(fii: dict, dii: dict, pro: dict,
         (fii_npf < 0 and client_nfno > 0) or
         (fii_npf > 0 and client_nfno < 0)
     )
-    heavy_short   = fii_npf < 0 and fii_spc >= CFG.fii_heavy_short_pct
+    heavy_short   = fii_npf < 0 and fii_short_rank >= CFG.heavy_short_rank
     pro_short     = (pro_nopo + pro_npf) < 0
     client_long   = client_nfno > 0
     s.retail_trap = heavy_short and pro_short and client_long
@@ -449,20 +551,29 @@ def compute_day_signals(fii: dict, dii: dict, pro: dict,
     score = 0
     score += CFG.weight_fii * ((fii_npf > 0) - (fii_npf < 0))
 
-    # FII extreme positioning bonus/penalty
-    if fii_spc >= CFG.fii_extreme_short:
+    # FII dynamic percentile positioning bonus/penalty (regime-adaptive)
+    if fii_short_rank >= CFG.extreme_short_rank:
         score -= 2
-    elif fii_spc >= CFG.fii_heavy_short_pct:
+    elif fii_short_rank >= CFG.heavy_short_rank:
         score -= 1
-    elif fii_spc <= CFG.fii_extreme_long:
+    elif fii_short_rank <= CFG.extreme_long_rank:
         score += 2
-    elif fii_spc <= 40.0:
+    elif fii_short_rank <= 0.25:
         score += 1
 
     pro_combined = pro_nopo + pro_npf
     score += CFG.weight_pro * ((pro_combined > 0) - (pro_combined < 0))
     score += CFG.weight_dii * ((dii_combined > 0) - (dii_combined < 0))
     score -= CFG.weight_client * ((client_nfno > 0) - (client_nfno < 0))
+
+    # ── Volume kicker: OI vs net-aggression divergence ──
+    # FII net short on OI but heavy net buying in volume = major short
+    # covering (+3). FII net long but heavy net selling = major long
+    # unwinding (-3).
+    if fii_npf < 0 and fii_net_vol > CFG.volume_kicker_threshold:
+        score += 3
+    elif fii_npf > 0 and fii_net_vol < -CFG.volume_kicker_threshold:
+        score -= 3
 
     s.smart_money_score = score
     s.institutional_strength = abs(fii_npf) + abs(pro_combined)
@@ -499,8 +610,17 @@ def compute_day_signals(fii: dict, dii: dict, pro: dict,
     return s
 
 
-def compute_cross_participant(data: dict[str, list[dict]]) -> list[DaySignals]:
-    """Align all 4 participants by date and compute signals per day."""
+def compute_cross_participant(
+        data: dict[str, list[dict]],
+        volume_history: dict[str, dict[datetime.date, float]] = None,
+) -> list[DaySignals]:
+    """Align all 4 participants by date and compute signals per day.
+
+    ``volume_history`` maps client → date → net aggression; missing dates
+    default to 0.0 (volume data not available yet).
+    """
+    volume_history = volume_history or {p: {} for p in PARTICIPANTS}
+
     # Build date → row maps
     by_date = {
         p: {r['date']: r for r in rows}
@@ -518,7 +638,13 @@ def compute_cross_participant(data: dict[str, list[dict]]) -> list[DaySignals]:
         # Only compute when at least FII data exists (primary participant)
         if not fii:
             continue
-        signals.append(compute_day_signals(fii, dii, pro, client))
+        signals.append(compute_day_signals(
+            fii, dii, pro, client,
+            fii_net_vol=volume_history['FII'].get(d, 0.0),
+            pro_net_vol=volume_history['PRO'].get(d, 0.0),
+            dii_net_vol=volume_history['DII'].get(d, 0.0),
+            client_net_vol=volume_history['CLIENT'].get(d, 0.0),
+        ))
 
     return signals
 
@@ -537,8 +663,7 @@ class SwingSignal:
     warnings: list = field(default_factory=list)
 
 
-def generate_swing_signal(day: DaySignals, fii_row: dict,
-                          prev_day: Optional[DaySignals] = None) -> SwingSignal:
+def generate_swing_signal(day: DaySignals, fii_row: dict) -> SwingSignal:
     """Convert one day's signals into an actionable swing trade plan."""
     warnings = []
     score = day.smart_money_score
@@ -560,19 +685,19 @@ def generate_swing_signal(day: DaySignals, fii_row: dict,
             stop_note='—',
             warnings=['⚡ Smart money in disagreement'])
 
-    # ── Warning collection ──
-    if day.fii_short_pct >= CFG.fii_extreme_short:
-        warnings.append(f'🔥 FII extreme short ({day.fii_short_pct:.0f}%) — '
-                        f'squeeze risk on any bounce')
-    elif day.fii_short_pct >= CFG.fii_heavy_short_pct:
-        warnings.append(f'⚠️ FII heavy short ({day.fii_short_pct:.0f}%)')
+    # ── Warning collection (dynamic percentile rank) ──
+    short_rank = fii_row.get('short_percentile')
+    if short_rank is not None:
+        if short_rank >= CFG.extreme_short_rank:
+            warnings.append(f'🔥 FII extreme short (rank {short_rank:.0%}) — '
+                            f'squeeze risk on any bounce')
+        elif short_rank >= CFG.heavy_short_rank:
+            warnings.append(f'⚠️ FII heavy short (rank {short_rank:.0%})')
 
     if fii_row.get('is_expiry_week'):
         warnings.append('📅 Expiry week — use wider stops (×1.5)')
 
     # Momentum flip detection
-    if prev_day and momentum is not None:
-        prev_mom = prev_day.date  # placeholder, real check below
     if momentum is not None:
         if momentum < 0 and day.fii_npf > 0:
             warnings.append('📉 NFNO momentum turning down despite net long — '
@@ -586,7 +711,7 @@ def generate_swing_signal(day: DaySignals, fii_row: dict,
         bias, strength = 'LONG', 'STRONG'
     elif score >= 2:
         bias, strength = 'LONG', 'MODERATE'
-        if day.fii_short_pct >= CFG.fii_heavy_short_pct:
+        if short_rank is not None and short_rank >= CFG.heavy_short_rank:
             strength = 'WEAK'
     elif score <= -4:
         bias, strength = 'SHORT', 'STRONG'
@@ -631,6 +756,7 @@ CREATE TABLE IF NOT EXISTS participant_derived (
     nfno_delta REAL, nopo_delta REAL, npf_delta REAL,
     fil_3d REAL, fis_3d REAL, nfno_5d_avg REAL, nfno_5d_mom REAL,
     short_pct_3d_trend REAL,
+    short_percentile REAL,
     day_of_week INT, month INT, days_to_expiry INT,
     is_expiry_week INT, week_of_month INT,
     PRIMARY KEY (date, client_type)
@@ -640,6 +766,7 @@ CREATE TABLE IF NOT EXISTS cross_signals (
     date TEXT PRIMARY KEY,
     fii_npf REAL, pro_nopo REAL, dii_combined REAL, client_nfno REAL,
     fii_short_pct REAL,
+    fii_net_vol REAL, pro_net_vol REAL, dii_net_vol REAL, client_net_vol REAL,
     smart_money_score INT, retail_trap INT,
     fii_pro_aligned INT, alignment_direction TEXT,
     fii_client_diverged INT, institutional_strength REAL,
@@ -658,8 +785,20 @@ class SwingDB:
         self.path = db_path or CFG.db_path
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         self.conn = sqlite3.connect(self.path)
+        # WAL + NORMAL: faster single-writer commits, safe concurrent readers.
+        self.conn.execute('PRAGMA journal_mode=WAL')
+        self.conn.execute('PRAGMA synchronous=NORMAL')
         self.conn.executescript(DB_SCHEMA)
         self.conn.commit()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is None:
+            self.conn.commit()
+        self.conn.close()
+        return False
 
     def save(self, derived: dict[str, list[dict]],
              signals: list[DaySignals]):
@@ -676,7 +815,7 @@ class SwingDB:
             'short_pct', 'long_pct', 'short_delta_pct', 'ls_ratio',
             'nfno_delta', 'nopo_delta', 'npf_delta',
             'fil_3d', 'fis_3d', 'nfno_5d_avg', 'nfno_5d_mom',
-            'short_pct_3d_trend',
+            'short_pct_3d_trend', 'short_percentile',
             'day_of_week', 'month', 'days_to_expiry',
             'is_expiry_week', 'week_of_month',
         ])
@@ -704,7 +843,9 @@ class SwingDB:
             cur.executemany(pd_sql, pd_rows)
 
         cs_cols = ['date', 'fii_npf', 'pro_nopo', 'dii_combined',
-                   'client_nfno', 'fii_short_pct', 'smart_money_score',
+                   'client_nfno', 'fii_short_pct',
+                   'fii_net_vol', 'pro_net_vol', 'dii_net_vol', 'client_net_vol',
+                   'smart_money_score',
                    'retail_trap', 'fii_pro_aligned', 'alignment_direction',
                    'fii_client_diverged', 'institutional_strength',
                    'ai_sentiment', 'ai_confidence']
@@ -714,7 +855,9 @@ class SwingDB:
 
         cs_rows = [
             (s.date.isoformat(), s.fii_npf, s.pro_nopo, s.dii_combined,
-             s.client_nfno, s.fii_short_pct, s.smart_money_score,
+             s.client_nfno, s.fii_short_pct,
+             s.fii_net_vol, s.pro_net_vol, s.dii_net_vol, s.client_net_vol,
+             s.smart_money_score,
              int(s.retail_trap), int(s.fii_pro_aligned),
              s.alignment_direction, int(s.fii_client_diverged),
              s.institutional_strength, s.ai_sentiment, s.ai_confidence)
@@ -750,7 +893,10 @@ class SwingDB:
         return datetime.date.fromisoformat(val) if val else None
 
     def close(self):
-        self.conn.close()
+        try:
+            self.conn.close()
+        except sqlite3.Error:
+            pass
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -770,18 +916,29 @@ class SwingEngine:
         today = datetime.date.today()
         cutoff = today - timedelta(days=365 * CFG.years_history)
 
+        if not os.path.isdir(CFG.csv_dir):
+            print(f'❌ CSV directory not found: {CFG.csv_dir}')
+            print('   Download participant OI CSVs first '
+                  '(fetch_participent_oi_vol.py), then re-run update.')
+            return {}
+
         # Find the newest date already persisted so we only fetch / process
         # data newer than it. A small warm-up buffer keeps the rolling
         # momentum windows accurate for the first new row.
-        db = SwingDB()
-        last_date = db.latest_stored_date()
-        db.close()
+        try:
+            with SwingDB() as db:
+                last_date = db.latest_stored_date()
+        except (sqlite3.Error, OSError) as exc:
+            print(f'❌ Could not open database {CFG.db_path}: {exc}')
+            return {}
 
         if last_date is None:
             start = cutoff
             mode = 'full'
         else:
-            warmup = timedelta(days=(CFG.momentum_window + CFG.flow_window) * 3)
+            # short_percentile needs a full 1-year lookback, so warm up far
+            # enough to recompute it correctly for the new rows.
+            warmup = timedelta(days=CFG.percentile_window * 2)
             start = max(cutoff, last_date - warmup)
             mode = 'incremental'
 
@@ -800,8 +957,11 @@ class SwingEngine:
         derived = {p: add_calendar_features(compute_derived(rows))
                    for p, rows in data.items() if rows}
 
+        print('Loading volume history...')
+        volume_history = load_all_volume_history()
+
         print('Computing cross-participant signals...')
-        signals = compute_cross_participant(derived)
+        signals = compute_cross_participant(derived, volume_history)
 
         # Only persist rows strictly newer than what is already stored.
         # (The warm-up rows are recomputed only as context and discarded.)
@@ -822,22 +982,24 @@ class SwingEngine:
 
         print(f'Saving {new_rows} new rows + {len(new_signals)} new signal '
               f'days to SQLite (INSERT OR REPLACE)...')
-        db = SwingDB()
-        db.save(new_derived, new_signals)
-        db.close()
+        try:
+            with SwingDB() as db:
+                db.save(new_derived, new_signals)
+        except (sqlite3.Error, OSError) as exc:
+            print(f'❌ Failed to write to database {CFG.db_path}: {exc}')
+            return {}
         print(f'✅ Done. Database: {CFG.db_path}')
         return {'derived': derived, 'signals': signals}
 
     # ── Today's swing report ──
     def report(self) -> str:
         db = SwingDB()
-        sigs = db.latest_signals(2)
+        sigs = db.latest_signals(1)
         if not sigs:
             db.close()
             return '❌ No data. Run: python fno_swing_engine.py update'
 
         latest = sigs[0]
-        prev = sigs[1] if len(sigs) > 1 else None
         fii_row = db.latest_participant('FII', 1)
         fii = fii_row[0] if fii_row else {}
         pro_rows = db.latest_participant('PRO', 1)
@@ -863,7 +1025,7 @@ class SwingEngine:
             ai_confidence=latest['ai_confidence'],
         )
 
-        signal = generate_swing_signal(day, fii, None)
+        signal = generate_swing_signal(day, fii)
 
         vol_data, vol_date = load_latest_volume_csv()
         vol_net = calculate_net_volume(vol_data) if vol_data else {}
@@ -1043,7 +1205,6 @@ class SwingEngine:
 # ══════════════════════════════════════════════════════════════════════
 
 def main():
-    import sys
     engine = SwingEngine()
     cmd = sys.argv[1] if len(sys.argv) > 1 else 'help'
 

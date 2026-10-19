@@ -34,6 +34,7 @@ The pure detectors are stdlib-only and safe to unit-test without Django.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from collections import deque
@@ -80,6 +81,9 @@ __all__ = [
     "evaluate_confirmation",
     "build_trigger_payload",
     "dispatch_trade_trigger",
+    "is_no_trade_zone",
+    "set_market_no_trade_probe",
+    "market_in_no_trade_zone",
 ]
 
 
@@ -94,14 +98,16 @@ def _to_float(value: Any) -> Optional[float]:
     return f if f == f else None
 
 
-def _candle_ohlc(candle: Dict[str, Any]) -> tuple:
-    """Return ``(open, high, low, close)``, raising on missing/invalid fields."""
+def _candle_ohlc(candle: Dict[str, Any]) -> Optional[tuple]:
+    """Return ``(open, high, low, close)``, or ``None`` when fields are missing/invalid."""
+    if not isinstance(candle, dict):
+        return None
     o = _to_float(candle.get("open"))
     h = _to_float(candle.get("high"))
     l = _to_float(candle.get("low"))
     c = _to_float(candle.get("close"))
     if None in (o, h, l, c):
-        raise ValueError(f"Candle missing OHLC fields: {candle}")
+        return None
     return o, h, l, c
 
 
@@ -124,14 +130,19 @@ def is_bullish_pin_bar(
     upper_frac: float = PIN_BAR_UPPER_WICK_FRAC,
 ) -> bool:
     """True when the candle is a bullish pin bar / hammer (long lower wick)."""
-    o, h, l, c = _candle_ohlc(candle)
+    ohlc = _candle_ohlc(candle)
+    if ohlc is None:
+        return False
+    o, h, l, c = ohlc
     total_range = h - l
     if total_range <= 0:
         return False
 
-    body = abs(c - o)
-    lower_wick = min(o, c) - l
-    upper_wick = h - max(o, c)
+    mn = min(o, c)
+    mx = max(o, c)
+    body = mx - mn
+    lower_wick = mn - l
+    upper_wick = h - mx
 
     long_lower = lower_wick >= wick_ratio * body and lower_wick >= lower_frac * total_range
     small_upper = upper_wick <= upper_frac * total_range
@@ -143,8 +154,14 @@ def is_bullish_engulfing(candle: Dict[str, Any], prev_candle: Optional[Dict[str,
     """True when ``candle`` bullishly engulfs the previous (bearish) candle body."""
     if not isinstance(prev_candle, dict):
         return False
-    o, _h, _l, c = _candle_ohlc(candle)
-    po, _ph, _pl, pc = _candle_ohlc(prev_candle)
+    curr = _candle_ohlc(candle)
+    if curr is None:
+        return False
+    prev = _candle_ohlc(prev_candle)
+    if prev is None:
+        return False
+    o, _h, _l, c = curr
+    po, _ph, _pl, pc = prev
 
     prev_bearish = pc < po
     curr_bullish = c > o
@@ -171,14 +188,19 @@ def is_bearish_pin_bar(
     lower_frac: float = BEAR_PIN_BAR_LOWER_WICK_FRAC,
 ) -> bool:
     """True when the candle is a bearish shooting star (long upper wick)."""
-    o, h, l, c = _candle_ohlc(candle)
+    ohlc = _candle_ohlc(candle)
+    if ohlc is None:
+        return False
+    o, h, l, c = ohlc
     total_range = h - l
     if total_range <= 0:
         return False
 
-    body = abs(c - o)
-    upper_wick = h - max(o, c)
-    lower_wick = min(o, c) - l
+    mn = min(o, c)
+    mx = max(o, c)
+    body = mx - mn
+    upper_wick = h - mx
+    lower_wick = mn - l
 
     long_upper = upper_wick >= wick_ratio * body and upper_wick >= upper_frac * total_range
     small_lower = lower_wick <= lower_frac * total_range
@@ -190,8 +212,14 @@ def is_bearish_engulfing(candle: Dict[str, Any], prev_candle: Optional[Dict[str,
     """True when ``candle`` bearishly engulfs the previous (bullish) candle body."""
     if not isinstance(prev_candle, dict):
         return False
-    o, _h, _l, c = _candle_ohlc(candle)
-    po, _ph, _pl, pc = _candle_ohlc(prev_candle)
+    curr = _candle_ohlc(candle)
+    if curr is None:
+        return False
+    prev = _candle_ohlc(prev_candle)
+    if prev is None:
+        return False
+    o, _h, _l, c = curr
+    po, _ph, _pl, pc = prev
 
     prev_bullish = pc > po
     curr_bearish = c < o
@@ -213,6 +241,8 @@ def has_bearish_pattern(
 # ── Gate 3: CVD confirmation ──────────────────────────────────────────────────
 def cvd_positive(candle: Dict[str, Any]) -> bool:
     """True when this candle's volume delta is positive (buyers dominated)."""
+    if not isinstance(candle, dict):
+        return False
     delta = _to_float(candle.get("delta"))
     return delta is not None and delta > 0
 
@@ -235,6 +265,8 @@ def cvd_confirmed(
 
 def cvd_negative(candle: Dict[str, Any]) -> bool:
     """True when this candle's volume delta is negative (sellers dominated)."""
+    if not isinstance(candle, dict):
+        return False
     delta = _to_float(candle.get("delta"))
     return delta is not None and delta < 0
 
@@ -267,6 +299,42 @@ class ConfirmationResult:
     trigger: Optional[Dict[str, Any]] = None
 
 
+def is_no_trade_zone(score: Any, momentum: Any, net_oi_bias: Any) -> bool:
+    """Mirror of the frontend tri-state in ``live_signals.html#updateAITrades``.
+
+    Returns True when the score / momentum / whole-chain Net-OI bias land in the
+    same dead-band the dashboard renders as ``🚫 NO TRADE ZONE``. Thresholds are
+    kept in lock-step with the frontend:
+      * bullish  = score > 55
+      * bearish  = score < 45, or (net_oi_bias < 0 and score < 50)
+      * middle-zone tie-break: momentum > +20 -> bullish, momentum < -20 -> bearish
+      * otherwise -> NO TRADE ZONE.
+    """
+    def _num(value: Any, default: float) -> float:
+        if value is None:
+            return default
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return default
+        if parsed != parsed or parsed in (float("inf"), float("-inf")):
+            return default
+        return parsed
+
+    score = _num(score, 50.0)
+    momentum = _num(momentum, 0.0)
+    macro_bias = _num(net_oi_bias, 0.0)
+
+    bullish = score > 55
+    bearish = (score < 45) or (macro_bias < 0 and score < 50)
+
+    if not bullish and not bearish:
+        bullish = momentum > 20
+        bearish = momentum < -20
+
+    return not bullish and not bearish
+
+
 def build_trigger_payload(setup_name: str, option_side: str = "CE") -> Dict[str, Any]:
     """The exact WebSocket trigger payload the frontend expects."""
     return {
@@ -286,6 +354,7 @@ def evaluate_confirmation(
     zone_pct: float = ENTRY_ZONE_PCT,
     trend_window: int = TREND_WINDOW,
     option_side: str = "CE",
+    no_trade_zone: bool = False,
 ) -> ConfirmationResult:
     """Run the confirmation gate over the just-closed candle.
 
@@ -314,7 +383,7 @@ def evaluate_confirmation(
     if pattern:
         reasons.append(f"pattern:{pattern}")
 
-    cvd_series = [c.get("cvd") for c in candles]
+    cvd_series = [c.get("cvd") if isinstance(c, dict) else None for c in candles]
     if side == "PE":
         cvd_ok = isinstance(candle, dict) and cvd_bear_confirmed(candle, cvd_series, trend_window)
     else:
@@ -325,6 +394,11 @@ def evaluate_confirmation(
     # CVD is ADVISORY only: a frozen CVD feed (missing bid/ask) must never block a
     # directional candle confirmation, so the trigger now ignores it entirely.
     triggered = in_zone and bool(pattern)
+    # NO TRADE ZONE gate: when the frontend tri-state would render "NO TRADE ZONE",
+    # the BUY_NOW trigger must NOT be published at all — suppress it here.
+    if triggered and no_trade_zone:
+        reasons.append("suppressed:no_trade_zone")
+        triggered = False
     return ConfirmationResult(
         triggered=triggered,
         in_zone=in_zone,
@@ -337,6 +411,33 @@ def evaluate_confirmation(
 
 
 # ── WebSocket dispatch ────────────────────────────────────────────────────────
+# Lazily built, process-wide Redis client for trade-trigger dispatch. Building a new
+# client (and its connection pool) on every trigger leaked a socket per publish and
+# paid a fresh connect each time; reusing one client removes both.
+_ai_trade_redis_client = None
+
+
+def _get_trade_redis_client():
+    """Return the cached trade-trigger Redis client, or None when redis-py is absent."""
+    global _ai_trade_redis_client
+    if _ai_trade_redis_client is None:
+        try:
+            import redis as _redis
+        except ImportError:
+            return None
+        try:
+            _ai_trade_redis_client = _redis.Redis.from_url(
+                AI_TRADE_REDIS_URL,
+                decode_responses=True,
+                socket_connect_timeout=1,
+                socket_timeout=1,
+            )
+        except Exception:
+            logger.exception("Could not build the AI trade-trigger Redis client.")
+            return None
+    return _ai_trade_redis_client
+
+
 def dispatch_trade_trigger(trigger: Dict[str, Any]) -> bool:
     """Publish a trade trigger for the AI Trade Setups card.
 
@@ -348,20 +449,41 @@ def dispatch_trade_trigger(trigger: Dict[str, Any]) -> bool:
     ``ai_trade_setups`` group, which ``AITradeTriggerConsumer`` forwards to every
     connected browser as ``{action: trade_trigger, status: BUY_NOW, ...}``.
     """
-    import json as _json
-
-    try:
-        import redis as _redis
-    except ImportError:
+    client = _get_trade_redis_client()
+    if client is None:
         logger.warning("redis-py unavailable; trigger not dispatched: %s", trigger)
         return False
-
     try:
-        client = _redis.Redis.from_url(AI_TRADE_REDIS_URL, decode_responses=True)
-        client.publish(AI_TRADE_REDIS_CHANNEL, _json.dumps(trigger, default=str))
+        client.publish(AI_TRADE_REDIS_CHANNEL, json.dumps(trigger, default=str))
         return True
     except Exception:
         logger.exception("Failed to dispatch AI trade trigger")
+        return False
+
+
+# ── Live no-trade gate (injected by the feed worker) ──────────────────────────
+# The feed worker (upstox_live_feed.py) owns the authoritative score/momentum/
+# net-OI-bias and injects a probe here so evaluate_confirmation() can suppress
+# BUY_NOW triggers while the dashboard is in a NO TRADE ZONE. The probe is
+# intentionally optional: without it the engine behaves exactly as before.
+_market_no_trade_probe = None
+
+
+def set_market_no_trade_probe(probe) -> None:
+    """Inject the feed worker's ``() -> bool`` no-trade-zone probe (idempotent)."""
+    global _market_no_trade_probe
+    _market_no_trade_probe = probe
+
+
+def market_in_no_trade_zone() -> bool:
+    """Return True when the injected probe reports the market is in a no-trade zone."""
+    probe = _market_no_trade_probe
+    if probe is None:
+        return False
+    try:
+        return bool(probe())
+    except Exception:
+        logger.exception("Market no-trade probe failed; defaulting to NOT suppressing.")
         return False
 
 
@@ -422,6 +544,7 @@ class CandleConfirmationEngine:
             zone_pct=self.zone_pct,
             trend_window=self.trend_window,
             option_side=self.option_side,
+            no_trade_zone=market_in_no_trade_zone(),
         )
 
         if result.triggered:

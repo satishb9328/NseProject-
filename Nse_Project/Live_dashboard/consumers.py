@@ -169,22 +169,31 @@ class CvdLiveConsumer(AsyncWebsocketConsumer):
         # waiting up to 2 minutes for the next candle close.
         snapshot = await sync_to_async(_read_snapshot)()
         if snapshot:
-            await self.send(
-                text_data=json.dumps({"type": "cvd_snapshot", "payload": snapshot})
-            )
+            try:
+                await self.send(
+                    text_data=json.dumps({"type": "cvd_snapshot", "payload": snapshot})
+                )
+            except Exception:
+                logger.debug("CVD snapshot send failed; client disconnected.", exc_info=True)
 
     async def disconnect(self, close_code):
         if self.channel_layer is not None:
-            await self.channel_layer.group_discard(CVD_GROUP, self.channel_name)
+            try:
+                await self.channel_layer.group_discard(CVD_GROUP, self.channel_name)
+            except Exception:
+                logger.debug("CVD group_discard failed on disconnect.", exc_info=True)
 
     async def cvd_update(self, event):
         """Handler for the ``cvd.update`` group message sent by the bridge."""
         payload = event.get("payload")
         if payload is None:
             return
-        await self.send(
-            text_data=json.dumps({"type": "cvd_update", "payload": payload})
-        )
+        try:
+            await self.send(
+                text_data=json.dumps({"type": "cvd_update", "payload": payload})
+            )
+        except Exception:
+            logger.debug("CVD update send failed; client disconnected.", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -328,22 +337,31 @@ class PreopenTrapConsumer(AsyncWebsocketConsumer):
         # to wait for a re-broadcast of the (already fired) settle event.
         snapshot = await sync_to_async(_read_preopen_snapshot)()
         if snapshot:
-            await self.send(
-                text_data=json.dumps({"type": "preopen_update", "payload": snapshot})
-            )
+            try:
+                await self.send(
+                    text_data=json.dumps({"type": "preopen_update", "payload": snapshot})
+                )
+            except Exception:
+                logger.debug("Pre-open snapshot send failed; client disconnected.", exc_info=True)
 
     async def disconnect(self, close_code):
         if self.channel_layer is not None:
-            await self.channel_layer.group_discard(PREOPEN_GROUP, self.channel_name)
+            try:
+                await self.channel_layer.group_discard(PREOPEN_GROUP, self.channel_name)
+            except Exception:
+                logger.debug("Pre-open group_discard failed on disconnect.", exc_info=True)
 
     async def preopen_update(self, event):
         """Handler for the ``preopen.update`` group message sent by the bridge."""
         payload = event.get("payload")
         if payload is None:
             return
-        await self.send(
-            text_data=json.dumps({"type": "preopen_update", "payload": payload})
-        )
+        try:
+            await self.send(
+                text_data=json.dumps({"type": "preopen_update", "payload": payload})
+            )
+        except Exception:
+            logger.debug("Pre-open update send failed; client disconnected.", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -387,7 +405,7 @@ def _ai_trade_bridge_loop() -> None:
                 socket_connect_timeout=REDIS_SOCKET_CONNECT_TIMEOUT,
                 socket_keepalive=True,
             )
-            pubsub = client.pubsub()
+            pubsub = client.pubsub(ignore_subscribe_messages=True)
             pubsub.subscribe(AI_TRADE_REDIS_CHANNEL)
             for message in pubsub.listen():
                 if message.get("type") != "message":
@@ -439,11 +457,17 @@ class AITradeTriggerConsumer(AsyncWebsocketConsumer):
 
     async def disconnect(self, close_code):
         if self.channel_layer is not None:
-            await self.channel_layer.group_discard(AI_TRADE_GROUP, self.channel_name)
+            try:
+                await self.channel_layer.group_discard(AI_TRADE_GROUP, self.channel_name)
+            except Exception:
+                logger.debug("AI trade group_discard failed on disconnect.", exc_info=True)
 
     async def trade_trigger(self, event):
         """Handler for the ``trade.trigger`` group message dispatched by the module."""
         trigger = event.get("trigger")
         if trigger is None:
             return
-        await self.send(text_data=json.dumps(trigger))
+        try:
+            await self.send(text_data=json.dumps(trigger))
+        except Exception:
+            logger.debug("AI trade trigger send failed; client disconnected.", exc_info=True)

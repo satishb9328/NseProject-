@@ -29,7 +29,10 @@ except ImportError:  # Keeps the dashboard importable until redis-py is installe
 
 logger = logging.getLogger(__name__)
 
-PREOPEN_TRAP_THRESHOLD = 50
+# Shared India (IST) timezone, reused by the feed-timestamp parser and the pre-open
+# context builder instead of reconstructing a tz object on every call.
+IST = timezone(timedelta(hours=5, minutes=30))
+
 # Pre-open wall strikes are derived from the previous session close +/- an offset and
 # rounded to the nearest NIFTY strike. The PRE-OPEN GAMMA TRAP is judged against these
 # morning / previous-EOD wall levels and must NOT drift with intraday OI, so they are
@@ -72,9 +75,6 @@ LIVE_OPTIONS_COLD_BACKUP = Path(settings.BASE_DIR) / "live_options_data.json"
 _live_options_redis = None
 _redis_outage_logged = False
 _redis_retry_after = 0.0
-
-OPTION_INSTRUMENT_METADATA: dict[str, dict] = {}
-MASTER_INSTRUMENTS_URL = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.csv.gz"
 
 LOT_SIZE = 65  # NIFTY option lot size (used to convert OI/COI shares -> lots)
 
@@ -345,14 +345,9 @@ PREOPEN_REDIS_TIMEOUT = float(os.getenv("PREOPEN_REDIS_TIMEOUT", "2.0"))
 _preopen_redis = None
 
 
-def _clamp(value: float, low: float, high: float) -> float:
-    """Clamp ``value`` into the inclusive ``[low, high]`` band."""
-    return max(low, min(high, value))
-
-
 def _ist_today() -> date:
     """Return the current date in the India (IST) timezone."""
-    return datetime.now(timezone(timedelta(hours=5, minutes=30))).date()
+    return datetime.now(IST).date()
 
 
 def _find_preopen_column(columns, hints) -> str | None:
@@ -461,7 +456,7 @@ def _parse_feed_timestamp(value) -> date | None:
     if value is None:
         return None
 
-    ist = timezone(timedelta(hours=5, minutes=30))
+    ist = IST
 
     if isinstance(value, (int, float)):
         try:
@@ -574,7 +569,7 @@ def _build_preopen_context() -> dict:
     and the Redis publisher so the three can never drift apart.
     """
     trap_data = fetch_real_preopen_trap_data()
-    ist_now = datetime.now(timezone(timedelta(hours=5, minutes=30))).isoformat()
+    ist_now = datetime.now(IST).isoformat()
 
     # Yesterday's close comes from the live feed's index snapshot (cp field), and is
     # only trusted when it is from today; otherwise it stays None and the projected
@@ -680,8 +675,10 @@ def publish_preopen_trap_to_redis(payload: dict | None = None) -> dict:
     if client is not None:
         try:
             raw = json.dumps(payload, default=str)
-            client.set(PREOPEN_REDIS_DATA_KEY, raw)
-            client.publish(PREOPEN_REDIS_CHANNEL, raw)
+            pipe = client.pipeline(transaction=False)
+            pipe.set(PREOPEN_REDIS_DATA_KEY, raw)
+            pipe.publish(PREOPEN_REDIS_CHANNEL, raw)
+            pipe.execute()
             logger.info("Published pre-open trap snapshot to Redis (%s).", PREOPEN_REDIS_DATA_KEY)
         except Exception as exc:
             logger.warning("Failed to publish pre-open snapshot to Redis: %s", exc)
@@ -728,10 +725,26 @@ def preopen_trap_api(request):
 
     Reads the published Redis snapshot first so the poll and the WebSocket always
     agree, then falls back to a fresh on-disk computation while Redis is down or the
-    snapshot has not been published yet.
+    snapshot has not been published yet. Any unexpected failure is returned as a JSON
+    body (never an HTML 500), so the frontend poll can degrade gracefully.
     """
-    cached = read_preopen_from_redis()
-    return JsonResponse(cached if cached is not None else _build_preopen_context())
+    try:
+        cached = read_preopen_from_redis()
+        return JsonResponse(cached if cached is not None else _build_preopen_context())
+    except Exception as exc:
+        logger.error("preopen_trap_api failed; serving a neutral fallback.", exc_info=True)
+        return JsonResponse({
+            "preopen_max": None,
+            "preopen_min": None,
+            "preopen_final": None,
+            "preopen_open": None,
+            "previous_close": None,
+            "projected_open_pct": None,
+            "projected_open_display": "—",
+            "projected_open_tone": "flat",
+            "updated_at": None,
+            "error": f"{type(exc).__name__}: {exc}",
+        })
 
 
 def get_live_options_redis():
@@ -878,68 +891,6 @@ def _to_number(value):
     return None
 
 
-def _normalized_symbol_value(value) -> str | None:
-    if not isinstance(value, str):
-        return None
-    symbol = value.strip().upper().replace(" ", "")
-    return symbol if symbol else None
-
-
-def _is_strict_target_symbol(value, target_symbol: str) -> bool:
-    normalized = _normalized_symbol_value(value)
-    if not normalized:
-        return False
-
-    target = target_symbol.upper().replace(" ", "")
-    if not normalized.startswith(target):
-        return False
-
-    if target == "NIFTY":
-        exclusions = ("BANKNIFTY", "FINNIFTY", "SENSEX", "MIDCPNIFTY")
-        if any(exclusion in normalized for exclusion in exclusions):
-            return False
-
-    return True
-
-
-def _collect_symbol_candidates(item: dict) -> list[str]:
-    candidates: list[str] = []
-
-    for field in ("tradingsymbol", "symbol", "instrument_key", "underlying", "underlying_name"):
-        value = item.get(field)
-        if isinstance(value, str):
-            candidates.append(value)
-
-    raw_sample = item.get("raw_sample")
-    if isinstance(raw_sample, dict):
-        def recurse(value):
-            if isinstance(value, dict):
-                for key, nested in value.items():
-                    if isinstance(nested, str) and any(token in key.lower() for token in ("symbol", "tradingsymbol", "underlying")):
-                        candidates.append(nested)
-                    else:
-                        recurse(nested)
-            elif isinstance(value, list):
-                for nested in value:
-                    recurse(nested)
-
-        recurse(raw_sample)
-
-    return candidates
-
-
-def _belongs_to_symbol(item: dict, target_symbol: str) -> bool:
-    """Require a strict target-symbol marker from saved metadata or the raw feed payload."""
-    if not isinstance(item, dict):
-        return False
-
-    for candidate in _collect_symbol_candidates(item):
-        if _is_strict_target_symbol(candidate, target_symbol):
-            return True
-
-    return False
-
-
 def _json_safe_value(value):
     if value is None:
         return 0
@@ -1024,11 +975,12 @@ def build_option_chain_rows(
             continue
 
         side = (item.get('option_type') or '').upper()
-        raw = item.get('raw_sample', {}) if isinstance(item.get('raw_sample', {}), dict) else {}
+        raw_sample = item.get('raw_sample', {})
+        raw = raw_sample if isinstance(raw_sample, dict) else {}
         if side not in {"CE", "PE"}:
             continue
 
-        strike_key = str(int(strike) if float(strike).is_integer() else strike)
+        strike_key = str(int(strike) if strike.is_integer() else strike)
         # THE fix: (expiry_date, strike_price), not strike_price alone.
         row_key = (expiry_group_key(item, active_expiry), strike)
         row = rows.setdefault(row_key, {
@@ -1085,7 +1037,7 @@ def build_option_chain_rows(
         # Volume Velocity (shares/sec) from the feed's rolling window tracker.
         velocity = _to_number(item.get('volume_velocity'))
         if velocity is None:
-            velocity = _to_number(item.get(f'{"call" if side == "CE" else "put"}_velocity'))
+            velocity = _to_number(item.get(f'{target}_velocity'))
 
         row[f'{target}_ltp'] = ltp if ltp is not None else '-'
         row[f'{target}_oi'] = oi if oi is not None else '-'

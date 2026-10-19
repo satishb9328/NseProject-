@@ -74,6 +74,8 @@ DAYS_PER_YEAR = 365.0
 SECONDS_PER_YEAR = DAYS_PER_YEAR * 24.0 * 60.0 * 60.0
 VOL_POINTS_PER_UNIT = 100.0
 MIN_DTE_YEARS = 1.0 / (DAYS_PER_YEAR * 24.0)
+# Precomputed sqrt(2*pi) for the Black-Scholes normal density (used per strike).
+SQRT_2PI = math.sqrt(2.0 * math.pi)
 
 
 class GammaBotError(RuntimeError):
@@ -151,12 +153,14 @@ def bs_greeks(spot: float, strike: float, dte: float, rate: float, volatility: f
         return 0.0, 0.0, 0.0, 0.0
     try:
         sqrt_dte = math.sqrt(dte)
-        d1 = (math.log(spot / strike) + (rate + 0.5 * volatility**2) * dte) / (volatility * sqrt_dte)
-        d2 = d1 - volatility * sqrt_dte
-        normal_pdf = math.exp(-0.5 * d1**2) / math.sqrt(2 * math.pi)
-        gamma = normal_pdf / (spot * volatility * sqrt_dte)
+        vol_sqrt_dte = volatility * sqrt_dte
+        variance = volatility * volatility
+        d1 = (math.log(spot / strike) + (rate + 0.5 * variance) * dte) / vol_sqrt_dte
+        d2 = d1 - vol_sqrt_dte
+        normal_pdf = math.exp(-0.5 * d1 * d1) / SQRT_2PI
+        gamma = normal_pdf / (spot * vol_sqrt_dte)
         
-        charm_core = normal_pdf * (2 * rate * dte - d2 * volatility * sqrt_dte) / (2 * dte * volatility * sqrt_dte)
+        charm_core = normal_pdf * (2.0 * rate * dte - d2 * vol_sqrt_dte) / (2.0 * dte * vol_sqrt_dte)
         charm_core /= DAYS_PER_YEAR
         call_charm = -charm_core
         put_charm = charm_core
@@ -308,12 +312,15 @@ class GammaProcessor:
 
         dte = self._fractional_dte(expiry)
         self._repair_iv_surface(strikes)
+        # Hoist loop-invariant values: the spot-scaled GEX factor and the risk-free rate
+        # never change across strikes, so compute them once instead of per strike.
+        rate = self.risk_free_rate
+        gex_scale = spot
         for strike in strikes:
             try:
-                call_gamma, strike.call_charm, _, strike.call_vanna = bs_greeks(spot, strike.strike, dte, self.risk_free_rate, strike.call_iv / 100)
-                put_gamma, _, strike.put_charm, strike.put_vanna = bs_greeks(spot, strike.strike, dte, self.risk_free_rate, strike.put_iv / 100)
+                call_gamma, strike.call_charm, _, strike.call_vanna = bs_greeks(spot, strike.strike, dte, rate, strike.call_iv / 100)
+                put_gamma, _, strike.put_charm, strike.put_vanna = bs_greeks(spot, strike.strike, dte, rate, strike.put_iv / 100)
                 
-                gex_scale = spot
                 strike.call_gex = -strike.call_oi * call_gamma * gex_scale
                 strike.put_gex = strike.put_oi * put_gamma * gex_scale
                 strike.net_gex = strike.call_gex + strike.put_gex
@@ -493,20 +500,24 @@ class GammaProcessor:
         best_swing = -1.0
 
         for strike in ordered:
+            strike_price = strike.strike
+            # The chain is sorted ascending, so once we pass the band nothing above it
+            # can ever contribute to a crossing near spot - stop scanning the tail.
+            if strike_price > upper_edge:
+                break
+
             strike_gex = getattr(strike, call_gex_attr) + getattr(strike, put_gex_attr)
 
             # Seed the running total from every strike below the band so the first
             # in-band cumulative is chain-absolute rather than band-relative.
-            if strike.strike < lower_edge:
+            if strike_price < lower_edge:
                 cumulative += strike_gex
-                continue
-            if strike.strike > upper_edge:
                 continue
 
             if prev_strike is None:
                 cumulative += strike_gex
                 prev_cumulative = cumulative
-                prev_strike = strike.strike
+                prev_strike = strike_price
                 continue
 
             prev_cumulative = cumulative
@@ -518,7 +529,7 @@ class GammaProcessor:
                 gex_diff = cumulative - prev_cumulative
                 if gex_diff != 0:
                     ratio = abs(prev_cumulative) / abs(gex_diff)
-                    level = prev_strike + (strike.strike - prev_strike) * ratio
+                    level = prev_strike + (strike_price - prev_strike) * ratio
                     swing = abs(gex_diff)
                     if swing > best_swing or (
                         swing == best_swing
@@ -527,7 +538,7 @@ class GammaProcessor:
                         best_swing = swing
                         best_level = level
 
-            prev_strike = strike.strike
+            prev_strike = strike_price
 
         return best_level
 
@@ -923,9 +934,15 @@ class RedisGammaBot:
             with self._redis_client.pubsub(ignore_subscribe_messages=True) as pubsub:
                 pubsub.subscribe(self.channel)
                 while not self._stop_event.is_set():
-                    message = pubsub.get_message(timeout=1.0)
-                    if message and message.get("type") == "message":
-                        self._process_message(message.get("data"))
+                    # A single bad message or transient Redis error must not kill the
+                    # listener thread; catch per iteration and keep polling.
+                    try:
+                        message = pubsub.get_message(timeout=1.0)
+                        if message and message.get("type") == "message":
+                            self._process_message(message.get("data"))
+                    except Exception as exc:
+                        self.last_error = str(exc)
+                        time.sleep(0.05)
         except Exception as exc:
             self.last_error = str(exc)
 

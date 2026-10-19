@@ -225,7 +225,7 @@ def _load_isin_map():
     if not os.path.exists(UNIVERSE_FILE):
         return {}
     try:
-        df = pd.read_csv(UNIVERSE_FILE)
+        df = pd.read_csv(UNIVERSE_FILE, usecols=["Symbol", "ISIN Code"])
         df.columns = [str(c).strip() for c in df.columns]
         sym_col = next((c for c in df.columns if c.lower() == "symbol"), None)
         isin_col = next((c for c in df.columns if "isin" in c.lower()), None)
@@ -817,21 +817,23 @@ def main():
         print("   Run funda_data.py first to generate nifty500_swing_candidates.csv.")
         return 1
 
-    cand = pd.read_csv(CANDIDATES_FILE)
+    try:
+        cand = pd.read_csv(CANDIDATES_FILE)
+    except Exception as exc:
+        print(f"❌ Failed to read {CANDIDATES_FILE}: {exc}")
+        return 1
     cand.columns = [str(c).strip() for c in cand.columns]
     sym_col = next((c for c in cand.columns if c.lower() == "symbol"), None)
     if sym_col is None:
         sym_col = cand.columns[0]
 
-    name_map, industry_map, price_map = {}, {}, {}
-    for _, row in cand.iterrows():
-        s = str(row[sym_col]).strip().upper()
-        if not s:
-            continue
-        name_map[s] = str(row.get("name", "")).strip() if "name" in cand.columns else ""
-        industry_map[s] = str(row.get("industry", "")).strip() if "industry" in cand.columns else ""
-        if "current_price" in cand.columns:
-            price_map[s] = row.get("current_price")
+    sym_series = cand[sym_col].astype(str).str.strip().str.upper()
+    name_map = (dict(zip(sym_series, cand["name"].astype(str).str.strip()))
+                if "name" in cand.columns else {})
+    industry_map = (dict(zip(sym_series, cand["industry"].astype(str).str.strip()))
+                    if "industry" in cand.columns else {})
+    price_map = (dict(zip(sym_series, cand["current_price"]))
+                 if "current_price" in cand.columns else {})
 
     symbols = list(dict.fromkeys(
         cand[sym_col].astype(str).str.strip().str.upper().tolist()))

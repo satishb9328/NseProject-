@@ -8,13 +8,9 @@ a stale legacy date.
 """
 
 import argparse
-import asyncio
 import os
 import sys
 from pathlib import Path
-
-if sys.platform == 'win32':
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 # Repository root (the folder that holds manage.py and the top-level preopen dir).
 # Derived from __file__ so it resolves identically on Windows (local) and Linux (Render).
@@ -109,5 +105,8 @@ def main():
 
 
 if __name__ == '__main__':
-    sys.exit(main())
-
+    try:
+        sys.exit(main())
+    except Exception as exc:
+        print(f'FATAL: unexpected error in orchestrator: {exc}')
+        sys.exit(1)

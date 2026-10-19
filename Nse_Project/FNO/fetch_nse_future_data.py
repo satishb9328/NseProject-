@@ -1,11 +1,9 @@
 import os
 import sys
 import time
-import json
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
-from io import StringIO
 
 # Settings
 OUTPUT_DIR = r"D:\FNO DATA\Nifty Future"
@@ -21,11 +19,6 @@ HEADERS = {
 }
 
 LIVE_DERIVATIVES_URL = "https://www.nseindia.com/api/liveEquity-derivatives?index=nse50_fut"
-DETAIL_URL_TEMPLATE = (
-    "https://www.nseindia.com/api/NextApi/apiClient/GetQuoteApi?"
-    "functionName=getSymbolDerivativesData&symbol=NIFTY&identifier={identifier}"
-    "&instrumentType=FUT&expiryDt={expiry}"
-)
 
 HISTORICAL_CSV_URL_TEMPLATE = (
     "https://www.nseindia.com/api/NextApi/apiClient/GetQuoteApi?"
@@ -33,9 +26,33 @@ HISTORICAL_CSV_URL_TEMPLATE = (
     "&strikePrice=&optionType=&fromDate={from_date}&toDate={to_date}&csv=true"
 )
 HISTORICAL_DATE_COL = "FH_TIMESTAMP"
-REQUEST_DELAY = 2
+REQUEST_DELAY = 2          # polite pause between expiry requests
 MAX_RETRIES = 3
-RETRY_DELAY = 5
+BACKOFF_SECONDS = 2.0
+RETRYABLE_STATUS = {403, 408, 429, 500, 502, 503, 504}
+
+
+def _get_with_retry(session, url, timeout=30):
+    """GET with exponential backoff for NSE's flaky API endpoints."""
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            resp = session.get(url, timeout=timeout)
+            if resp.status_code == 200:
+                return resp
+            if resp.status_code not in RETRYABLE_STATUS:
+                return resp
+            msg = f'HTTP {resp.status_code}'
+        except requests.RequestException as exc:
+            msg = str(exc)
+            if attempt >= MAX_RETRIES:
+                raise
+        if attempt >= MAX_RETRIES:
+            raise requests.RequestException(f'Exhausted retries: {msg}')
+        delay = BACKOFF_SECONDS * (2 ** (attempt - 1))
+        print(f'   -> {msg} (attempt {attempt}/{MAX_RETRIES}); retrying in {delay:.0f}s...')
+        time.sleep(delay)
 
 
 def get_session():
@@ -49,9 +66,12 @@ def get_session():
 
 
 def fetch_live_derivatives(session):
-    resp = session.get(LIVE_DERIVATIVES_URL, timeout=20)
+    resp = _get_with_retry(session, LIVE_DERIVATIVES_URL, timeout=20)
     resp.raise_for_status()
-    return resp.json()
+    payload = resp.json()
+    if not isinstance(payload, dict) or not payload.get("data"):
+        raise ValueError("Live derivatives payload missing 'data' list.")
+    return payload
 
 
 def select_three_expiries(df):
@@ -63,51 +83,6 @@ def select_three_expiries(df):
     unique = df[["expiryDate", "expiry_parsed"]].drop_duplicates(subset=["expiryDate"])
     result = unique.sort_values("expiry_parsed")["expiryDate"].head(3).tolist()
     return result
-
-
-def choose_identifier_for_expiry(df, expiry):
-    candidates = df[df["expiryDate"] == expiry]
-    if candidates.empty:
-        return None
-    if "instrumentType" in candidates.columns:
-        filt = candidates[candidates["instrumentType"].astype(str).str.upper() == "FUTIDX"]
-        if not filt.empty:
-            candidates = filt
-    identifiers = candidates["identifier"].dropna().unique()
-    return identifiers[0] if len(identifiers) > 0 else None
-
-
-def fetch_detail_for_identifier(session, identifier, expiry):
-    url = DETAIL_URL_TEMPLATE.format(identifier=identifier, expiry=expiry)
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            resp = session.get(url, timeout=20)
-            resp.raise_for_status()
-            return resp.json()
-        except requests.HTTPError as exc:
-            if exc.response is not None and exc.response.status_code == 503 and attempt < MAX_RETRIES:
-                time.sleep(RETRY_DELAY)
-                continue
-            raise
-        except Exception:
-            if attempt < MAX_RETRIES:
-                time.sleep(RETRY_DELAY)
-                continue
-            raise
-
-
-def payload_to_df(payload, expiry, identifier):
-    if not isinstance(payload, dict):
-        return pd.DataFrame()
-    data = payload.get("data")
-    if data is None:
-        return pd.DataFrame()
-    if isinstance(data, dict):
-        data = [data]
-    df = pd.DataFrame(data)
-    df["expiryDate"] = expiry
-    df["identifier"] = identifier
-    return df
 
 
 def get_history_csv_path(expiry):
@@ -140,23 +115,21 @@ def fetch_historical_data(session, expiry, from_date, to_date):
         from_date=from_date.strftime("%d-%m-%Y"),
         to_date=to_date.strftime("%d-%m-%Y"),
     )
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            resp = session.get(url, timeout=30)
-            resp.raise_for_status()
-            payload = resp.json()
-            if not isinstance(payload, list) or len(payload) == 0:
-                return pd.DataFrame()
-            df = pd.DataFrame(payload)
-            if HISTORICAL_DATE_COL in df.columns:
-                df[HISTORICAL_DATE_COL] = pd.to_datetime(df[HISTORICAL_DATE_COL], errors="coerce")
-            return df
-        except Exception as exc:
-            print(f"Attempt {attempt} failed for historical fetch expiry {expiry}: {exc}")
-            if attempt < MAX_RETRIES:
-                time.sleep(RETRY_DELAY)
-                continue
-            raise
+    resp = _get_with_retry(session, url, timeout=30)
+    if resp.status_code != 200:
+        return pd.DataFrame()
+    try:
+        payload = resp.json()
+    except ValueError as exc:
+        print(f"   -> Non-JSON response for expiry {expiry}: {exc}")
+        return pd.DataFrame()
+    if not isinstance(payload, list) or len(payload) == 0:
+        return pd.DataFrame()
+    df = pd.DataFrame(payload)
+    if HISTORICAL_DATE_COL not in df.columns:
+        return pd.DataFrame()
+    df[HISTORICAL_DATE_COL] = pd.to_datetime(df[HISTORICAL_DATE_COL], errors="coerce")
+    return df.dropna(subset=[HISTORICAL_DATE_COL])
 
 
 def append_history(csv_path, existing_df, new_df):
@@ -175,25 +148,13 @@ def _safe_expiry_filename(expiry: str) -> str:
     return expiry.replace("-", "")
 
 
-def save_expiry_files(payload, expiry, identifier):
-    safe_name = _safe_expiry_filename(expiry)
-    json_path = os.path.join(OUTPUT_DIR, f"nifty_future_{safe_name}.json")
-    csv_path = os.path.join(OUTPUT_DIR, f"nifty_future_{safe_name}.csv")
-
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2)
-
-    df = payload_to_df(payload, expiry, identifier)
-    if not df.empty:
-        df.to_csv(csv_path, index=False)
-        return json_path, csv_path
-
-    return json_path, None
-
-
 def main():
     session = get_session()
-    live_payload = fetch_live_derivatives(session)
+    try:
+        live_payload = fetch_live_derivatives(session)
+    except (requests.RequestException, ValueError) as exc:
+        print(f"Could not fetch live derivatives data: {exc}")
+        return
     live_df = pd.DataFrame(live_payload.get("data", []))
 
     expiries = select_three_expiries(live_df)
@@ -227,6 +188,7 @@ def main():
             print(f"Updated CSV for expiry {expiry}: {csv_path} ({len(combined_df)} rows)")
         except Exception as exc:
             print(f"Failed to update historical CSV for expiry {expiry}: {exc}")
+        time.sleep(REQUEST_DELAY)
 
 
 if __name__ == '__main__':

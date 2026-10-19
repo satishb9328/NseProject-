@@ -1,2 +1,2 @@
-"""Compatibility package exposing modules from the legacy `Nse Project` folder."""
+"""Live dashboard Django app: WebSocket consumers, live-feed views, and AI candle confirmation."""
 

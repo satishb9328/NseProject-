@@ -1,162 +1,194 @@
+import csv
+import glob
 import os
+import re
 import sys
-import django
-import shutil
-import json
-from pathlib import Path
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-# Ensure project root is in sys.path and set working directory
+from pathlib import Path
+
+import django
+
+# ---------------------------------------------------------------------------
+# Environment bootstrap
+# ---------------------------------------------------------------------------
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 repository_root = os.path.dirname(project_root)
+
 # Central location for preopen CSVs (same env var the fetcher and dashboard use,
 # so the three can never point at different folders again). Anchored to the repo
 # root via __file__ so it works on Windows (local) and Linux (Render).
-PREOPEN_CSV_DIR = os.getenv("PREOPEN_TBT_DIR", str(Path(__file__).resolve().parents[2] / "preopen"))
+PREOPEN_CSV_DIR = os.getenv(
+    "PREOPEN_TBT_DIR", str(Path(__file__).resolve().parents[2] / "preopen")
+)
+
 os.chdir(project_root)
 sys.path.insert(0, repository_root)
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Nse_Project.settings')
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "Nse_Project.settings")
 django.setup()
 
 from Nse_Project.Preopen.models import PreopenSummary
 
-# Path to the "current" JSON file that fetch_preopen.py is expected to create
-# (Previously pointed inside pre_hist_data with a leading slash that broke on Windows)
-current_json_path = os.path.join(project_root, 'Preopen', 'data', 'preopen_data.json')
-# Fallback (legacy) location inside history folder if current not present
-legacy_json_path = os.path.join(project_root, 'Preopen', 'data', 'pre_hist_data', 'preopen_data.json')
+IST = timezone(timedelta(hours=5, minutes=30))
 
-# Resolve which JSON to use
-if os.path.exists(current_json_path):
-    json_path = current_json_path
-elif os.path.exists(legacy_json_path):
-    json_path = legacy_json_path
-else:
-    print(f"ERROR: preopen_data.json not found. Looked at: \n  {current_json_path}\n  {legacy_json_path}\nEnsure fetch script created the file.")
-    json_path = None
+# Formats accepted for the CSV datetime column (manual uploads vary).
+_DATETIME_FORMATS = (
+    "%d-%m-%Y %H:%M", "%d-%m-%Y %H:%M:%S",
+    "%d/%m/%Y %H:%M", "%d/%m/%Y %H:%M:%S",
+    "%m/%d/%Y %H:%M", "%m/%d/%Y %H:%M:%S",
+    "%d-%m-%y %H:%M", "%d/%m/%y %H:%M",
+    "%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S",
+    "%Y/%m/%d %H:%M", "%Y/%m/%d %H:%M:%S",
+    "%d-%m-%Y %I:%M:%S %p", "%d/%m/%Y %I:%M:%S %p",
+)
 
-# Load JSON data if available
-data = {}
-if json_path:
-    try:
-        with open(json_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        print(f"ERROR: File disappeared before reading: {json_path}")
-    except json.JSONDecodeError as e:
-        print(f"ERROR: JSON decode failed for {json_path}: {e}")
-    except Exception as e:
-        print(f"ERROR: Unexpected issue reading {json_path}: {e}")
+_UPDATE_FIELDS = ("open", "high", "low", "close")
 
-# Now you can access the data, for example:
-# print(data)
-# You can add your logic here to upload data to the model
-
-def parse_time(timestr):
-    try:
-        return datetime.strptime(timestr, "%H:%M:%S").time()
-    except Exception:
-        return None
-
-def parse_date(datestr):
-    try:
-        return datetime.strptime(datestr, "%Y-%m-%d").date()
-    except Exception:
-        return None
 
 def parse_datetime(dtstr):
+    """Parse a datetime string against all supported formats (naive)."""
+    for fmt in _DATETIME_FORMATS:
+        try:
+            return datetime.strptime(dtstr, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def parse_date_from_name(path):
+    """Extract a ``date`` from a CSV filename, or ``None`` if none is embedded."""
+    name = os.path.basename(path)
+    for pattern, fmt in (
+        (r"(\d{2})(\d{2})(\d{4})", "%d%m%Y"),            # DDMMYYYY
+        (r"(\d{4})(\d{2})(\d{2})", "%Y%m%d"),            # YYYYMMDD
+        (r"(\d{4})[-_](\d{2})[-_](\d{2})", "%Y-%m-%d"),  # YYYY-MM-DD / YYYY_MM_DD
+        (r"(\d{2})[-_](\d{2})[-_](\d{4})", "%d-%m-%Y"),  # DD-MM-YYYY / DD_MM_YYYY
+    ):
+        m = re.search(pattern, name)
+        if m:
+            raw = m.group(0).replace("_", "-")
+            try:
+                return datetime.strptime(raw, fmt).date()
+            except ValueError:
+                continue
+    return None
+
+
+def _detect_columns(fieldnames):
+    """Return ``(datetime_col, date_col, time_col, value_cols)`` for a CSV header."""
+    datetime_col = None
+    date_col = None
+    time_col = None
+    value_cols = []
+
+    for col in fieldnames:
+        col = str(col)
+        col_clean = col.lower().replace("_", "").replace(" ", "")
+        if col_clean in ("datetime", "dateandtime"):
+            datetime_col = col
+        elif col_clean == "date" and datetime_col is None:
+            date_col = col
+        elif col_clean == "time" and datetime_col is None:
+            time_col = col
+
+        if col_clean in ("preopennifty50", "preopennifty_50", "preopennifty", "preopenniftyopen"):
+            value_cols.append(col)
+        if col_clean in ("nifty50", "nifty_50", "nifty"):
+            value_cols.append(col)
+
+    return datetime_col, date_col, time_col, value_cols
+
+
+def _read_csv_ticks(csv_path):
+    """Stream ``csv_path`` and return ``{date: [(epoch_ms, price), ...]}``.
+
+    Returns ``None`` when the file is unreadable or contains no usable rows.
+    """
     try:
-        # Accept format: DD-MM-YYYY HH:MM
-        return datetime.strptime(dtstr, "%d-%m-%Y %H:%M")
-    except Exception:
+        with open(csv_path, "r", encoding="utf-8-sig", newline="") as fh:
+            reader = csv.DictReader(fh)
+            if not reader.fieldnames:
+                print(f"Skipping empty CSV: {csv_path}")
+                return None
+
+            datetime_col, date_col, time_col, value_cols = _detect_columns(reader.fieldnames)
+            if not datetime_col and not (date_col and time_col):
+                print(f"Could not find datetime columns in CSV: {csv_path}")
+                return None
+            if not value_cols:
+                print(f"Could not find value columns in CSV: {csv_path}")
+                return None
+
+            grouped = defaultdict(list)
+            valid = 0
+            for row in reader:
+                if datetime_col:
+                    dt_raw = row.get(datetime_col, "")
+                else:
+                    dt_raw = f"{row.get(date_col, '')} {row.get(time_col, '')}"
+
+                dt_val = parse_datetime(dt_raw.strip()) if dt_raw else None
+                if dt_val is None:
+                    continue
+
+                price = None
+                for vcol in value_cols:
+                    raw = (row.get(vcol) or "").strip()
+                    if raw:
+                        try:
+                            price = float(raw)
+                            break
+                        except ValueError:
+                            continue
+                if price is None:
+                    continue
+
+                ts = int(dt_val.replace(tzinfo=IST).timestamp() * 1000)
+                grouped[dt_val.date()].append((ts, price))
+                valid += 1
+
+            if valid == 0:
+                print(f"No valid rows found in CSV: {csv_path}")
+                return None
+            return grouped
+
+    except OSError as exc:
+        print(f"ERROR: could not read {csv_path}: {exc}")
+        return None
+    except Exception as exc:  # noqa: BLE001 - keep the batch alive on any bad file
+        print(f"ERROR: unexpected issue reading {csv_path}: {exc}")
         return None
 
-def process_preopen_nifty50_from_json(grapth_data):
-    # grapth_data is expected to be a list of [timestamp, value] pairs
-    if not grapth_data:
-        print('No data to process.')
-        return
-    IST = timezone(timedelta(hours=5, minutes=30))
-    # Extract values and times
-    values = [v for _, v in grapth_data]
-    timestamps = [ts for ts, _ in grapth_data]
-    datetimes = [
-        datetime.fromtimestamp(ts/1000.0, timezone.utc).astimezone(IST)
-        for ts in timestamps
-    ]
-    times = [dt.time() for dt in datetimes]
-    date = datetimes[0].date() if datetimes else None
-    open_val = values[0]
-    open_time = times[0]
-    high_val = max(values)
-    high_idx = values.index(high_val)
-    high_time = times[high_idx]
-    low_val = min(values)
-    low_idx = values.index(low_val)
-    low_time = times[low_idx]
-    close_val = values[-1]
-    close_time = times[-1]
-    avg_val = sum(values) / len(values)
-    above_indices = [i for i, v in enumerate(values) if v > avg_val]
-    below_indices = [i for i, v in enumerate(values) if v < avg_val]
-    if above_indices:
-        high_above_val = max([values[i] for i in above_indices])
-        high_above_idx = above_indices[[values[i] for i in above_indices].index(high_above_val)]
-        high_above_time = times[high_above_idx]
-        low_above_val = min([values[i] for i in above_indices])
-        low_above_idx = above_indices[[values[i] for i in above_indices].index(low_above_val)]
-        low_above_time = times[low_above_idx]
-        avg_above = (high_above_val + low_above_val) / 2
-    else:
-        high_above_val = None
-        high_above_time = None
-        low_above_val = None
-        low_above_time = None
-        avg_above = None
-    if below_indices:
-        high_below_val = max([values[i] for i in below_indices])
-        high_below_idx = below_indices[[values[i] for i in below_indices].index(high_below_val)]
-        high_below_time = times[high_below_idx]
-        low_below_val = min([values[i] for i in below_indices])
-        low_below_idx = below_indices[[values[i] for i in below_indices].index(low_below_val)]
-        low_below_time = times[low_below_idx]
-        avg_below = (high_below_val + low_below_val) / 2
-    else:
-        high_below_val = None
-        high_below_time = None
-        low_below_val = None
-        low_below_time = None
-        avg_below = None
-    obj, created = PreopenSummary.objects.update_or_create(
-        date=date,
-        defaults={
-            'open': open_val,
-            'high': high_val,
-            'low': low_val,
-            'close': close_val,
-        }
-    )
-    print(f"{'Created' if created else 'Updated'} PreopenSummary for {date}")
+
+def _compute_ohlc(ticks):
+    """Compute ``(open, high, low, close)`` from a tick series in one pass."""
+    ticks = sorted(ticks, key=lambda t: t[0])  # ensure chronological order
+    if not ticks:
+        return None
+
+    open_val = ticks[0][1]
+    close_val = ticks[-1][1]
+    high_val = low_val = ticks[0][1]
+    for _, price in ticks:
+        if price > high_val:
+            high_val = price
+        if price < low_val:
+            low_val = price
+    return open_val, high_val, low_val, close_val
+
 
 def import_preopen_data_to_db():
-    import glob
-    import csv
-    import re
-    from collections import defaultdict
-    csv_directory = PREOPEN_CSV_DIR
-    IST = timezone(timedelta(hours=5, minutes=30))
+    """Import fresh pre-open CSV(s) into ``PreopenSummary``.
 
-    # The fetcher (fetch_preopen.py) writes two files:
-    #   * nifty50_graph_data.csv                    -> ACTIVE file (today's data)
-    #   * archive/nifty50_graph_data_YYYY-MM-DD.csv -> dated history (NOT read here)
-    # Prefer today's dated file / the active file, then fall back to any other CSV
+    Returns ``True`` if at least one row was created/updated, ``False`` otherwise.
+    """
+    csv_directory = PREOPEN_CSV_DIR
+    today_str = datetime.now(IST).date().strftime("%Y-%m-%d")
+
+    # Priority: today's dated file, then the active file, then any other CSV
     # dropped directly in this folder (manual uploads). The archive/ subfolder is
     # deliberately excluded because it holds historical backups, not fresh input.
-    today_str = datetime.now(IST).date().strftime("%Y-%m-%d")
-    priority_names = [
-        f"nifty50_graph_data_{today_str}.csv",
-        "nifty50_graph_data.csv",
-    ]
-
+    priority_names = [f"nifty50_graph_data_{today_str}.csv", "nifty50_graph_data.csv"]
     csv_files = []
     seen = set()
     for name in priority_names:
@@ -167,224 +199,116 @@ def import_preopen_data_to_db():
         if os.path.isfile(path):
             csv_files.append(path)
 
-    for path in sorted(glob.glob(os.path.join(csv_directory, '*.csv'))):
+    for path in sorted(glob.glob(os.path.join(csv_directory, "*.csv"))):
         path = os.path.abspath(path)
         if path not in seen:
             seen.add(path)
             csv_files.append(path)
 
     if not csv_files:
-        print('No CSV files found in', csv_directory)
+        print(f"No CSV files found in {csv_directory}")
         return False
 
-    def parse_date_from_name(path):
-        name = os.path.basename(path)
-        # Try DDMMYYYY
-        m = re.search(r'(\d{2})(\d{2})(\d{4})', name)
-        if m:
-            try:
-                return datetime.strptime(''.join(m.groups()), '%d%m%Y').date()
-            except Exception:
-                pass
-        # Try YYYYMMDD
-        m = re.search(r'(\d{4})(\d{2})(\d{2})', name)
-        if m:
-            try:
-                return datetime.strptime(''.join(m.groups()), '%Y%m%d').date()
-            except Exception:
-                pass
-        # Try YYYY-MM-DD or YYYY_MM_DD
-        m = re.search(r'(\d{4})[-_](\d{2})[-_](\d{2})', name)
-        if m:
-            try:
-                return datetime.strptime('-'.join(m.groups()), '%Y-%m-%d').date()
-            except Exception:
-                pass
-        # Try DD-MM-YYYY or DD_MM_YYYY
-        m = re.search(r'(\d{2})[-_](\d{2})[-_](\d{4})', name)
-        if m:
-            try:
-                return datetime.strptime('-'.join(m.groups()), '%d-%m-%Y').date()
-            except Exception:
-                pass
-        return None
+    # Newest first (embedded filename date, falling back to file mtime).
+    scored = sorted(
+        ((parse_date_from_name(f) or datetime.min.date(), os.path.getmtime(f), f) for f in csv_files),
+        key=lambda x: (x[0], x[1]),
+        reverse=True,
+    )
 
-    # Sort all CSVs newest first (by embedded date fallback mtime)
-    scored = []
-    for f in csv_files:
-        date_in_name = parse_date_from_name(f)
-        mtime = os.path.getmtime(f)
-        scored.append((date_in_name, mtime, f))
-    scored_sorted = sorted(scored, key=lambda x: (x[0] or datetime.min.date(), x[1]), reverse=True)
-    print('CSV import order (newest first):')
-    for i, (d, mt, f) in enumerate(scored_sorted):
-        mt_readable = datetime.fromtimestamp(mt).strftime('%Y-%m-%d %H:%M:%S')
-        print(f"  #{i+1}: {f} | name-date={d} | mtime={mt_readable}")
+    print("CSV import order (newest first):")
+    for i, (d, mt, f) in enumerate(scored):
+        mt_readable = datetime.fromtimestamp(mt).strftime("%Y-%m-%d %H:%M:%S")
+        print(f"  #{i + 1}: {f} | name-date={d} | mtime={mt_readable}")
 
-    def parse_datetime(dtstr):
-        # Accept multiple common date/time formats (manual uploads vary)
-        formats = [
-            '%d-%m-%Y %H:%M', '%d-%m-%Y %H:%M:%S', '%d/%m/%Y %H:%M', '%d/%m/%Y %H:%M:%S',
-            '%m/%d/%Y %H:%M', '%m/%d/%Y %H:%M:%S', '%d-%m-%y %H:%M', '%d/%m/%y %H:%M',
-            '%Y-%m-%d %H:%M', '%Y-%m-%d %H:%M:%S', '%Y/%m/%d %H:%M', '%Y/%m/%d %H:%M:%S',
-            '%d-%m-%Y %I:%M:%S %p', '%d/%m/%Y %I:%M:%S %p'
-        ]
-        for fmt in formats:
-            try:
-                return datetime.strptime(dtstr, fmt)
-            except Exception:
-                continue
-        return None
-
-    # Collect per-date graph data, preferring newer files for the same date
+    # Collect per-date tick series, preferring the newest file for a given date.
     per_date_data = {}
-
-    for rank, (date_in_name, mtime, csv_path) in enumerate(scored_sorted, start=1):
-        with open(csv_path, 'r', encoding='utf-8-sig') as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
-        if not rows:
-            print(f'Skipping empty CSV: {csv_path}')
+    for _date_in_name, mtime, csv_path in scored:
+        grouped = _read_csv_ticks(csv_path)
+        if not grouped:
             continue
-
-        datetime_col = None
-        value_cols = []
-        date_col = None
-        time_col = None
-        for col in rows[0].keys():
-            col_clean = col.lower().replace('_', '').replace(' ', '')
-            if col_clean in ['datetime', 'dateandtime'] or col.strip().lower() == 'datetime':
-                datetime_col = col
-            if col_clean in ['date'] and not datetime_col:
-                date_col = col
-            if col_clean in ['time'] and not datetime_col:
-                time_col = col
-            if col_clean in ['preopennifty50', 'preopennifty_50', 'preopennifty', 'preopenniftyopen'] or col.strip().lower() == 'pre open nifty 50':
-                value_cols.append(col)
-            if col_clean in ['nifty50', 'nifty_50', 'nifty'] or col.strip().lower() == 'nifty 50':
-                value_cols.append(col)
-        if not datetime_col and date_col and time_col:
-            print(f"No single datetime column found; using date='{date_col}' and time='{time_col}' for {csv_path}")
-        if (not datetime_col and not (date_col and time_col)) or not value_cols:
-            print(f'Could not find datetime or value columns in CSV: {csv_path}')
-            continue
-
-        grouped = defaultdict(list)
-        valid_row_count = 0
-        for idx, row in enumerate(rows):
-            try:
-                if datetime_col:
-                    dt_raw = row.get(datetime_col, '')
-                elif date_col and time_col:
-                    dt_raw = f"{row.get(date_col, '')} {row.get(time_col, '')}"
-                else:
-                    dt_raw = ''
-                dt_val = parse_datetime(dt_raw.strip()) if dt_raw else None
-                if not dt_val:
-                    continue
-                nifty_val = None
-                for vcol in value_cols:
-                    val = row.get(vcol, '').strip()
-                    if val:
-                        try:
-                            nifty_val = float(val)
-                            break
-                        except Exception:
-                            pass
-                if nifty_val is None:
-                    continue
-                ts = int(dt_val.replace(tzinfo=IST).timestamp() * 1000)
-                grouped[dt_val.date()].append([ts, nifty_val])
-                valid_row_count += 1
-            except Exception:
-                pass
-        if valid_row_count == 0:
-            print(f'No valid rows found in CSV: {csv_path}')
-            continue
-
-        for date_key, graph_data in grouped.items():
+        for date_key, ticks in grouped.items():
             existing = per_date_data.get(date_key)
-            if existing and existing['mtime'] >= mtime:
+            if existing and existing["mtime"] >= mtime:
                 print(f"Skipping {csv_path} for {date_key}: newer or same file already used")
                 continue
-            per_date_data[date_key] = {'graph': graph_data, 'mtime': mtime, 'source': csv_path}
+            per_date_data[date_key] = {"ticks": ticks, "mtime": mtime, "source": csv_path}
 
     if not per_date_data:
-        print('No usable data found in CSV files')
+        print("No usable data found in CSV files")
         return False
 
-    # Process dates in chronological order for consistency
-    for date in sorted(per_date_data.keys()):
-        grapth_data = sorted(per_date_data[date]['graph'], key=lambda x: x[0])  # ensure chronological order
-        values = [v for _, v in grapth_data]
-        timestamps = [ts for ts, _ in grapth_data]
-        datetimes = [datetime.fromtimestamp(ts/1000.0, timezone.utc).astimezone(IST) for ts in timestamps]
-        times = [dt.time() for dt in datetimes]
-        open_val = values[0]
-        open_time = times[0]
-        high_val = max(values)
-        high_idx = values.index(high_val)
-        high_time = times[high_idx]
-        low_val = min(values)
-        low_idx = values.index(low_val)
-        low_time = times[low_idx]
-        close_val = values[-1]
-        close_time = times[-1]
-        avg_val = sum(values) / len(values)
-        above_indices = [i for i, v in enumerate(values) if v > avg_val]
-        below_indices = [i for i, v in enumerate(values) if v < avg_val]
-        if above_indices:
-            high_above_val = max([values[i] for i in above_indices])
-            high_above_idx = above_indices[[values[i] for i in above_indices].index(high_above_val)]
-            high_above_time = times[high_above_idx]
-            low_above_val = min([values[i] for i in above_indices])
-            low_above_idx = above_indices[[values[i] for i in above_indices].index(low_above_val)]
-            low_above_time = times[low_above_idx]
-            avg_above = (high_above_val + low_above_val) / 2
+    # Single-pass OHLC per date.
+    summaries = {}
+    for date_key, info in per_date_data.items():
+        ohlc = _compute_ohlc(info["ticks"])
+        if ohlc is None:
+            print(f"Skipping {date_key}: no usable ticks")
+            continue
+        summaries[date_key] = ohlc
+
+    if not summaries:
+        print("No OHLC computed from CSV files")
+        return False
+
+    # ---- Database write (bulk instead of one round-trip per row) ----
+    try:
+        existing = {
+            obj.date: obj
+            for obj in PreopenSummary.objects.filter(date__in=list(summaries.keys()))
+        }
+    except Exception as exc:
+        print(f"ERROR: failed to query existing PreopenSummary rows: {exc}")
+        return False
+
+    to_create = []
+    to_update = []
+    for date_key, (open_val, high_val, low_val, close_val) in summaries.items():
+        if date_key in existing:
+            obj = existing[date_key]
+            obj.open = open_val
+            obj.high = high_val
+            obj.low = low_val
+            obj.close = close_val
+            to_update.append(obj)
         else:
-            high_above_val = None
-            high_above_time = None
-            low_above_val = None
-            low_above_time = None
-            avg_above = None
-        if below_indices:
-            high_below_val = max([values[i] for i in below_indices])
-            high_below_idx = below_indices[[values[i] for i in below_indices].index(high_below_val)]
-            high_below_time = times[high_below_idx]
-            low_below_val = min([values[i] for i in below_indices])
-            low_below_idx = below_indices[[values[i] for i in below_indices].index(low_below_val)]
-            low_below_time = times[low_below_idx]
-            avg_below = (high_below_val + low_below_val) / 2
-        else:
-            high_below_val = None
-            high_below_time = None
-            low_below_val = None
-            low_below_time = None
-            avg_below = None
-        obj, created = PreopenSummary.objects.update_or_create(
-            date=date,
-            defaults={
-                'open': open_val,
-                'high': high_val,
-                'low': low_val,
-                'close': close_val,
-            }
-        )
-        print(("Created" if created else "Updated") + f' PreopenSummary for {date} (source: {per_date_data[date]["source"]})')
+            to_create.append(
+                PreopenSummary(
+                    date=date_key,
+                    open=open_val,
+                    high=high_val,
+                    low=low_val,
+                    close=close_val,
+                )
+            )
+
+    try:
+        if to_create:
+            PreopenSummary.objects.bulk_create(to_create)
+        if to_update:
+            PreopenSummary.objects.bulk_update(to_update, _UPDATE_FIELDS)
+    except Exception as exc:
+        print(f"ERROR: failed to write PreopenSummary rows: {exc}")
+        return False
+
+    for date_key in sorted(summaries):
+        action = "Updated" if date_key in existing else "Created"
+        print(f"{action} PreopenSummary for {date_key} (source: {per_date_data[date_key]['source']})")
+
     return True
 
 
 def main():
     """Import today's fresh pre-open CSV into the DB.
 
-    Returns 0 on success, 1 when no fresh CSV was imported. The legacy
-    ``pre_hist_data/preopen_data.json`` archive (historical dates, e.g. 2025-07-30)
-    is deliberately NOT used here — importing it was the cause of the false
-    "Updated PreopenSummary for 2025-07-30" SUCCESS.
+    Returns 0 on success, 1 when no fresh CSV was imported.
     """
-    manual_folder = PREOPEN_CSV_DIR
-    print(f"Checking for CSV in: {manual_folder}")
-    imported = import_preopen_data_to_db()
+    print(f"Checking for CSV in: {PREOPEN_CSV_DIR}")
+    try:
+        imported = import_preopen_data_to_db()
+    except Exception as exc:
+        print(f"FAILED: unexpected error during import: {exc}")
+        return 1
 
     if not imported:
         print("FAILED: no fresh pre-open CSV was imported.")
