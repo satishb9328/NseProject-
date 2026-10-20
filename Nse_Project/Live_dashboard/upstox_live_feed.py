@@ -75,7 +75,7 @@ UPSTOX_INSTRUMENTS_HEADERS = {
 # the on-disk baseline_oi_cache_*.json files, and all previous-trading-day/holiday
 # date arithmetic. See fetch_previous_oi_map() for the exact contract.
 OPTION_CHAIN_URL = "https://api.upstox.com/v2/option/chain"
-REDIS_URL = "redis://127.0.0.1:6379/0"
+REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
 REDIS_DATA_KEY = "live_options_data"
 REDIS_CHANNEL = "gamma:live_options_updated"
 

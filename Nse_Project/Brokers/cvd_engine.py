@@ -33,7 +33,7 @@ Integration examples
 --------------------
 Fyers ``on_message`` (raw dict)::
 
-    cvd = CVDEngine(redis_url="redis://127.0.0.1:6379/0")
+    cvd = CVDEngine()
     cvd.start()
     # inside FyersSocketManager._on_message(msg):
     cvd.ingest_fyers_message(msg)
@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import queue
 import threading
 import time
@@ -74,7 +75,7 @@ IST = timezone(timedelta(hours=5, minutes=30))
 MARKET_OPEN = time_of_day(9, 15)
 
 # ── Redis defaults (override with env vars in your deployment) ──────────────────
-DEFAULT_REDIS_URL = "redis://127.0.0.1:6379/0"
+DEFAULT_REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
 DEFAULT_REDIS_DATA_KEY = "cvd_2m_snapshot"
 DEFAULT_REDIS_CHANNEL = "cvd:2m_candle_closed"
 
@@ -795,4 +796,3 @@ def _self_test() -> None:
 
 if __name__ == "__main__":
     _self_test()
-

@@ -57,7 +57,7 @@ GAMMA_WALL_STRIKE_STEP = 50      # round walls to the nearest 50-point NIFTY str
 # cache backend key-prefixes (":1:") and pickles its values, so it could never read the
 # plain string key the feed writes. The env var names match GAMMA/gamma_blast_engine.py
 # so one setting moves the feed, the engine and the dashboard together.
-LIVE_OPTIONS_REDIS_URL = os.getenv("GAMMA_REDIS_URL", "redis://127.0.0.1:6379/0")
+REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
 LIVE_OPTIONS_REDIS_KEY = os.getenv("GAMMA_REDIS_DATA_KEY", "live_options_data")
 # Fail fast: a dead Redis must never hold a 1 Hz dashboard poll open.
 LIVE_OPTIONS_REDIS_TIMEOUT = float(os.getenv("LIVE_OPTIONS_REDIS_TIMEOUT", "0.5"))
@@ -337,7 +337,6 @@ _PRICE_COLUMN_HINTS = (
 
 # Pre-open Redis IPC. The 09:10 publisher SETs this snapshot key and PUBLISHes to the
 # matching channel; the Channels consumer bridge then fans the payload out to browsers.
-REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
 PREOPEN_REDIS_DATA_KEY = os.getenv("PREOPEN_REDIS_DATA_KEY", "preopen_trap_data")
 PREOPEN_REDIS_CHANNEL = os.getenv("PREOPEN_REDIS_CHANNEL", "preopen:trap_updated")
 PREOPEN_REDIS_TIMEOUT = float(os.getenv("PREOPEN_REDIS_TIMEOUT", "2.0"))
@@ -761,7 +760,7 @@ def get_live_options_redis():
     if _live_options_redis is None:
         try:
             _live_options_redis = redis.Redis.from_url(
-                LIVE_OPTIONS_REDIS_URL,
+                REDIS_URL,
                 decode_responses=True,
                 socket_connect_timeout=LIVE_OPTIONS_REDIS_TIMEOUT,
                 socket_timeout=LIVE_OPTIONS_REDIS_TIMEOUT,
@@ -798,7 +797,7 @@ def _read_live_options_from_redis() -> dict | None:
         if not _redis_outage_logged:
             logger.warning(
                 "Redis unavailable at %s (%s); serving the cold JSON backup instead.",
-                LIVE_OPTIONS_REDIS_URL, exc,
+                REDIS_URL, exc,
             )
             _redis_outage_logged = True
         return None

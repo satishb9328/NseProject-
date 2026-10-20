@@ -32,7 +32,6 @@ logger = logging.getLogger(__name__)
 REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
 
 # Keep these in sync with cvd_engine.py (env-overridable, same style as the Gamma feed).
-CVD_REDIS_URL = os.getenv("CVD_REDIS_URL", "redis://127.0.0.1:6379/0")
 CVD_REDIS_CHANNEL = os.getenv("CVD_REDIS_CHANNEL", "cvd:2m_candle_closed")
 CVD_REDIS_SNAPSHOT_KEY = os.getenv("CVD_REDIS_SNAPSHOT_KEY", "cvd_2m_snapshot")
 
@@ -59,7 +58,7 @@ def _get_snapshot_client():
         with _snapshot_client_lock:
             if _snapshot_client is None:
                 _snapshot_client = redis.Redis.from_url(
-                    CVD_REDIS_URL,
+                    REDIS_URL,
                     decode_responses=True,
                     health_check_interval=REDIS_HEALTH_CHECK_INTERVAL,
                     socket_timeout=REDIS_SOCKET_TIMEOUT,
@@ -89,7 +88,7 @@ def _bridge_loop() -> None:
         client = None
         try:
             client = redis.Redis.from_url(
-                CVD_REDIS_URL,
+                REDIS_URL,
                 decode_responses=True,
                 health_check_interval=REDIS_HEALTH_CHECK_INTERVAL,
                 socket_timeout=REDIS_SOCKET_TIMEOUT,

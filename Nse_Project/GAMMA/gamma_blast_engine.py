@@ -66,7 +66,7 @@ CONFIG = {
     "exposure_units": os.getenv("GAMMA_EXPOSURE_UNITS", "indian").strip().lower(),
 }
 
-REDIS_URL = os.getenv("GAMMA_REDIS_URL", "redis://127.0.0.1:6379/0")
+REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
 REDIS_DATA_KEY = os.getenv("GAMMA_REDIS_DATA_KEY", "live_options_data")
 REDIS_CHANNEL = os.getenv("GAMMA_REDIS_CHANNEL", "gamma:live_options_updated")
 

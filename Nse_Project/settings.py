@@ -7,6 +7,14 @@ from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+LIVE_OPTIONS_DATA_PATH = BASE_DIR / 'live_options_data.json'
+try:
+    with LIVE_OPTIONS_DATA_PATH.open('x', encoding='utf-8') as live_options_file:
+        live_options_file.write('{}')
+except FileExistsError:
+    pass
+
+os.makedirs(BASE_DIR / 'preopen', exist_ok=True)
 
 # ==========================================
 # SECURITY SETTINGS (Dynamic for Render/Local)
@@ -82,7 +90,7 @@ ASGI_APPLICATION = 'Nse_Project.asgi.application'
 # WEBSOCKETS & REDIS CONFIGURATION
 # ==========================================
 # Dynamically fetches the Redis URL from Render, or uses localhost for local machine
-REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
+REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
 
 CHANNEL_LAYERS = {
     "default": {
