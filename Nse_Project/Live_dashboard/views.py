@@ -337,7 +337,7 @@ _PRICE_COLUMN_HINTS = (
 
 # Pre-open Redis IPC. The 09:10 publisher SETs this snapshot key and PUBLISHes to the
 # matching channel; the Channels consumer bridge then fans the payload out to browsers.
-PREOPEN_REDIS_URL = os.getenv("PREOPEN_REDIS_URL", "redis://127.0.0.1:6379/0")
+REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
 PREOPEN_REDIS_DATA_KEY = os.getenv("PREOPEN_REDIS_DATA_KEY", "preopen_trap_data")
 PREOPEN_REDIS_CHANNEL = os.getenv("PREOPEN_REDIS_CHANNEL", "preopen:trap_updated")
 PREOPEN_REDIS_TIMEOUT = float(os.getenv("PREOPEN_REDIS_TIMEOUT", "2.0"))
@@ -650,7 +650,7 @@ def _get_preopen_redis():
     if _preopen_redis is None:
         try:
             _preopen_redis = redis.Redis.from_url(
-                PREOPEN_REDIS_URL,
+                REDIS_URL,
                 decode_responses=True,
                 socket_connect_timeout=PREOPEN_REDIS_TIMEOUT,
                 socket_timeout=PREOPEN_REDIS_TIMEOUT,
@@ -1191,6 +1191,9 @@ def live_option_chain_api(request):
             "momentum": 0,
             "score": 50,
             "cvd": 0,
+            "current_atr": 0,
+            "current_atr_ce": 0,
+            "current_atr_pe": 0,
             "delta_wt_impact": 0,
             "gamma_boost_val": 0,
             "iv_skew_est": 0,
@@ -1282,6 +1285,11 @@ def _build_live_option_chain_payload() -> dict:
         # Live cumulative CVD (index-level), bridged from the CVD engine so the AI
         # card's macro bearish confirmation reads it straight from this 1 Hz payload.
         "cvd": _json_safe_value(market_state.get("cumulative_cvd")),
+        # AI Trade Setups: live 1-minute ATR entry-zone buffer (₹). The PRICE field
+        # renders [entry - ATR] - [entry + ATR] from these.
+        "current_atr": _json_safe_value(market_state.get("current_atr")),
+        "current_atr_ce": _json_safe_value(market_state.get("current_atr_ce")),
+        "current_atr_pe": _json_safe_value(market_state.get("current_atr_pe")),
         "net_gex": _json_safe_value(market_state.get("net_gex")),
         "net_gex_ratio": _json_safe_value(market_state.get("net_gex_ratio")),
         # Advanced Greek Blend inputs (Vanna / Charm / Gamma Flip level) driving the score.
@@ -1300,4 +1308,3 @@ def _build_live_option_chain_payload() -> dict:
         "deadly_combo_signals": combo_signals,
         "error": None,
     }
-

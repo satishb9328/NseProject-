@@ -61,6 +61,11 @@ DEFAULT_MARKET_STATE = {
     "peak_net_oi_bias": 0.0,
     "peak_total_vol_skew": 0.0,
     "peak_total_pcr": 1.0,
+    # AI Trade Setups: live 1-minute ATR of the ATM option candles (per side plus
+    # the active-side value), used by the frontend to render the dynamic entry zone.
+    "current_atr": 0.0,
+    "current_atr_ce": 0.0,
+    "current_atr_pe": 0.0,
 }
 
 

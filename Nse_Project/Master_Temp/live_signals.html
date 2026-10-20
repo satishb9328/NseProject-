@@ -1069,7 +1069,7 @@
       window.speechSynthesis.speak(new SpeechSynthesisUtterance(message));
     } catch (e) { /* speech engine unavailable — ignore */ }
   }
-  function updateAITrades() {
+  function updateAITrades(data) {
     const atm = aiAtmRow();
     const atmStrike = atm ? number(atm.strike) : 0;
     const px = value => `₹${value.toFixed(2)}`;
@@ -1134,22 +1134,26 @@
     // bullish, put for bearish) so entries line up with the trade side.
     const ltp = atm ? (bearish ? number(atm.put_ltp) : number(atm.call_ltp)) : 0;
 
+    // Live ATR entry-zone buffer (₹) streamed from the backend AI engines. CE/PE
+    // option premiums (and their 1-minute ATRs) differ, so pick the side matching
+    // the signal. Degrades to 0 (single-price render) before 14 candles exist.
+    const rawAtr = bearish ? (data && data.current_atr_pe) : (data && data.current_atr_ce);
+    const atr = Number.isFinite(Number(rawAtr)) && Number(rawAtr) > 0 ? Number(rawAtr) : 0;
+
     // Card A — Momentum pullback: buy a 15% dip off the ATM premium.
     const aEntry = ltp > 0 ? ltp * 0.85 : 0;
-    // Direction-aware SL/Target: SL sits against the trade, Target with the trade,
-    // so the geometry is logical for BOTH CE (bullish) and PE (bearish).
-    const aSl = bearish ? aEntry * 1.20 : aEntry * 0.80;
-    const aTarget = bearish ? aEntry * 0.60 : aEntry * 1.40;
+    // Option-Buy logic: a long option (CE or PE) always profits when its premium
+    // RISES, so SL sits 20% BELOW entry and Target sits 40% ABOVE entry for both.
+    const aSl = aEntry * 0.80;
+    const aTarget = aEntry * 1.40;
 
     // Card B — Supp/Res trap: fade the break of the support/resistance wall.
     // Entry is the LIVE ATM option premium (call premium for CE, put premium for PE).
-    // SL and Target are sized around it so the risk:reward is a fixed 1:2 and the
-    // direction is always correct:
-    //   CE (bullish): SL = entry * 0.80 (below), Target = entry * 1.40 (above)
-    //   PE (bearish): SL = entry * 1.20 (above), Target = entry * 0.60 (below)
+    // Option-Buy logic: a long option (CE or PE) always profits when its premium
+    // RISES, so SL sits 20% BELOW entry and Target sits 40% ABOVE entry for both.
     const bEntry = ltp > 0 ? ltp : 0;
-    const bSl = bearish ? bEntry * 1.20 : bEntry * 0.80;
-    const bTarget = bearish ? bEntry * 0.60 : bEntry * 1.40;
+    const bSl = bEntry * 0.80;
+    const bTarget = bEntry * 1.40;
 
     // NO_TRADE: blank the card instead of pretending a CE/PE edge exists.
     // Otherwise render the correct CE/PE strike and the staged entry/SL/target.
@@ -1164,7 +1168,13 @@
         setText(`${prefix}-target`, 'WAIT');
         return;
       }
-      setText(`${prefix}-entry`, ltp > 0 ? px(entry) : '--');
+      // PRICE renders the dynamic ATR entry zone [entry - ATR] - [entry + ATR]
+      // once the backend ATR is live; otherwise it degrades to the single price.
+      const zoneLow = Math.max(0, entry - atr);
+      const entryText = ltp > 0
+        ? (atr > 0 ? `${px(zoneLow)} - ${px(entry + atr)}` : px(entry))
+        : '--';
+      setText(`${prefix}-entry`, entryText);
       setText(`${prefix}-sl`, ltp > 0 ? px(sl) : '--');
       setText(`${prefix}-target`, ltp > 0 ? px(target) : '--');
     };
@@ -1174,7 +1184,7 @@
     updateMathConsole(currentTradeState);
   }
 
-  async function refreshOptions() { try { const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); updateSpotPrice(data); allRows = Array.isArray(data.option_chain) ? data.option_chain.sort((a, b) => number(a.strike) - number(b.strike)) : []; updateSentiment(data); updateAITrades(); renderAdvancedMetrics(data); renderMacroMetrics(data); } catch (error) { console.warn('Option-chain fetch failed:', error); } }
+  async function refreshOptions() { try { const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); updateSpotPrice(data); allRows = Array.isArray(data.option_chain) ? data.option_chain.sort((a, b) => number(a.strike) - number(b.strike)) : []; updateSentiment(data); updateAITrades(data); renderAdvancedMetrics(data); renderMacroMetrics(data); } catch (error) { console.warn('Option-chain fetch failed:', error); } }
   async function refreshGamma() { try { const response = await fetch('/gamma/status/', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); const status = data?.status || data; if (status?.last_profile) renderProfile(status.last_profile); if (Array.isArray(status?.gamma_alerts)) status.gamma_alerts.forEach(renderSignal); if (status?.last_signal != null) renderSignal(status.last_signal); } catch (error) { console.warn('Gamma status fetch failed:', error); } }
 
   // Blink whichever of MAX/MIN IEP the Final IEP settled closest to.

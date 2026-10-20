@@ -2,21 +2,27 @@
 Django settings for MyProject2 project.
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-gh^o_^vogsp_l+80778wk!do0fr0)#$k$!n12plcg)h4^kyun_'
+# ==========================================
+# SECURITY SETTINGS (Dynamic for Render/Local)
+# ==========================================
+# Uses the secret key from Render if available, otherwise uses the local default
+SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-gh^o_^vogsp_l+80778wk!do0fr0)#$k$!n12plcg)h4^kyun_')
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# DEBUG is True locally, but can be turned off in Render by setting Environment Variable DEBUG=False
+DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = ['*']
 
-# Application definition
-# Application definition
+
+# ==========================================
+# APPLICATION DEFINITION
+# ==========================================
 INSTALLED_APPS = [
     'daphne',
     'django.contrib.admin',
@@ -50,8 +56,6 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-# NOTE: If your inner configuration folder is named 'Nse_Project' instead of 'MyProject2', 
-# you will need to change 'MyProject2' to 'Nse_Project' in the two lines below!
 ROOT_URLCONF = 'Nse_Project.urls'
 
 TEMPLATES = [
@@ -73,25 +77,26 @@ TEMPLATES = [
 WSGI_APPLICATION = 'Nse_Project.wsgi.application'
 ASGI_APPLICATION = 'Nse_Project.asgi.application'
 
+
+# ==========================================
+# WEBSOCKETS & REDIS CONFIGURATION
+# ==========================================
+# Dynamically fetches the Redis URL from Render, or uses localhost for local machine
+REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
+
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
             "hosts": [
                 {
-                    "address": "redis://127.0.0.1:6379/0",
-                    # PING an idle connection before reuse so a silently-closed
-                    # socket is detected and replaced instead of timing out.
+                    "address": REDIS_URL,
                     "health_check_interval": 30,
-                    # MUST be > channels_redis's 5s BRPOP/BZPOPMIN poll timeout,
-                    # otherwise the socket read races the server poll and raises
-                    # redis.exceptions.TimeoutError ("Timeout reading from ...").
                     "socket_timeout": 10,
                     "socket_connect_timeout": 5,
                     "socket_keepalive": True,
                 },
             ],
-            # channels_redis defaults — kept explicit and self-documenting.
             "expiry": 60,
             "group_expiry": 86400,
             "capacity": 100,
@@ -99,7 +104,11 @@ CHANNEL_LAYERS = {
     },
 }
 
-# Database
+
+# ==========================================
+# DATABASE SETTINGS
+# ==========================================
+# Note: SQLite data resets on every Render deployment.
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -107,7 +116,10 @@ DATABASES = {
     }
 }
 
-# Password validation
+
+# ==========================================
+# PASSWORD VALIDATION
+# ==========================================
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
@@ -123,11 +135,19 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-# Internationalization
+
+# ==========================================
+# INTERNATIONALIZATION
+# ==========================================
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-# Static files (CSS, JavaScript, Images)
+
+# ==========================================
+# STATIC FILES (CSS, JavaScript, Images)
+# ==========================================
 STATIC_URL = 'static/'
+# STATIC_ROOT is required by Render to collect and serve static files properly
+STATIC_ROOT = BASE_DIR / 'staticfiles'

@@ -29,6 +29,8 @@ except ImportError:  # keeps the module importable if redis-py is missing
 
 logger = logging.getLogger(__name__)
 
+REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
+
 # Keep these in sync with cvd_engine.py (env-overridable, same style as the Gamma feed).
 CVD_REDIS_URL = os.getenv("CVD_REDIS_URL", "redis://127.0.0.1:6379/0")
 CVD_REDIS_CHANNEL = os.getenv("CVD_REDIS_CHANNEL", "cvd:2m_candle_closed")
@@ -205,7 +207,6 @@ class CvdLiveConsumer(AsyncWebsocketConsumer):
 # thread subscribes to the raw Redis channel and re-broadcasts every payload into
 # the Channels group ``preopen_updates``, which ``PreopenTrapConsumer`` joins and
 # forwards to every connected browser.
-PREOPEN_REDIS_URL = os.getenv("PREOPEN_REDIS_URL", "redis://127.0.0.1:6379/0")
 PREOPEN_REDIS_CHANNEL = os.getenv("PREOPEN_REDIS_CHANNEL", "preopen:trap_updated")
 PREOPEN_REDIS_SNAPSHOT_KEY = os.getenv("PREOPEN_REDIS_DATA_KEY", "preopen_trap_data")
 
@@ -225,7 +226,7 @@ def _get_preopen_snapshot_client():
         with _preopen_snapshot_lock:
             if _preopen_snapshot_client is None:
                 _preopen_snapshot_client = redis.Redis.from_url(
-                    PREOPEN_REDIS_URL,
+                    REDIS_URL,
                     decode_responses=True,
                     health_check_interval=REDIS_HEALTH_CHECK_INTERVAL,
                     socket_timeout=REDIS_SOCKET_TIMEOUT,
@@ -255,7 +256,7 @@ def _preopen_bridge_loop() -> None:
         client = None
         try:
             client = redis.Redis.from_url(
-                PREOPEN_REDIS_URL,
+                REDIS_URL,
                 decode_responses=True,
                 health_check_interval=REDIS_HEALTH_CHECK_INTERVAL,
                 socket_timeout=REDIS_SOCKET_TIMEOUT,
@@ -372,7 +373,6 @@ class PreopenTrapConsumer(AsyncWebsocketConsumer):
 # ``ai:trade_trigger``. This mirrors the CVD / pre-open bridges: one lightweight
 # thread subscribes to that channel and re-broadcasts every payload into the
 # Channels group ``ai_trade_setups``, which ``AITradeTriggerConsumer`` joins.
-AI_TRADE_REDIS_URL = os.getenv("AI_TRADE_REDIS_URL", "redis://127.0.0.1:6379/0")
 AI_TRADE_REDIS_CHANNEL = os.getenv("AI_TRADE_REDIS_CHANNEL", "ai:trade_trigger")
 
 _ai_trade_bridge_started = False
@@ -398,7 +398,7 @@ def _ai_trade_bridge_loop() -> None:
         client = None
         try:
             client = redis.Redis.from_url(
-                AI_TRADE_REDIS_URL,
+                REDIS_URL,
                 decode_responses=True,
                 health_check_interval=REDIS_HEALTH_CHECK_INTERVAL,
                 socket_timeout=REDIS_SOCKET_TIMEOUT,

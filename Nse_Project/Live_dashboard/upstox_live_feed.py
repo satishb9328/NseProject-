@@ -2028,6 +2028,27 @@ def _route_ai_option_candle(candle: dict) -> None:
             logger.exception("AI setup engine on_candle failed for %s", key)
 
 
+def _ai_current_atr() -> dict:
+    """Return the latest ATR per side from the AI candle-confirmation engines.
+
+    Engines are keyed by (instrument_key, setup_type); both setups for a given
+    instrument share the same 1-minute candle history, so the first non-null ATR
+    per side is representative. Returns {"ce": float|None, "pe": float|None}.
+    """
+    ce_atr = pe_atr = None
+    with _ai_engines_lock:
+        for (_key, _setup), eng in _ai_engines.items():
+            atr = getattr(eng, "latest_atr", None)
+            if not isinstance(atr, (int, float)) or atr != atr or atr <= 0:
+                continue
+            side = (getattr(eng, "option_side", "") or "").upper()
+            if side == "CE" and ce_atr is None:
+                ce_atr = float(atr)
+            elif side == "PE" and pe_atr is None:
+                pe_atr = float(atr)
+    return {"ce": ce_atr, "pe": pe_atr}
+
+
 def _ai_market_no_trade_probe() -> bool:
     """Live no-trade gate for the AI candle-confirmation engine.
 
@@ -2144,6 +2165,24 @@ def _refresh_market_state(instrument_data=None) -> None:
     market_state["net_oi_bias"] = macro["net_oi_bias"]
     market_state["total_vol_skew"] = macro["total_vol_skew"]
     market_state["total_pcr"] = macro["total_pcr"]
+
+    # AI Trade Setups: expose the live ATR entry-zone buffer (₹) so the frontend
+    # can render PRICE as [entry - ATR] - [entry + ATR]. CE/PE premiums differ,
+    # so both sides are published plus a single active-side value.
+    ai_atr = _ai_current_atr()
+    market_state["current_atr_ce"] = ai_atr["ce"] if ai_atr["ce"] is not None else 0.0
+    market_state["current_atr_pe"] = ai_atr["pe"] if ai_atr["pe"] is not None else 0.0
+    _bullish = score > 55
+    _bearish = (score < 45) or (macro["net_oi_bias"] < 0 and score < 50)
+    if not _bullish and not _bearish:
+        _bullish = momentum > 20
+        _bearish = momentum < -20
+    if _bearish:
+        market_state["current_atr"] = market_state["current_atr_pe"]
+    elif _bullish:
+        market_state["current_atr"] = market_state["current_atr_ce"]
+    else:
+        market_state["current_atr"] = 0.0
 
     if abs(macro["net_oi_bias"]) > abs(market_state.get("peak_net_oi_bias", 0.0)):
         market_state["peak_net_oi_bias"] = macro["net_oi_bias"]
