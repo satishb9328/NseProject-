@@ -6,7 +6,7 @@ heavy MTF/parquet calculations owned by ``build_daily_trend_setups``.
 
     python manage.py update_live_sniper
 """
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from Nse_Project.funda_fetch.models import LiveSignal, TrendSetup
@@ -15,20 +15,31 @@ from Nse_Project.funda_fetch.models import LiveSignal, TrendSetup
 # defensively so the command still runs if the scanner is missing.
 try:
     from Nse_Project.funda_fetch.live_ml_scanner import main as run_live_scanner
-except Exception:  # noqa: BLE001
+except Exception as exc:  # noqa: BLE001
     run_live_scanner = None
+    scanner_import_error = exc
+else:
+    scanner_import_error = None
 
 
 def get_live_sniper_result() -> dict:
     """Return the scanner result, including both 2H and Mega Reversal signals."""
     if run_live_scanner is None:
-        return {}
+        raise CommandError(
+            f"Could not import the live sniper scanner: {scanner_import_error}"
+        ) from scanner_import_error
 
     try:
         result = run_live_scanner()
-        return result if isinstance(result, dict) else {}
-    except Exception:  # noqa: BLE001
-        return {}
+    except Exception as exc:  # noqa: BLE001
+        raise CommandError(f"Live sniper scan failed: {exc}") from exc
+    if not isinstance(result, dict):
+        raise CommandError(
+            f"Live sniper scanner returned {type(result).__name__}, expected dict."
+        )
+    if result.get("scan_status") == "failed":
+        raise CommandError("Live sniper scan did not complete; existing signals were not changed.")
+    return result
 
 
 def get_live_sniper_alerts() -> dict:
@@ -51,6 +62,13 @@ class Command(BaseCommand):
         result = get_live_sniper_result()
         signals = result.get("signals", [])
         mega_signals = result.get("mega_reversal_signals", [])
+        diagnostics = result.get("diagnostics", {})
+        evaluated_symbols = {
+            str(symbol).strip().upper()
+            for symbol in result.get("evaluated_symbols", [])
+        }
+        if diagnostics:
+            self.stdout.write(f"Scanner diagnostics: {diagnostics}")
         live_alerts = {
             str(alert.get("symbol", "")).strip().upper(): alert.get("pattern")
             for alert in signals
@@ -60,6 +78,8 @@ class Command(BaseCommand):
 
         changed = []
         for obj in TrendSetup.objects.all():
+            if obj.symbol.upper() not in evaluated_symbols:
+                continue
             new_pattern = live_alerts.get(obj.symbol.upper())
             if obj.live_sniper_pattern != new_pattern:
                 obj.live_sniper_pattern = new_pattern

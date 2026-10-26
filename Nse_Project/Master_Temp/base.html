@@ -11,10 +11,15 @@
 
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📈</text></svg>">
 
-  <!-- Tailwind CSS (Play CDN — swap for a compiled stylesheet in production) -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tailwind CSS (Play CDN — swap for a compiled stylesheet in production).
+       Loaded with `defer` so it never blocks the first paint. The theme config is
+       captured up front and applied as soon as the CDN has executed, which makes
+       the Play CDN re-render with our custom colors/fonts/shadows. -->
+  <script src="https://cdn.tailwindcss.com" defer></script>
   <script>
-    tailwind.config = {
+    // Captured at parse time. We cannot touch the `tailwind` global here because the
+    // CDN script above is deferred and has not executed yet — it is applied below.
+    window.__tailwindConfig = {
       darkMode: 'class',
       theme: {
         extend: {
@@ -53,11 +58,41 @@
       },
     };
   </script>
+  <script>
+    // Apply the config once the deferred CDN has executed. Deferred scripts run
+    // before DOMContentLoaded, so `window.tailwind` exists by the time this fires.
+    (function () {
+      function applyConfig() {
+        if (window.tailwind && window.__tailwindConfig) {
+          window.tailwind.config = window.__tailwindConfig; // triggers Play CDN re-render
+          return true;
+        }
+        return false;
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function () {
+          if (!applyConfig()) {
+            // CDN was unusually slow or unreachable: retry briefly, then give up
+            // gracefully (the page stays usable via the inline <style> fallback).
+            var tries = 0;
+            var timer = setInterval(function () {
+              if (applyConfig() || ++tries >= 40) clearInterval(timer);
+            }, 250);
+          }
+        });
+      } else {
+        applyConfig();
+      }
+    })();
+  </script>
 
-  <!-- Google Fonts: Inter (body) + Space Grotesk (display) + JetBrains Mono (data) -->
+  <!-- Google Fonts: Inter (body) + Space Grotesk (display) + JetBrains Mono (data).
+       Loaded asynchronously via media="print" + onload so the stylesheet is
+       non-render-blocking; the <noscript> fallback covers JS-disabled clients. -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"></noscript>
 
   <style>
     :root {
@@ -177,12 +212,12 @@
           <span class="nav-label">Performance</span>
         </a>
 
-        <a href="#" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-slate-100 hover:bg-ink-800/70 transition-all duration-200">
+        <a href="{% url 'watchlist' %}" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-slate-100 hover:bg-ink-800/70 transition-all duration-200">
           <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
           <span class="nav-label">Watchlist</span>
         </a>
 
-        <a href="#" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-slate-100 hover:bg-ink-800/70 transition-all duration-200">
+        <a href="{% url 'admin:index' %}" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-400 hover:text-slate-100 hover:bg-ink-800/70 transition-all duration-200">
           <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 011.45.12l.773.774c.39.389.44 1.002.12 1.45l-.527.737c-.25.35-.272.806-.107 1.204.165.397.505.71.93.78l.893.15c.543.09.94.56.94 1.109v1.094c0 .55-.397 1.02-.94 1.11l-.893.149c-.425.07-.765.383-.93.78-.165.398-.143.854.107 1.204l.527.738c.32.447.269 1.06-.12 1.45l-.774.773a1.125 1.125 0 01-1.449.12l-.738-.527c-.35-.25-.806-.272-1.203-.107-.397.165-.71.505-.781.929l-.149.894c-.09.542-.56.94-1.11.94h-1.094c-.55 0-1.019-.398-1.11-.94l-.148-.894c-.071-.424-.384-.764-.781-.93-.398-.164-.854-.142-1.204.108l-.738.527c-.447.32-1.06.269-1.45-.12l-.773-.774a1.125 1.125 0 01-.12-1.45l.527-.737c.25-.35.273-.806.108-1.204-.165-.397-.506-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0 .55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.93-.78.165-.398.143-.854-.108-1.204l-.526-.738a1.125 1.125 0 01.12-1.45l.773-.773a1.125 1.125 0 011.45-.12l.737.527c.35.25.807.272 1.204.107.397-.165.71-.505.78-.929l.15-.894z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
           <span class="nav-label">Settings</span>
         </a>

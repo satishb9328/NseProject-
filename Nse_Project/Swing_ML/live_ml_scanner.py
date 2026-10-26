@@ -11,6 +11,7 @@ import numpy as np
 import xgboost as xgb
 import joblib
 import warnings
+from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
@@ -29,8 +30,15 @@ except ImportError:
     print("[WARN] Warning: nifty_advanced_strategy.py not found. SMC filtering will be skipped.")
     smc_entry_signal = None
 
-# 🔴 కరెక్ట్ చేసిన టోకెన్ పాత్ (User Provided Path)
-TOKEN_FILE_PATH = r"C:\Program Files\MyProject2\Nse_Project\Brokers\upstox\upstox\upstox_token.json"
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BASE_DIR.parent
+TOKEN_DIR = PROJECT_ROOT / 'Brokers' / 'upstox'
+TOKEN_FILE_PATHS = [
+    TOKEN_DIR / 'upstox' / 'upstox_token.json',
+    TOKEN_DIR / 'upstox_v3_token.json',
+    TOKEN_DIR / 'upstox_login_details.json',
+    PROJECT_ROOT.parent / 'upstox' / 'upstox_token.json',
+]
 
 HISTORY_DIR = r"D:\Api data\ML_HISTO_DATA\Upstox_History"
 MODEL_PATH = r"D:\Api data\ML_HISTO_DATA\Model_Weights\xgboost_swing_model.pkl"
@@ -46,21 +54,29 @@ ML_FEATURES = [
 # =====================================================================
 def get_access_token():
     """టోకెన్ ఫైల్ నుండి టోకెన్ ని సురక్షితంగా చదివే ఫంక్షన్"""
-    try:
-        with open(TOKEN_FILE_PATH, 'r') as file:
-            data = json.load(file)
+    candidates = []
+    for path in TOKEN_FILE_PATHS:
+        if not path.exists():
+            continue
+        try:
+            with path.open('r', encoding='utf-8') as file:
+                data = json.load(file)
             token = data.get("access_token")
             if token:
-                return token
+                candidates.append((path.stat().st_mtime, path, token))
             else:
-                print(f"[WARN] Token file found, but 'access_token' is missing inside it.")
-                return None
-    except FileNotFoundError:
-        print(f"[ERROR] Token file not found at: {TOKEN_FILE_PATH}")
+                print(f"[WARN] Token file found, but 'access_token' is missing: {path}")
+        except Exception as exc:
+            print(f"[ERROR] Error reading token file {path}: {exc}")
+
+    if not candidates:
+        print(f"[ERROR] No valid Upstox token found in: {TOKEN_FILE_PATHS}")
         return None
-    except Exception as e:
-        print(f"[ERROR] Error reading token JSON: {e}")
-        return None
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    _, newest_path, token = candidates[0]
+    print(f"[INFO] Loaded Upstox token from {newest_path}")
+    return token
 
 def get_upstox_instrument_dict():
     url = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.csv.gz"
@@ -134,14 +150,14 @@ def main():
 
     if not os.path.exists(MODEL_PATH):
         print("[ERROR] AI Model not found! Please run train_model.py first.")
-        return
+        return {"status": "error", "message": "Missing model"}
     model = joblib.load(MODEL_PATH)
     print("[OK] AI Brain (XGBoost) Loaded Successfully.")
 
     token = get_access_token()
     if not token:
         print("[ERROR] Upstox Token Invalid or Missing. Exiting.")
-        return
+        return {"status": "error", "message": "Missing token"}
     headers = {'Accept': 'application/json', 'Authorization': f'Bearer {token}'}
     
     upstox_keys = get_upstox_instrument_dict()

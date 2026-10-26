@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Watchlist | NSE Dashboard{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
+  <div class="mb-6 flex flex-col gap-2">
+    <p class="text-xs uppercase tracking-[0.3em] text-slate-400">Watchlist</p>
+    <h1 class="text-2xl sm:text-3xl font-display font-bold text-slate-50">📝 Near-Miss Watchlist</h1>
+    <p class="text-sm text-slate-400">Stocks building a base near the 52-week low — one trigger away from a valid SMC setup.</p>
+  </div>
+
+  <div class="glass rounded-2xl overflow-hidden">
+    <div class="flex items-center justify-between border-b border-ink-700/60 px-4 py-3">
+      <span class="text-sm text-slate-300">{{ near_miss_count }} stock{{ near_miss_count|pluralize }}</span>
+      <span class="text-xs text-slate-500">Last updated: {{ last_updated|default:'—' }}</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-left text-xs uppercase tracking-wider text-slate-500 border-b border-ink-700/60">
+            <th class="px-4 py-3">Symbol</th>
+            <th class="px-4 py-3">CMP (₹)</th>
+            <th class="px-4 py-3">Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for miss in near_misses %}
+          <tr class="border-b border-ink-800/60 hover:bg-ink-800/40 transition">
+            <td class="px-4 py-3 font-semibold text-slate-100">{{ miss.symbol|default:'—' }}</td>
+            <td class="px-4 py-3 font-mono text-neon-green">{{ miss.price|floatformat:2|default:'—' }}</td>
+            <td class="px-4 py-3 text-slate-400">{{ miss.reason|default:'—' }}</td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="3" class="px-4 py-12 text-center text-slate-500">No near-miss setups right now — the base is quiet.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

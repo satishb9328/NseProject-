@@ -152,3 +152,16 @@ def queue_ticks_smc_view(request):
         "last_updated": _latest_updated(),
     }
     return render(request, "queue_ticks.html", context)
+
+
+def watchlist_view(request):
+    """Render the Near-Miss Watchlist as a standalone page."""
+    near_misses = _normalise_near_misses(_read_csv_records(NEAR_MISS_CSV))
+
+    context = {
+        "near_misses": near_misses,
+        "near_miss_count": len(near_misses),
+        "total_scanned": TOTAL_SCANNED,
+        "last_updated": _latest_updated(),
+    }
+    return render(request, "watchlist.html", context)

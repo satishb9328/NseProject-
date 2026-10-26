@@ -162,9 +162,26 @@ class CvdLiveConsumer(AsyncWebsocketConsumer):
         # Ensure the raw-Redis -> group bridge is running (single instance per process).
         start_cvd_bridge()
 
-        if self.channel_layer is not None:
-            await self.channel_layer.group_add(CVD_GROUP, self.channel_name)
+        # Accept the handshake FIRST so a slow/unavailable Redis channel layer can
+        # never leave the browser stuck in CONNECTING (the handshake must not depend
+        # on Redis). The group join happens after accept; if it fails, notify the
+        # client and close cleanly.
         await self.accept()
+
+        if self.channel_layer is not None:
+            try:
+                await self.channel_layer.group_add(CVD_GROUP, self.channel_name)
+            except Exception:
+                logger.warning("CVD group_add failed; closing connection.", exc_info=True)
+                try:
+                    await self.send(text_data=json.dumps({
+                        "type": "error",
+                        "message": "Channel layer unavailable",
+                    }))
+                except Exception:
+                    logger.debug("Failed to send CVD channel-layer error to client.", exc_info=True)
+                await self.close(code=1011)
+                return
 
         # Send the latest snapshot immediately so the widget is never empty while
         # waiting up to 2 minutes for the next candle close.
@@ -329,9 +346,26 @@ class PreopenTrapConsumer(AsyncWebsocketConsumer):
         # Ensure the raw-Redis -> group bridge is running (single instance per process).
         start_preopen_bridge()
 
-        if self.channel_layer is not None:
-            await self.channel_layer.group_add(PREOPEN_GROUP, self.channel_name)
+        # Accept the handshake FIRST so a slow/unavailable Redis channel layer can
+        # never leave the browser stuck in CONNECTING (the handshake must not depend
+        # on Redis). The group join happens after accept; if it fails, notify the
+        # client and close cleanly.
         await self.accept()
+
+        if self.channel_layer is not None:
+            try:
+                await self.channel_layer.group_add(PREOPEN_GROUP, self.channel_name)
+            except Exception:
+                logger.warning("Pre-open group_add failed; closing connection.", exc_info=True)
+                try:
+                    await self.send(text_data=json.dumps({
+                        "type": "error",
+                        "message": "Channel layer unavailable",
+                    }))
+                except Exception:
+                    logger.debug("Failed to send pre-open channel-layer error to client.", exc_info=True)
+                await self.close(code=1011)
+                return
 
         # Push the latest snapshot immediately so a page opened after 09:10 never has
         # to wait for a re-broadcast of the (already fired) settle event.
@@ -450,9 +484,26 @@ class AITradeTriggerConsumer(AsyncWebsocketConsumer):
         # Ensure the raw-Redis -> group bridge is running (single instance per process).
         start_ai_trade_bridge()
 
-        if self.channel_layer is not None:
-            await self.channel_layer.group_add(AI_TRADE_GROUP, self.channel_name)
+        # Accept the handshake FIRST so a slow/unavailable Redis channel layer can
+        # never leave the browser stuck in CONNECTING (the handshake must not depend
+        # on Redis). The group join happens after accept; if it fails, notify the
+        # client and close cleanly.
         await self.accept()
+
+        if self.channel_layer is not None:
+            try:
+                await self.channel_layer.group_add(AI_TRADE_GROUP, self.channel_name)
+            except Exception:
+                logger.warning("AI trade group_add failed; closing connection.", exc_info=True)
+                try:
+                    await self.send(text_data=json.dumps({
+                        "type": "error",
+                        "message": "Channel layer unavailable",
+                    }))
+                except Exception:
+                    logger.debug("Failed to send AI trade channel-layer error to client.", exc_info=True)
+                await self.close(code=1011)
+                return
 
     async def disconnect(self, close_code):
         if self.channel_layer is not None:

@@ -125,6 +125,9 @@
   .math-progress-track .math-fill.neg { background: linear-gradient(90deg, #ef4444, #facc15); }
   .math-progress-track .math-fill.delta { background: #22c55e; }
   .math-zero { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: rgba(148, 163, 184, .55); transform: translateX(-50%); z-index: 1; pointer-events: none; }
+  /* Central neutral / no-trade band rendered inside every slider track. Sits above
+     the fill, below the neon marker, so the marker simply slides over it. */
+  .math-neutral-zone { position: absolute; top: 0; bottom: 0; border-radius: inherit; background: rgba(250, 204, 21, .10); box-shadow: inset 0 0 0 1px rgba(250, 204, 21, .22); z-index: 1; pointer-events: none; }
   .macro-ref-line { position: absolute; top: -2px; bottom: -2px; left: 50%; width: 1px; transform: translateX(-50%); background: rgba(250, 204, 21, .95); box-shadow: 0 0 5px rgba(250, 204, 21, .8); z-index: 2; pointer-events: none; }
   .math-progress-track .math-marker { position: absolute; top: -4px; bottom: -4px; left: 0; width: 2px; transform: translateX(-50%); border-radius: 2px; background: var(--peak-color, #f8fafc); box-shadow: 0 0 6px var(--peak-color, #fff), 0 0 14px var(--peak-color, #fff); z-index: 3; pointer-events: none; opacity: 0; transition: left .4s ease-out, opacity .3s ease; }
   .math-progress-track .math-marker.is-visible { opacity: 1; animation: peak-pulse 1.6s ease-in-out infinite; }
@@ -202,6 +205,150 @@
   @media (prefers-reduced-motion: reduce) {
     .blink-bullish, .blink-bearish { animation: none; }
   }
+
+  /* =====================================================================
+     SCALPER MODE — frontend-only toggle (V3 scalp module)
+     =====================================================================
+     The toggle button lives in the top header (next to "Live Signals").
+     When ON, the AI TRADE SETUPS card (#ai-trade-setups) is hidden and a
+     dedicated SCALP SIGNALS card (#scalp-trade-setups) takes its place.
+     Color scheme: neon-cyan + amber-yellow (deliberately different from
+     the intraday green/red so the operator can tell which engine is
+     driving the AI card at a glance).
+     ===================================================================== */
+
+  .scalper-toggle {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .45rem .85rem;
+    border-radius: .55rem;
+    border: 1px solid rgba(34, 211, 238, .35);
+    background: rgba(8, 47, 73, .35);
+    color: #67e8f9;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    transition: background-color .25s ease, border-color .25s ease,
+                color .25s ease, box-shadow .25s ease;
+    cursor: pointer;
+    user-select: none;
+  }
+  .scalper-toggle:hover {
+    background: rgba(8, 47, 73, .55);
+    border-color: rgba(34, 211, 238, .6);
+  }
+  .scalper-toggle .pulse-dot {
+    width: 8px; height: 8px; border-radius: 999px;
+    background: #475569;
+    box-shadow: 0 0 0 0 rgba(34, 211, 238, 0);
+    transition: background-color .25s ease, box-shadow .25s ease;
+  }
+  .scalper-toggle.is-active {
+    color: #fde047;
+    border-color: rgba(250, 204, 21, .85);
+    background: rgba(69, 26, 3, .45);
+    box-shadow: 0 0 14px rgba(250, 204, 21, .35), inset 0 0 0 1px rgba(250, 204, 21, .25);
+    animation: scalper-active-pulse 2.2s ease-in-out infinite;
+  }
+  .scalper-toggle.is-active .pulse-dot {
+    background: #fde047;
+    box-shadow: 0 0 10px #fde047, 0 0 18px rgba(250, 204, 21, .65);
+  }
+  @keyframes scalper-active-pulse {
+    0%, 100% { box-shadow: 0 0 14px rgba(250, 204, 21, .35), inset 0 0 0 1px rgba(250, 204, 21, .25); }
+    50%      { box-shadow: 0 0 22px rgba(250, 204, 21, .55), inset 0 0 0 1px rgba(250, 204, 21, .45); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .scalper-toggle.is-active { animation: none; }
+  }
+
+  /* ---- SCALP SIGNALS card (replaces #ai-trade-setups when scalper ON) ---- */
+  #scalp-trade-setups { display: none; }
+  body.scalper-on #ai-trade-setups { display: none !important; }
+  body.scalper-on #scalp-trade-setups { display: flex; }
+
+  .scalp-bias-box {
+    border-radius: .55rem;
+    border: 1px solid transparent;
+    padding: .65rem .75rem;
+    text-align: center;
+    transition: background-color .35s ease, border-color .35s ease, color .35s ease;
+  }
+  .scalp-bias-box .bias-label {
+    font-size: 10px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase;
+    opacity: .85;
+  }
+  .scalp-bias-box .bias-value {
+    display: block; margin-top: .15rem; font-size: 18px; font-weight: 800; letter-spacing: .04em;
+    font-variant-numeric: tabular-nums;
+  }
+  .scalp-bias-box.bias-bull { color: #4ade80; background: rgba(34,197,94,.10); border-color: rgba(34,197,94,.45); }
+  .scalp-bias-box.bias-bear { color: #f87171; background: rgba(239,68,68,.10); border-color: rgba(239,68,68,.45); }
+  .scalp-bias-box.bias-neutral { color: #fde047; background: rgba(250,204,21,.08); border-color: rgba(250,204,21,.35); }
+
+  .scalp-reason-list {
+    margin: 0; padding: 0; list-style: none;
+    font-size: 10.5px; line-height: 1.45; color: #cbd5e1;
+  }
+  .scalp-reason-list li {
+    padding: .15rem 0 .15rem .65rem;
+    border-left: 2px solid rgba(148, 163, 184, .35);
+  }
+  .scalp-reason-list li.pos { border-left-color: #4ade80; }
+  .scalp-reason-list li.neg { border-left-color: #f87171; }
+
+  .scalp-alert-feed { scrollbar-width: thin; scrollbar-color: rgba(250, 204, 21, .45) rgba(7, 11, 20, .8); }
+  .scalp-alert-item {
+    padding: .25rem .45rem;
+    border-left: 2px solid rgba(250, 204, 21, .55);
+    background: rgba(250, 204, 21, .05);
+    border-radius: .25rem;
+    font-size: 10.5px; line-height: 1.35;
+    color: #fef3c7;
+    word-break: break-word;
+  }
+  .scalp-alert-item.alert-bear { border-left-color: rgba(248, 113, 113, .65); background: rgba(239, 68, 68, .07); color: #fecaca; }
+  .scalp-alert-item.alert-bull { border-left-color: rgba(74, 222, 128, .65); background: rgba(34, 197, 94, .07); color: #bbf7d0; }
+
+  .scalp-velocity-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .35rem; }
+  .scalp-velocity-cell {
+    border: 1px solid rgba(34, 211, 238, .25);
+    background: rgba(8, 47, 73, .35);
+    border-radius: .35rem;
+    padding: .25rem .35rem;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .scalp-velocity-cell .v-label { font-size: 9px; font-weight: 700; letter-spacing: .12em; color: #67e8f9; text-transform: uppercase; }
+  .scalp-velocity-cell .v-value { display: block; margin-top: .1rem; font-size: 13px; font-weight: 700; color: #f8fafc; }
+  .scalp-velocity-cell .v-value.up { color: #4ade80; }
+  .scalp-velocity-cell .v-value.down { color: #f87171; }
+
+  .scalp-coi-row {
+    display: grid; grid-template-columns: minmax(50px, .6fr) minmax(38px, .4fr) minmax(0, 1fr) minmax(0, 1fr);
+    gap: .35rem;
+    padding: .2rem .35rem;
+    border-bottom: 1px solid rgba(148, 163, 184, .12);
+    font-size: 10.5px; line-height: 1.3; font-variant-numeric: tabular-nums;
+  }
+  .scalp-coi-row:last-child { border-bottom: 0; }
+  .scalp-coi-row .sc-strike { color: #e2e8f0; font-weight: 700; }
+  .scalp-coi-row .sc-side.call { color: #7dd3fc; }
+  .scalp-coi-row .sc-side.put { color: #fdba74; }
+  .scalp-coi-row .sc-delta.up { color: #4ade80; }
+  .scalp-coi-row .sc-delta.down { color: #f87171; }
+
+  .scalp-metric-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: .2rem .45rem; font-size: 10.5px; line-height: 1.3;
+    border-bottom: 1px solid rgba(148, 163, 184, .12);
+  }
+  .scalp-metric-row:last-child { border-bottom: 0; }
+  .scalp-metric-row .sm-label { color: #94a3b8; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; font-size: 9.5px; }
+  .scalp-metric-row .sm-value { color: #f8fafc; font-variant-numeric: tabular-nums; font-weight: 600; }
 </style>
 {% endblock %}
 
@@ -215,7 +362,12 @@
         <span>SPOT: <span id="live-spot-price" class="text-white font-mono transition-colors duration-300">--</span><span id="live-spot" class="hidden">--</span></span>
         <span>Expiry: <span id="live-expiry" class="text-white font-mono">--</span></span>
       </div>
-      <div class="text-sm font-bold text-neon-green uppercase tracking-[.3em]">Live Signals</div>
+      <div class="flex items-center gap-3">
+        <div class="text-sm font-bold text-neon-green uppercase tracking-[.3em] hidden sm:block">Live Signals</div>
+        <button id="scalper-toggle" type="button" class="scalper-toggle" aria-pressed="false" title="Toggle between intraday mode (V2 composite score) and scalper mode (V3 raw GEX flips + ATR stops + COI velocity)">
+          <span class="pulse-dot"></span><span class="toggle-label">⚡ SCALPER: OFF</span>
+        </button>
+      </div>
     </div>
 
     <section id="gamma-snapshot" class="mt-0">
@@ -248,7 +400,9 @@
           </div>
           <div class="flex-1 overflow-hidden rounded-lg">
             <table id="compact-options-table" class="compact-chain-table">
-              <tbody>
+              <!-- ISSUE #8 FIX: Use <thead> for headers (was <tbody>) — semantic HTML
+                   for accessibility tools and screen readers. -->
+              <thead>
                 <tr>
                   <th scope="col" class="call-side text-[11px]">CALL COI%</th>
                   <th scope="col" class="call-side text-[11px]">CALL LTP</th>
@@ -258,7 +412,7 @@
                   <th scope="col" class="put-side text-[11px]">PUT LTP</th>
                   <th scope="col" class="put-side text-[11px]">PUT COI%</th>
                 </tr>
-              </tbody>
+              </thead>
               <tbody id="compact-options-tbody">
                 <tr><td colspan="7" class="px-1 py-2 text-[11px] text-slate-500">Loading compact chain…</td></tr>
               </tbody>
@@ -369,24 +523,40 @@
           <span class="flex items-center gap-1.5 text-xs"><span class="uppercase tracking-wider text-slate-400">🕒 Time Decay:</span> <span id="ai-mom-decay" class="font-mono font-semibold text-amber-300">--</span></span>
         </div>
         <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div class="rounded-lg border border-orange-500/30 bg-orange-950/20 p-3">
-            <p class="mb-2 text-sm font-bold uppercase tracking-wider text-orange-300">⚡ Momentum Pullback (15% Dip)</p>
-            <div class="grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm">
-              <span class="uppercase tracking-wider text-slate-500">Strike</span><span id="ai-mom-strike" class="text-right font-mono font-semibold text-slate-50">--</span>
-              <span class="uppercase tracking-wider text-slate-500">Price</span><span id="ai-mom-entry" class="text-right font-mono font-semibold text-slate-50">--</span>
-              <span class="uppercase tracking-wider text-slate-500">SL</span><span id="ai-mom-sl" class="text-right font-mono font-semibold text-rose-300">--</span>
-              <span class="uppercase tracking-wider text-slate-500">Target</span><span id="ai-mom-target" class="text-right font-mono font-semibold text-emerald-300">--</span>
-              <div id="momentum-signal-box" class="col-span-2 mt-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-center text-xs font-bold uppercase tracking-wider text-amber-300">🟡 WAITING</div>
+          <div class="rounded-lg border border-orange-500/30 bg-orange-950/20 p-2.5">
+            <p class="mb-1.5 text-xs font-bold uppercase tracking-wider text-orange-300">⚡ Momentum Pullback (15% Dip)</p>
+            <div class="space-y-1 text-xs">
+              <div class="flex items-center justify-between gap-2">
+                <span class="uppercase tracking-wider text-slate-500">Strike</span><span id="ai-mom-strike" class="text-right font-mono font-semibold whitespace-nowrap text-slate-50">--</span>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="uppercase tracking-wider text-slate-500">Price</span><span id="ai-mom-entry" class="text-right font-mono font-semibold text-[11px] whitespace-nowrap text-slate-50">--</span>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="uppercase tracking-wider text-slate-500">SL</span><span id="ai-mom-sl" class="text-right font-mono font-semibold whitespace-nowrap text-rose-300">--</span>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="uppercase tracking-wider text-slate-500">Target</span><span id="ai-mom-target" class="text-right font-mono font-semibold whitespace-nowrap text-emerald-300">--</span>
+              </div>
+              <div id="momentum-signal-box" class="rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wider text-amber-300">🟡 WAITING</div>
             </div>
           </div>
-          <div class="rounded-lg border border-sky-500/30 bg-sky-950/20 p-3">
-            <p class="mb-2 text-sm font-bold uppercase tracking-wider text-sky-300">🛡️ Supp/Res Trap (Delta)</p>
-            <div class="grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm">
-              <span class="uppercase tracking-wider text-slate-500">Strike</span><span id="ai-sr-strike" class="text-right font-mono font-semibold text-slate-50">--</span>
-              <span class="uppercase tracking-wider text-slate-500">Price</span><span id="ai-sr-entry" class="text-right font-mono font-semibold text-slate-50">--</span>
-              <span class="uppercase tracking-wider text-slate-500">SL</span><span id="ai-sr-sl" class="text-right font-mono font-semibold text-rose-300">--</span>
-              <span class="uppercase tracking-wider text-slate-500">Target</span><span id="ai-sr-target" class="text-right font-mono font-semibold text-emerald-300">--</span>
-              <div id="suppres-signal-box" class="col-span-2 mt-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-center text-xs font-bold uppercase tracking-wider text-amber-300">🟡 WAITING</div>
+          <div class="rounded-lg border border-yellow-500/40 bg-yellow-950/20 p-2.5">
+            <p class="mb-1.5 text-xs font-bold uppercase tracking-wider text-yellow-300">📐 Fibonacci Bounce (3m)</p>
+            <div class="space-y-1 text-xs">
+              <div class="flex items-center justify-between gap-2">
+                <span class="uppercase tracking-wider text-slate-500">Strike</span><span id="ai-fib-strike" class="text-right font-mono font-semibold whitespace-nowrap text-slate-50">--</span>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="uppercase tracking-wider text-slate-500">Price</span><span id="ai-fib-entry" class="text-right font-mono font-semibold text-[11px] whitespace-nowrap text-slate-50">--</span>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="uppercase tracking-wider text-slate-500">SL</span><span id="ai-fib-sl" class="text-right font-mono font-semibold whitespace-nowrap text-rose-300">--</span>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="uppercase tracking-wider text-slate-500">Target</span><span id="ai-fib-target" class="text-right font-mono font-semibold whitespace-nowrap text-emerald-300">--</span>
+              </div>
+              <div id="fib-signal-box" class="rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wider text-amber-300">🟡 WAITING</div>
             </div>
           </div>
           
@@ -404,6 +574,7 @@
               </div>
               <div class="math-progress">
                 <div class="math-progress-track">
+                  <span class="math-neutral-zone" style="left: 25%; width: 50%;"></span>
                   <span class="math-zero"></span>
                   <span id="math-bias-fill" class="math-fill neg" style="width: 59%;"></span>
                   <span class="math-marker"></span>
@@ -418,6 +589,7 @@
               </div>
               <div class="math-progress">
                 <div class="math-progress-track">
+                  <span class="math-neutral-zone" style="left: 25%; width: 50%;"></span>
                   <span class="math-zero"></span>
                   <span id="math-momentum-fill" class="math-fill" style="left: 50%; width: 0%;"></span>
                   <span class="math-marker"></span>
@@ -432,6 +604,7 @@
               </div>
               <div class="math-progress">
                 <div class="math-progress-track">
+                  <span class="math-neutral-zone" style="left: 37.5%; width: 25%;"></span>
                   <span class="math-zero"></span>
                   <span id="math-delta-wt-fill" class="math-fill" style="left: 50%; width: 0%;"></span>
                   <span class="math-marker"></span>
@@ -449,6 +622,7 @@
               </div>
               <div class="math-progress">
                 <div class="math-progress-track">
+                  <span class="math-neutral-zone" style="left: 40%; width: 20%;"></span>
                   <span id="math-score-fill" class="math-fill pos" style="width: 71%;"></span>
                   <span class="math-marker"></span>
                 </div>
@@ -462,6 +636,7 @@
               </div>
               <div class="math-progress">
                 <div class="math-progress-track">
+                  <span class="math-neutral-zone" style="left: 35%; width: 30%;"></span>
                   <span class="math-zero"></span>
                   <span class="math-fill neg" style="width: 38%;"></span>
                   <span class="math-marker"></span>
@@ -476,6 +651,7 @@
               </div>
               <div class="math-progress">
                 <div class="math-progress-track">
+                  <span class="math-neutral-zone" style="left: 25%; width: 50%;"></span>
                   <span class="math-zero"></span>
                   <span class="math-fill neg" style="width: 26.25%;"></span>
                   <span class="math-marker"></span>
@@ -491,6 +667,91 @@
           <button id="audio-toggle" type="button" class="rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1 text-xs font-bold uppercase tracking-[.12em] text-slate-300 transition hover:bg-slate-700/60" aria-pressed="false">🔇 ALERTS OFF</button>
         </div>
 
+      </section>
+
+      <!-- ================================================================ -->
+      <!-- SCALP SIGNALS CARD — visible only when scalper toggle is ON.      -->
+      <!-- Replaces #ai-trade-setups (above) — same grid cell, same size.    -->
+      <!-- ================================================================ -->
+      <section id="scalp-trade-setups" class="flex h-full flex-col rounded-xl border border-cyan-700/60 bg-slate-900/40 p-4 lg:col-start-3 lg:row-start-2">
+        <div class="mb-2 flex items-center justify-between gap-3">
+          <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-cyan-300">⚡ Scalp Signals (V3)</h2>
+          <span class="flex items-center gap-1.5 text-xs"><span class="uppercase tracking-wider text-slate-400">🎯 ATR(2m):</span> <span id="scalp-atr" class="font-mono font-semibold text-amber-300">--</span></span>
+        </div>
+
+        <!-- Combined scalp bias gauge -->
+        <div id="scalp-bias-box" class="scalp-bias-box bias-neutral">
+          <span class="bias-label">Scalp Bias</span>
+          <span id="scalp-bias-value" class="bias-value">NEUTRAL</span>
+          <span id="scalp-bias-score" class="block mt-0.5 text-[10px] font-mono opacity-80">score: 0.00</span>
+        </div>
+
+        <!-- Bias reasons (factor breakdown) -->
+        <div class="mt-2 rounded-md border border-slate-700/60 bg-black/30 p-2">
+          <p class="mb-1 text-[9px] font-bold uppercase tracking-[.18em] text-cyan-400">Bias Reasons</p>
+          <ul id="scalp-bias-reasons" class="scalp-reason-list">
+            <li class="text-slate-500">Waiting for scalp signals…</li>
+          </ul>
+        </div>
+
+        <!-- Scalp AI setups (Mom Pullback + Fib Bounce — same shape as intraday card) -->
+        <div class="mt-2 grid grid-cols-1 gap-2 lg:grid-cols-2">
+          <div class="rounded-lg border border-cyan-500/30 bg-cyan-950/15 p-2">
+            <p class="mb-1 text-[10px] font-bold uppercase tracking-wider text-cyan-300">⚡ Scalp Pullback (ATR stop)</p>
+            <div class="space-y-1 text-xs">
+              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Strike</span><span id="scalp-mom-strike" class="text-right font-mono font-semibold text-slate-50">--</span></div>
+              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Entry</span><span id="scalp-mom-entry" class="text-right font-mono font-semibold text-[11px] text-slate-50">--</span></div>
+              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">SL (1×ATR)</span><span id="scalp-mom-sl" class="text-right font-mono font-semibold text-rose-300">--</span></div>
+              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Target (1.5×ATR)</span><span id="scalp-mom-target" class="text-right font-mono font-semibold text-emerald-300">--</span></div>
+            </div>
+          </div>
+          <div class="rounded-lg border border-amber-500/30 bg-amber-950/15 p-2">
+            <p class="mb-1 text-[10px] font-bold uppercase tracking-wider text-amber-300">📐 Scalp Reversal (Wall test)</p>
+            <div class="space-y-1 text-xs">
+              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Strike</span><span id="scalp-fib-strike" class="text-right font-mono font-semibold text-slate-50">--</span></div>
+              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Entry</span><span id="scalp-fib-entry" class="text-right font-mono font-semibold text-[11px] text-slate-50">--</span></div>
+              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">SL (1×ATR)</span><span id="scalp-fib-sl" class="text-right font-mono font-semibold text-rose-300">--</span></div>
+              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Target (1.5×ATR)</span><span id="scalp-fib-target" class="text-right font-mono font-semibold text-emerald-300">--</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live scalp alerts feed (raw GEX flips + wall tests + volume surges) -->
+        <div class="mt-2 flex flex-col rounded-md border border-slate-700/60 bg-black/30 p-2">
+          <p class="mb-1 text-[9px] font-bold uppercase tracking-[.18em] text-amber-300">⚡ Live Scalp Alerts</p>
+          <div id="scalp-alerts-feed" class="scalp-alert-feed max-h-32 space-y-1 overflow-y-auto">
+            <p class="text-[10px] text-slate-500">No scalp alerts yet…</p>
+          </div>
+        </div>
+
+        <!-- Spot velocity (5s / 10s / 30s) -->
+        <div class="mt-2 rounded-md border border-slate-700/60 bg-black/30 p-2">
+          <p class="mb-1 text-[9px] font-bold uppercase tracking-[.18em] text-cyan-400">Spot Velocity (pts/s)</p>
+          <div class="scalp-velocity-grid">
+            <div class="scalp-velocity-cell"><span class="v-label">5s</span><span id="scalp-vel-5" class="v-value">--</span></div>
+            <div class="scalp-velocity-cell"><span class="v-label">10s</span><span id="scalp-vel-10" class="v-value">--</span></div>
+            <div class="scalp-velocity-cell"><span class="v-label">30s</span><span id="scalp-vel-30" class="v-value">--</span></div>
+          </div>
+        </div>
+
+        <!-- Top COI movers -->
+        <div class="mt-2 rounded-md border border-slate-700/60 bg-black/30 p-2">
+          <p class="mb-1 text-[9px] font-bold uppercase tracking-[.18em] text-amber-300">Top COI Movers (ΔCOI)</p>
+          <div id="scalp-coi-movers">
+            <div class="scalp-coi-row text-slate-500"><span>Strike</span><span>Side</span><span>5s</span><span>30s</span></div>
+          </div>
+        </div>
+
+        <!-- Quick metrics row (ATR candles used, evaluated_at) -->
+        <div class="mt-2 rounded-md border border-slate-700/60 bg-black/30 px-2 py-1">
+          <div class="scalp-metric-row"><span class="sm-label">ATR candles</span><span id="scalp-atr-candles" class="sm-value">0</span></div>
+          <div class="scalp-metric-row"><span class="sm-label">Last update</span><span id="scalp-evaluated-at" class="sm-value">--</span></div>
+          <div class="scalp-metric-row"><span class="sm-label">Trade state</span><span id="scalp-trade-state" class="sm-value">--</span></div>
+        </div>
+
+        <div class="mt-auto flex w-full justify-end gap-1.5 pt-2">
+          <button id="scalp-audio-toggle" type="button" class="rounded-md border border-cyan-700/60 bg-cyan-900/40 px-2 py-1 text-xs font-bold uppercase tracking-[.12em] text-cyan-300 transition hover:bg-cyan-800/60" aria-pressed="false">🔇 ALERTS OFF</button>
+        </div>
       </section>
     </div>
     </section>
@@ -529,6 +790,22 @@
   // once per CE/PE/NO_TRADE transition, never on every 1 Hz poll.
   let audioAlertsEnabled = false;
   let previousTradeState = 'NO_TRADE';
+  // ---- V3 Scalper mode state -------------------------------------------
+  // Frontend-only toggle. When ON the dashboard renders the SCALP SIGNALS card
+  // (hidden by default) instead of #ai-trade-setups, drives AI entries from
+  // scalp_signals.bias + bias_score + atr_2min, and swaps voice alerts to fire
+  // on bias BULLISH/BEARISH transitions. State persists in localStorage so a
+  // refresh doesn't drop the operator back into intraday mode mid-trade.
+  let scalperMode = localStorage.getItem('scalper_mode') === 'on';
+  // Latest scalp_signals snapshot captured from /gamma/status/ (refreshGamma).
+  // Stays null until the V3 engine publishes its first scalp_signals payload.
+  let currentScalpSignals = null;
+  // Voice-alert dedup for scalper mode (separate from intraday previousTradeState
+  // so toggling the mode doesn't double-fire announcements).
+  let previousScalpBias = 'NEUTRAL';
+  // Tracks seen scalp alert strings so the feed doesn't grow infinitely on a
+  // repeated wall-proximity message.
+  const seenScalpAlerts = new Set();
   // Client-side High-Water Mark cache — seeded from the Redis-backed market state
   // injected by views.py so a hard refresh keeps the accumulated peaks. A peak now
   // decays exponentially toward its `center` with a 5-minute half-life, so a peak
@@ -603,7 +880,7 @@
   const pct = value => value === null || value === undefined || value === '-' ? '-' : `${Number(value).toFixed(1)}%`;
   const signedPct = value => `${value >= 0 ? '+' : ''}${Math.round(value)}%`;
   const profileValue = (profile, ...keys) => keys.reduce((value, key) => value ?? profile?.[key], null) ?? '--';
-  const themes = { bullish: ['bg-slate-900/40', 'text-slate-300', 'border-slate-800'], neutral: ['bg-slate-900/40', 'text-slate-300', 'border-slate-800'], bearish: ['bg-slate-900/40', 'text-slate-300', 'border-slate-800'] };
+  // ISSUE #6 FIX: Removed dead `themes` object (was never referenced).
   // Fallback tier only - the engine normally ships its own `signal`. Exposures are now
   // per CONTRACT (lot_size / 65x smaller than the old share-scaled numbers), so the old
   // 5,000,000,000 gate would have called every real reading "range-bound".
@@ -871,7 +1148,80 @@
   function pcrColorClass(value) { const pcr = Number(value); if (!Number.isFinite(pcr)) return 'text-slate-50'; if (pcr >= 1.2) return 'text-green-400'; if (pcr <= 0.8) return 'text-red-400'; return 'text-yellow-400'; }
   // ---- Gamma Flip missing-value guard (None/null renders as "--") ----
   function isFlipMissing(value) { if (value === null || value === undefined) return true; const text = String(value).trim(); if (!text || text === '--' || /^(none|null)$/i.test(text)) return true; return !Number.isFinite(Number(value)); }
-  function renderProfile(profile) { if (!profile || typeof profile !== 'object') return; const spot = profileValue(profile, 'spot', 'Spot', 'spot_price'); const weekly = profile.weekly_gamma || profile; const day = profile.day_gamma || {}; if (!haveIndexSpot) { currentSpot = Number(spot); const el = document.getElementById('live-spot-price'); if (el) el.textContent = fmt(spot); } document.getElementById('live-spot').textContent = fmt(spot); document.getElementById('live-expiry').textContent = profile.expiry || '--'; [['weekly', weekly], ['day', day]].forEach(([prefix, metrics]) => { const netGex = profileValue(metrics, 'net_gex', 'netGEX', 'net_gex_value'); const pcr = profileValue(metrics, 'pcr', 'PCR'); const gexTier = metrics.signal ? signalTier(metrics.signal) : netGexTier(netGex, pcr); const pcrElement = document.getElementById(`${prefix}-pcr`); pcrElement.textContent = fmt(pcr); pcrElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); pcrElement.classList.add(pcrColorClass(pcr)); if (prefix !== 'day') { const gammaFlipRaw = profileValue(metrics, 'gamma_flip_level', 'gamma_flip', 'gammaFlip', 'gamma_flip_value'); document.getElementById(`${prefix}-gamma-flip`).textContent = fmtFlip(gammaFlipRaw); const gammaFlipWarning = document.getElementById(`${prefix}-gamma-flip-warning`); if (gammaFlipWarning) gammaFlipWarning.classList.toggle('is-visible', isFlipMissing(gammaFlipRaw)); } document.getElementById(`${prefix}-call-wall`).textContent = fmt(metrics.call_wall ?? metrics.call_wall_strike); document.getElementById(`${prefix}-put-wall`).textContent = fmt(metrics.put_wall ?? metrics.put_wall_strike); if (prefix !== 'day') { const charmElement = document.getElementById(`${prefix}-net-charm`); const vannaElement = document.getElementById(`${prefix}-net-vanna`); charmElement.textContent = fmtExposure(metrics.net_charm_display, metrics.net_charm); vannaElement.textContent = fmtExposure(metrics.net_vanna_display, metrics.net_vanna); charmElement.title = exactTitle(metrics.net_charm); vannaElement.title = exactTitle(metrics.net_vanna); exposureColor(charmElement, metrics.net_charm); exposureColor(vannaElement, metrics.net_vanna); } const gexElement = document.getElementById(`${prefix}-net-gex`); const summaryElement = document.getElementById(`${prefix}-net-gex-summary`); gexElement.textContent = fmtExposure(metrics.net_gex_display, netGex); gexElement.title = exactTitle(netGex); gexElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50'); gexElement.classList.add(gexTier.colorClass); summaryElement.textContent = gexTier.summary; summaryElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-400'); summaryElement.classList.add(gexTier.colorClass); }); }
+  // BUG #3 FIX: Rewritten from a 1500-char one-liner into readable multi-line
+  // code. Every getElementById now has a null guard so a missing element ID
+  // (typo, removed element) can't kill the entire refreshGamma() call.
+  function renderProfile(profile) {
+    if (!profile || typeof profile !== 'object') return;
+    const spot = profileValue(profile, 'spot', 'Spot', 'spot_price');
+    const weekly = profile.weekly_gamma || profile;
+    const day = profile.day_gamma || {};
+
+    if (!haveIndexSpot) {
+      currentSpot = Number(spot);
+      const spotEl = document.getElementById('live-spot-price');
+      if (spotEl) spotEl.textContent = fmt(spot);
+    }
+    const liveSpotEl = document.getElementById('live-spot');
+    if (liveSpotEl) liveSpotEl.textContent = fmt(spot);
+    const expiryEl = document.getElementById('live-expiry');
+    if (expiryEl) expiryEl.textContent = profile.expiry || '--';
+
+    [['weekly', weekly], ['day', day]].forEach(([prefix, metrics]) => {
+      const netGex = profileValue(metrics, 'net_gex', 'netGEX', 'net_gex_value');
+      const pcr = profileValue(metrics, 'pcr', 'PCR');
+      const gexTier = metrics.signal ? signalTier(metrics.signal) : netGexTier(netGex, pcr);
+
+      const pcrElement = document.getElementById(`${prefix}-pcr`);
+      if (pcrElement) {
+        pcrElement.textContent = fmt(pcr);
+        pcrElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50');
+        pcrElement.classList.add(pcrColorClass(pcr));
+      }
+
+      if (prefix !== 'day') {
+        const gammaFlipRaw = profileValue(metrics, 'gamma_flip_level', 'gamma_flip', 'gammaFlip', 'gamma_flip_value');
+        const flipEl = document.getElementById(`${prefix}-gamma-flip`);
+        if (flipEl) flipEl.textContent = fmtFlip(gammaFlipRaw);
+        const gammaFlipWarning = document.getElementById(`${prefix}-gamma-flip-warning`);
+        if (gammaFlipWarning) gammaFlipWarning.classList.toggle('is-visible', isFlipMissing(gammaFlipRaw));
+      }
+
+      const callWallEl = document.getElementById(`${prefix}-call-wall`);
+      if (callWallEl) callWallEl.textContent = fmt(metrics.call_wall ?? metrics.call_wall_strike);
+      const putWallEl = document.getElementById(`${prefix}-put-wall`);
+      if (putWallEl) putWallEl.textContent = fmt(metrics.put_wall ?? metrics.put_wall_strike);
+
+      if (prefix !== 'day') {
+        const charmElement = document.getElementById(`${prefix}-net-charm`);
+        const vannaElement = document.getElementById(`${prefix}-net-vanna`);
+        if (charmElement) {
+          charmElement.textContent = fmtExposure(metrics.net_charm_display, metrics.net_charm);
+          charmElement.title = exactTitle(metrics.net_charm);
+          exposureColor(charmElement, metrics.net_charm);
+        }
+        if (vannaElement) {
+          vannaElement.textContent = fmtExposure(metrics.net_vanna_display, metrics.net_vanna);
+          vannaElement.title = exactTitle(metrics.net_vanna);
+          exposureColor(vannaElement, metrics.net_vanna);
+        }
+      }
+
+      const gexElement = document.getElementById(`${prefix}-net-gex`);
+      if (gexElement) {
+        gexElement.textContent = fmtExposure(metrics.net_gex_display, netGex);
+        gexElement.title = exactTitle(netGex);
+        gexElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-50');
+        gexElement.classList.add(gexTier.colorClass);
+      }
+      const summaryElement = document.getElementById(`${prefix}-net-gex-summary`);
+      if (summaryElement) {
+        summaryElement.textContent = gexTier.summary;
+        summaryElement.classList.remove('text-green-400', 'text-red-400', 'text-yellow-400', 'text-slate-400');
+        summaryElement.classList.add(gexTier.colorClass);
+      }
+    });
+  }
   function renderSignal(signal) { if (signal == null) return; const text = typeof signal === 'string' ? signal : signal.message || JSON.stringify(signal); if (seenSignals.has(text)) return; seenSignals.add(text); const stream = /weekly|macro/i.test(text) ? signalStreams.weekly : signalStreams.daily; if (!stream) return; if (stream.querySelector('p')) stream.replaceChildren(); const item = document.createElement('div'); item.className = 'rounded-lg border border-slate-700/80 bg-ink-800/80 p-2'; const timestamp = typeof signal === 'object' && signal.timestamp ? new Date(signal.timestamp).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }) : new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }); item.textContent = `${timestamp}  ${text}`; stream.prepend(item); while (stream.children.length > 8) stream.lastChild.remove(); }
 
   // ---- Live index SPOT ----
@@ -1070,6 +1420,11 @@
     } catch (e) { /* speech engine unavailable — ignore */ }
   }
   function updateAITrades(data) {
+    // Frontend-only mode switch: in scalper mode the AI TRADE SETUPS card is
+    // hidden and updateAITradesScalp() drives the visible SCALP SIGNALS card
+    // instead. The intraday math (below) still runs every tick so toggling
+    // back is instant — no re-warmup needed.
+    if (scalperMode) { updateAITradesScalp(data); return; }
     const atm = aiAtmRow();
     const atmStrike = atm ? number(atm.strike) : 0;
     const px = value => `₹${value.toFixed(2)}`;
@@ -1101,11 +1456,11 @@
 
     // NO_TRADE must SUPPRESS the candle-confirmation signal badges too, not just the
     // strike text. The WebSocket BUY_NOW handler (a separate <script> block) latches
-    // #suppres-signal-box and #momentum-signal-box to "BUY NOW (… Confirmed!)" and
+    // #fib-signal-box and #momentum-signal-box to "BUY NOW (… Confirmed!)" and
     // never clears them, so we force both back to their neutral WAITING state — and
     // strip any CE/PE styling — whenever the tri-state lands in the no-trade dead-band.
     if (noTrade) {
-      const signalBoxIds = ['suppres-signal-box', 'momentum-signal-box'];
+      const signalBoxIds = ['fib-signal-box', 'momentum-signal-box'];
       const resetClasses = ['border-amber-500/40', 'bg-amber-500/10', 'text-amber-300'];
       const activeClasses = [
         'border-amber-500/40', 'bg-amber-500/10', 'text-amber-300',
@@ -1147,11 +1502,11 @@
     const aSl = aEntry * 0.80;
     const aTarget = aEntry * 1.40;
 
-    // Card B — Supp/Res trap: fade the break of the support/resistance wall.
-    // Entry is the LIVE ATM option premium (call premium for CE, put premium for PE).
-    // Option-Buy logic: a long option (CE or PE) always profits when its premium
-    // RISES, so SL sits 20% BELOW entry and Target sits 40% ABOVE entry for both.
-    const bEntry = ltp > 0 ? ltp : 0;
+    // Card B — Fibonacci Bounce: buy a 15% dip off the ATM premium (the same strict
+    // 0.85 factor fib_bounce_engine.FibBounceEngine uses for its entry). Option-Buy
+    // logic: a long option profits when its premium RISES, so SL sits 20% BELOW
+    // entry and Target sits 40% ABOVE entry for both.
+    const bEntry = ltp > 0 ? ltp * 0.85 : 0;
     const bSl = bEntry * 0.80;
     const bTarget = bEntry * 1.40;
 
@@ -1179,13 +1534,329 @@
       setText(`${prefix}-target`, ltp > 0 ? px(target) : '--');
     };
     render('ai-mom', aEntry, aSl, aTarget);
-    render('ai-sr', bEntry, bSl, bTarget);
+    render('ai-fib', bEntry, bSl, bTarget);
     // Transparency: mirror the live math (score + momentum + decision) into the debug console.
     updateMathConsole(currentTradeState);
   }
 
-  async function refreshOptions() { try { const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); updateSpotPrice(data); allRows = Array.isArray(data.option_chain) ? data.option_chain.sort((a, b) => number(a.strike) - number(b.strike)) : []; updateSentiment(data); updateAITrades(data); renderAdvancedMetrics(data); renderMacroMetrics(data); } catch (error) { console.warn('Option-chain fetch failed:', error); } }
-  async function refreshGamma() { try { const response = await fetch('/gamma/status/', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); const data = await response.json(); const status = data?.status || data; if (status?.last_profile) renderProfile(status.last_profile); if (Array.isArray(status?.gamma_alerts)) status.gamma_alerts.forEach(renderSignal); if (status?.last_signal != null) renderSignal(status.last_signal); } catch (error) { console.warn('Gamma status fetch failed:', error); } }
+  async function refreshOptions() {
+    try {
+      const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store' });
+      if (!response.ok) throw new Error(response.statusText);
+      const data = await response.json();
+      updateSpotPrice(data);
+      allRows = Array.isArray(data.option_chain) ? data.option_chain.sort((a, b) => number(a.strike) - number(b.strike)) : [];
+      updateSentiment(data);
+      updateAITrades(data);
+      renderAdvancedMetrics(data);
+      renderMacroMetrics(data);
+      // BUG #2 FIX: Render the compact chain from the SAME fetch — eliminates the
+      // duplicate 1Hz HTTP request that Script 3 used to make independently.
+      if (typeof window.renderCompactChain === 'function') {
+        window.renderCompactChain(
+          Array.isArray(data.option_chain) ? data.option_chain : [],
+          number(data.spot_price),
+          Array.isArray(data.deadly_combo_signals) ? data.deadly_combo_signals : []
+        );
+      }
+    } catch (error) {
+      console.warn('Option-chain fetch failed:', error);
+    }
+  }
+  async function refreshGamma() {
+    try {
+      const response = await fetch('/gamma/status/', { cache: 'no-store' });
+      if (!response.ok) throw new Error(response.statusText);
+      const data = await response.json();
+      const status = data?.status || data;
+      if (status?.last_profile) {
+        renderProfile(status.last_profile);
+        // V3: capture scalp_signals (only present when the backend runs with
+        // GAMMA_SCALP_MODE=on). Stored globally so updateAITradesScalp() can
+        // pick it up on the next 1 Hz option-chain tick without waiting for
+        // the next /gamma/status/ poll.
+        const scalp = status.last_profile.scalp_signals;
+        if (scalp && typeof scalp === 'object' && scalp.enabled !== false) {
+          currentScalpSignals = scalp;
+          renderScalpSignals(currentScalpSignals);
+          if (scalperMode) updateAITradesScalp(null);
+        }
+      }
+      if (Array.isArray(status?.gamma_alerts)) status.gamma_alerts.forEach(renderSignal);
+      if (status?.last_signal != null) renderSignal(status.last_signal);
+    } catch (error) { console.warn('Gamma status fetch failed:', error); }
+  }
+
+  // ====================================================================
+  // V3 SCALPER MODE — frontend rendering + AI setup logic.
+  // All scalp_signals data comes from /gamma/status/ (refreshGamma, above).
+  // The 1 Hz option-chain poll only contributes the ATM row (LTP/strike) so
+  // scalp entries can use a fresh premium between gamma-status ticks.
+  // ====================================================================
+
+  function applyScalperMode() {
+    // Toggle body class which CSS uses to show/hide the two AI cards.
+    document.body.classList.toggle('scalper-on', scalperMode);
+    const btn = document.getElementById('scalper-toggle');
+    if (btn) {
+      const label = btn.querySelector('.toggle-label');
+      if (label) label.textContent = scalperMode ? '⚡ SCALPER: ON' : '⚡ SCALPER: OFF';
+      btn.classList.toggle('is-active', scalperMode);
+      btn.setAttribute('aria-pressed', String(scalperMode));
+    }
+    // Re-render whichever card is now active so the toggle is instantly visible.
+    if (scalperMode) {
+      renderScalpSignals(currentScalpSignals);
+      updateAITradesScalp(null);
+    } else {
+      // Force a re-render of the intraday card so stale scalp values don't linger.
+      updateMathConsole(previousTradeState);
+    }
+  }
+
+  function renderScalpSignals(scalp) {
+    const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+    const biasBox = document.getElementById('scalp-bias-box');
+
+    // No payload yet — paint a neutral placeholder.
+    if (!scalp || typeof scalp !== 'object') {
+      if (biasBox) { biasBox.className = 'scalp-bias-box bias-neutral'; }
+      setText('scalp-bias-value', 'WAITING');
+      setText('scalp-bias-score', 'score: --');
+      setText('scalp-atr', '--');
+      setText('scalp-atr-candles', '0');
+      setText('scalp-evaluated-at', '--');
+      setText('scalp-vel-5', '--');
+      setText('scalp-vel-10', '--');
+      setText('scalp-vel-30', '--');
+      const reasonsEl = document.getElementById('scalp-bias-reasons');
+      if (reasonsEl) reasonsEl.innerHTML = '<li class="text-slate-500">Waiting for scalp signals…</li>';
+      const feed = document.getElementById('scalp-alerts-feed');
+      if (feed) feed.innerHTML = '<p class="text-[10px] text-slate-500">No scalp alerts yet…</p>';
+      return;
+    }
+
+    // Bias + score
+    const bias = String(scalp.bias || 'NEUTRAL').toUpperCase();
+    if (biasBox) {
+      biasBox.className = 'scalp-bias-box ' + (
+        bias === 'BULLISH' ? 'bias-bull' :
+        bias === 'BEARISH' ? 'bias-bear' : 'bias-neutral'
+      );
+    }
+    setText('scalp-bias-value', bias);
+    setText('scalp-bias-score', `score: ${Number(scalp.bias_score || 0).toFixed(2)}`);
+
+    // Bias reasons
+    const reasonsEl = document.getElementById('scalp-bias-reasons');
+    if (reasonsEl) {
+      const reasons = Array.isArray(scalp.bias_reasons) ? scalp.bias_reasons : [];
+      if (!reasons.length) {
+        reasonsEl.innerHTML = '<li class="text-slate-500">No contributing factors yet…</li>';
+      } else {
+        reasonsEl.innerHTML = reasons.map(r => {
+          const txt = String(r || '');
+          const cls = txt.startsWith('+') ? 'pos' : txt.startsWith('-') ? 'neg' : '';
+          return `<li class="${cls}">${txt}</li>`;
+        }).join('');
+      }
+    }
+
+    // ATR + candles + evaluated_at
+    const atrVal = (scalp.atr_2min === null || scalp.atr_2min === undefined) ? null : Number(scalp.atr_2min);
+    setText('scalp-atr', atrVal !== null && Number.isFinite(atrVal) ? atrVal.toFixed(2) : '-- (warming up)');
+    setText('scalp-atr-candles', String(scalp.atr_candles_used || 0));
+    setText('scalp-evaluated-at', scalp.evaluated_at || '--');
+
+    // Spot velocity
+    const v = scalp.spot_velocity || {};
+    const fmtVel = (val) => {
+      const n = Number(val);
+      if (!Number.isFinite(n)) return '--';
+      return (n >= 0 ? '+' : '') + n.toFixed(2);
+    };
+    const setVel = (id, val) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = fmtVel(val);
+      const n = Number(val);
+      el.classList.remove('up', 'down');
+      if (Number.isFinite(n)) el.classList.add(n > 0 ? 'up' : n < 0 ? 'down' : '');
+    };
+    setVel('scalp-vel-5', v[5]);
+    setVel('scalp-vel-10', v[10]);
+    setVel('scalp-vel-30', v[30]);
+
+    // Alerts feed (raw GEX flips + wall proximity + volume surges)
+    const feed = document.getElementById('scalp-alerts-feed');
+    if (feed) {
+      const alerts = Array.isArray(scalp.alerts) ? scalp.alerts : [];
+      if (!alerts.length) {
+        feed.innerHTML = '<p class="text-[10px] text-slate-500">No scalp alerts yet…</p>';
+      } else {
+        // Newest first; dedupe identical strings so a held wall test doesn't
+        // flood the panel.
+        const fresh = [];
+        for (const a of alerts) {
+          const txt = String(a || '').trim();
+          if (!txt || seenScalpAlerts.has(txt)) continue;
+          seenScalpAlerts.add(txt);
+          fresh.unshift(txt);
+        }
+        // Keep at most the 20 most recent unique alerts.
+        if (seenScalpAlerts.size > 20) {
+          const arr = Array.from(seenScalpAlerts);
+          seenScalpAlerts.clear();
+          arr.slice(-20).forEach(s => seenScalpAlerts.add(s));
+        }
+        if (fresh.length === 0) {
+          feed.innerHTML = '<p class="text-[10px] text-slate-500">No new scalp alerts…</p>';
+        } else {
+          feed.innerHTML = fresh.map(txt => {
+            const cls = /NEGATIVE/i.test(txt) ? 'alert-bear' : /POSITIVE/i.test(txt) ? 'alert-bull' : '';
+            return `<div class="scalp-alert-item ${cls}">${txt}</div>`;
+          }).join('');
+        }
+      }
+    }
+
+    // Top COI movers
+    const coiHost = document.getElementById('scalp-coi-movers');
+    if (coiHost) {
+      const movers = Array.isArray(scalp.top_coi_velocity) ? scalp.top_coi_velocity : [];
+      if (!movers.length) {
+        coiHost.innerHTML = '<div class="scalp-coi-row text-slate-500"><span>Strike</span><span>Side</span><span>5s</span><span>30s</span></div><div class="scalp-coi-row text-slate-500"><span colspan="4">No COI movers yet…</span></div>';
+      } else {
+        const fmtDelta = (val) => {
+          const n = Number(val);
+          if (!Number.isFinite(n)) return '--';
+          return (n >= 0 ? '+' : '') + Math.round(n).toLocaleString('en-IN');
+        };
+        const rows = movers.slice(0, 5).map(m => {
+          const d = m.deltas || {};
+          const d5 = fmtDelta(d[5]);
+          const d30 = fmtDelta(d[30]);
+          const cls5 = Number(d[5]) < 0 ? 'down' : 'up';
+          const cls30 = Number(d[30]) < 0 ? 'down' : 'up';
+          const sideCls = String(m.side || '').toLowerCase() === 'put' ? 'put' : 'call';
+          return `<div class="scalp-coi-row">
+            <span class="sc-strike">${Number(m.strike || 0).toLocaleString('en-IN')}</span>
+            <span class="sc-side ${sideCls}">${String(m.side || '').toUpperCase()}</span>
+            <span class="sc-delta ${cls5}">${d5}</span>
+            <span class="sc-delta ${cls30}">${d30}</span>
+          </div>`;
+        }).join('');
+        coiHost.innerHTML = '<div class="scalp-coi-row text-slate-500"><span>Strike</span><span>Side</span><span>5s</span><span>30s</span></div>' + rows;
+      }
+    }
+  }
+
+  function updateAITradesScalp(data) {
+    // data is the 1 Hz option-chain payload (for the ATM row). When called from
+    // refreshGamma() with null, fall back to the cached allRows so scalp entries
+    // still update between option-chain ticks.
+    const rows = (data && Array.isArray(data.option_chain)) ? data.option_chain : allRows;
+    const atm = (rows && rows.length) ? rows.reduce((closest, row) => {
+      const cd = Math.abs(number(closest.strike) - currentSpot);
+      const d = Math.abs(number(row.strike) - currentSpot);
+      return d < cd ? row : closest;
+    }, rows[0]) : null;
+    const atmStrike = atm ? number(atm.strike) : 0;
+    const px = value => `₹${value.toFixed(2)}`;
+    const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+
+    // Drive everything from scalp_signals.bias (BULLISH / BEARISH / NEUTRAL).
+    const scalp = currentScalpSignals;
+    const bias = scalp && scalp.bias ? String(scalp.bias).toUpperCase() : 'NEUTRAL';
+    const noTrade = bias === 'NEUTRAL' || !scalp;
+    const optionSide = bias === 'BEARISH' ? 'PE' : bias === 'BULLISH' ? 'CE' : 'NO_TRADE';
+
+    // ATR stop + target (1×ATR stop, 1.5×ATR target — the scalp standard).
+    const atrValRaw = scalp ? scalp.atr_2min : null;
+    const atr = (atrValRaw !== null && atrValRaw !== undefined && Number.isFinite(Number(atrValRaw)))
+      ? Number(atrValRaw) : 0;
+
+    // ATM premium — use the side that matches the bias.
+    const ltp = atm ? (bias === 'BEARISH' ? number(atm.put_ltp) : number(atm.call_ltp)) : 0;
+
+    // Voice-alert transitions in scalper mode fire on bias change.
+    const currentBias = bias;
+    if (audioAlertsEnabled && currentBias !== previousScalpBias) {
+      if (currentBias === 'BULLISH') speakAlert('Scalp mode: Bullish bias detected. Buy C E.');
+      else if (currentBias === 'BEARISH') speakAlert('Scalp mode: Bearish bias detected. Buy P E.');
+    }
+    previousScalpBias = currentBias;
+
+    // Card A — Scalp Pullback: enter at ATM premium, ATR stops.
+    // Long option logic: SL below entry by 1×ATR, target above by 1.5×ATR.
+    const aEntry = ltp > 0 ? ltp : 0;
+    const aSl = atr > 0 ? Math.max(0, aEntry - atr) : (aEntry ? aEntry * 0.80 : 0);
+    const aTarget = atr > 0 ? aEntry + atr * 1.5 : (aEntry ? aEntry * 1.40 : 0);
+
+    // Card B — Scalp Reversal (wall test): same ATM premium + ATR stops. The
+    // wall context is implied by the bias (bear bias = call-wall rejection,
+    // bull bias = put-wall bounce) — visible in the alerts feed above.
+    const bEntry = aEntry;
+    const bSl = aSl;
+    const bTarget = aTarget;
+
+    const strikeText = noTrade
+      ? '🚫 NO TRADE ZONE'
+      : (atmStrike > 0 ? `${atmStrike.toLocaleString('en-IN')} ${optionSide}` : '--');
+
+    const render = (prefix, entry, sl, target) => {
+      setText(`${prefix}-strike`, strikeText);
+      if (noTrade) {
+        setText(`${prefix}-entry`, 'WAIT');
+        setText(`${prefix}-sl`, 'WAIT');
+        setText(`${prefix}-target`, 'WAIT');
+        return;
+      }
+      const entryText = ltp > 0
+        ? (atr > 0 ? `${px(Math.max(0, entry - atr * 0.5))} - ${px(entry + atr * 0.5)}` : px(entry))
+        : '--';
+      setText(`${prefix}-entry`, entryText);
+      setText(`${prefix}-sl`, ltp > 0 ? px(sl) : '--');
+      setText(`${prefix}-target`, ltp > 0 ? px(target) : '--');
+    };
+    render('scalp-mom', aEntry, aSl, aTarget);
+    render('scalp-fib', bEntry, bSl, bTarget);
+
+    // Update trade-state badge + math-console score (scalp mode shows the
+    // composite scalp bias_score in the same console slot as the V2 score so
+    // the operator's eye stays on the same bar).
+    const stateEl = document.getElementById('scalp-trade-state');
+    if (stateEl) {
+      stateEl.textContent = noTrade ? 'NO_TRADE' : optionSide;
+      stateEl.classList.remove('text-emerald-300', 'text-rose-300', 'text-slate-200');
+      stateEl.classList.add(noTrade ? 'text-slate-200' : optionSide === 'PE' ? 'text-rose-300' : 'text-emerald-300');
+    }
+    // Mirror the scalp bias score into the Math Console's Score row (visible
+    // only when the AI TRADE SETUPS card is hidden, but kept in sync so a mode
+    // toggle shows the right number instantly).
+    const scoreEl = document.getElementById('math-score');
+    if (scoreEl) {
+      const s = scalp ? Number(scalp.bias_score || 0) : 0;
+      // Map scalp bias_score (~ -2.5 .. +2.5) onto a 0-100 visual scale so the
+      // unipolar Score bar still renders meaningfully: 0 = -2.5, 50 = 0, 100 = +2.5.
+      const visual = Math.max(0, Math.min(100, 50 + (s * 20)));
+      scoreEl.textContent = `${s.toFixed(2)}`;
+      scoreEl.style.color = s >= 1.5 ? '#00ff00' : s <= -1.5 ? '#ff0000' : '#ffffff';
+      const scoreRow = scoreEl.closest('.math-metric-row');
+      const scoreTrack = scoreRow ? scoreRow.querySelector('.math-progress-track') : null;
+      if (scoreTrack) {
+        const scorePeak = bumpPeak('score', Number.isFinite(visual) ? visual : 50, 50);
+        renderBar(scoreTrack, { bipolar: false, value: visual, min: 0, max: 100, peak: scorePeak });
+      }
+    }
+    // Trade state badge in Math Console mirrors scalp state too.
+    const consoleStateEl = document.getElementById('math-trade-state');
+    if (consoleStateEl) {
+      consoleStateEl.textContent = noTrade ? 'NO_TRADE' : optionSide;
+      consoleStateEl.classList.remove('text-emerald-300', 'text-rose-300', 'text-slate-200');
+      consoleStateEl.classList.add(noTrade ? 'text-slate-200' : optionSide === 'PE' ? 'text-rose-300' : 'text-emerald-300');
+    }
+  }
 
   // Blink whichever of MAX/MIN IEP the Final IEP settled closest to.
   // - Final nearer MAX  -> MAX blinks green  (.blink-bullish)
@@ -1262,6 +1933,55 @@
     };
     audioToggleBtn.addEventListener('click', applyAudioState);
   }
+
+  // BUG #1 FIX: Expose updatePreopen to window so Script 2's pre-open WebSocket
+  // handler can call it. Without this, the WS handler throws ReferenceError
+  // because updatePreopen is scoped to this IIFE's closure.
+  window.updatePreopen = updatePreopen;
+
+  // ====================================================================
+  // V3 SCALPER TOGGLE — frontend-only mode switch with localStorage.
+  // applyScalperMode() lives above (defined next to renderScalpSignals so the
+  // scalp data flow stays in one place). The toggle button sits in the top
+  // header; a second audio-toggle button lives inside the SCALP SIGNALS card
+  // so each mode has its own visible mute control.
+  // ====================================================================
+  const scalperToggleBtn = document.getElementById('scalper-toggle');
+  if (scalperToggleBtn) {
+    scalperToggleBtn.addEventListener('click', () => {
+      scalperMode = !scalperMode;
+      localStorage.setItem('scalper_mode', scalperMode ? 'on' : 'off');
+      applyScalperMode();
+    });
+  }
+  // Mirror the existing audio-toggle onto the SCALP SIGNALS card. Same state
+  // (audioAlertsEnabled) so toggling one updates both buttons.
+  const scalpAudioToggleBtn = document.getElementById('scalp-audio-toggle');
+  if (scalpAudioToggleBtn) {
+    const syncScalpAudioBtn = () => {
+      scalpAudioToggleBtn.textContent = audioAlertsEnabled ? '🔊 ALERTS ON' : '🔇 ALERTS OFF';
+      scalpAudioToggleBtn.setAttribute('aria-pressed', String(audioAlertsEnabled));
+      scalpAudioToggleBtn.classList.toggle('text-amber-300', audioAlertsEnabled);
+      scalpAudioToggleBtn.classList.toggle('text-cyan-300', !audioAlertsEnabled);
+    };
+    syncScalpAudioBtn();
+    scalpAudioToggleBtn.addEventListener('click', () => {
+      audioAlertsEnabled = !audioAlertsEnabled;
+      syncScalpAudioBtn();
+      // Keep the intraday card's button in sync too.
+      const mainBtn = document.getElementById('audio-toggle');
+      if (mainBtn) {
+        mainBtn.textContent = audioAlertsEnabled ? '🔊 ALERTS ON' : '🔇 ALERTS OFF';
+        mainBtn.setAttribute('aria-pressed', String(audioAlertsEnabled));
+        mainBtn.classList.toggle('text-emerald-300', audioAlertsEnabled);
+        mainBtn.classList.toggle('text-slate-300', !audioAlertsEnabled);
+      }
+    });
+  }
+
+  // Apply persisted scalper mode on load. Hides #ai-trade-setups and shows
+  // #scalp-trade-setups if the operator left it ON last session.
+  applyScalperMode();
 
 })();
 </script>
@@ -1384,6 +2104,8 @@
 
     preopenWs.onclose = () => {
       preopenWs = null;
+      // ISSUE #7 FIX: Don't reconnect after market close (15:30 IST).
+      if (isMarketClosed()) return;
       const delay = Math.min(1000 * Math.pow(2, preopenRetry), 15000);
       preopenRetry += 1;
       setTimeout(connectPreopen, delay);
@@ -1546,8 +2268,12 @@
       }
     }
 
+    // BUG #2 FIX: Expose renderCompactChain so Script 1's refreshOptions() can
+    // call it from the SAME fetch. The initial call below renders the chain
+    // before the first 1Hz tick; the setInterval is removed because
+    // refreshOptions() now drives both renders from one HTTP request.
+    window.renderCompactChain = renderCompactChain;
     refreshCompactChain();
-    setInterval(refreshCompactChain, 1000);
   }
 
 })();
@@ -1560,7 +2286,7 @@
   const resolveBox = (setupType) => {
     const t = String(setupType || "").toLowerCase();
     if (t.includes("momentum")) return "momentum-signal-box";
-    if (t.includes("supp") || t.includes("trap")) return "suppres-signal-box";
+    if (t.includes("fib")) return "fib-signal-box";
     return null;
   };
 
@@ -1603,12 +2329,20 @@
   let retry = 0;
   let ws = null;
 
+  // ISSUE #7 FIX: Market-closed guard (copied from Script 2's CVD widget) —
+  // stops reconnecting after 15:30 IST so the server isn't bombarded with
+  // reconnect attempts after hours.
+  function isMarketClosed() {
+    const ist = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    return ist.getHours() > 15 || (ist.getHours() === 15 && ist.getMinutes() >= 30);
+  }
+
   function connect() {
     ws = new WebSocket(url);
     ws.onopen = () => { retry = 0; };
     ws.onmessage = (event) => {
       let msg;
-      try { msg = JSON.parse(event.data); } catch (e) { return; }
+      try { msg = JSON.parse(event.data); } catch (e) { console.warn('AI trade WS: malformed message', e); return; }
       if (!msg || msg.action !== "trade_trigger" || msg.status !== "BUY_NOW") return;
       const boxId = resolveBox(msg.setup_type);
       if (!boxId) return;
@@ -1617,6 +2351,7 @@
     };
     ws.onclose = () => {
       ws = null;
+      if (isMarketClosed()) return;
       const delay = Math.min(1000 * Math.pow(2, retry), 15000);
       retry += 1;
       setTimeout(connect, delay);

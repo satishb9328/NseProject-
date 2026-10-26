@@ -8,5 +8,6 @@ from . import views
 # sidebar use ``{% url 'queue_ticks' %}`` directly.
 urlpatterns = [
     path("queue-ticks/", views.queue_ticks_smc_view, name="queue_ticks"),
+    path("watchlist/", views.watchlist_view, name="watchlist"),
 ]
 

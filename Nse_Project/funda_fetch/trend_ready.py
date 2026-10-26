@@ -52,11 +52,14 @@ python trend_ready.py --symbols RELIANCE,TCS,ACC
 """
 
 import argparse
+import logging
 import os
 import sys
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 # ─────────────────────────────── CONFIG ───────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -65,25 +68,29 @@ CANDIDATES_FILE = os.path.join(BASE_DIR, "nifty500_swing_candidates.csv")
 UNIVERSE_FILE = os.path.join(BASE_DIR, "ind_nifty500list.csv")
 OUTPUT_FILE = os.path.join(BASE_DIR, "master_trend_setups.csv")
 
-DAY_DIR = r"D:\Api data\ML_HISTO_DATA\Upstox Data\Day Data"
-WEEK_DIR = r"D:\Api data\ML_HISTO_DATA\Upstox Data\Weeks Data"
+# BUG #1 FIX: Make data directories env-overridable. The original hardcoded
+# Windows paths (D:\...) fail silently on Linux/Docker/WSL — every stock
+# reports 'no_file' and the output is empty with no explanation.
+DAY_DIR = os.getenv("FUND_DAY_DIR", r"D:\Api data\ML_HISTO_DATA\Upstox Data\Day Data")
+WEEK_DIR = os.getenv("FUND_WEEK_DIR", r"D:\Api data\ML_HISTO_DATA\Upstox Data\Weeks Data")
 
 # ── Bucket thresholds ─────────────────────────────────────────────────────────
-LOW_PROXIMITY_PCT = 10.0              # Bottom Fishing: within this % of 52w low
-MID_RANGE_LO = 40.0                   # Mid-Range Bounce band (retracement %)
-MID_RANGE_HI = 60.0
-DAILY_EMA_FAST = 20
-DAILY_EMA_SLOW = 50
-WEEKLY_EMA_FAST = 20
-WEEKLY_EMA_SLOW = 50
-EMA_TOUCH_TOL = 0.02                  # ±2% of an EMA counts as "touching" it
-RSI_PERIOD = 14
-VOL_AVG_WINDOW = 20                   # 20-day average-volume denominator
-VOL_DRY_THRESH = 0.75                 # flag volume contraction below this ratio
-LOOKBACK_52W = 252                    # ~52 weeks of trading days
-SLOPE_LOOKBACK = 5                    # bars used to estimate EMA slope
-MIN_DAILY_BARS = 60                   # minimum history for reliable daily signals
-MIN_WEEKLY_BARS = 40                  # minimum history for weekly signals
+# ISSUE #6 FIX: all thresholds are now env-overridable for tuning without code changes.
+LOW_PROXIMITY_PCT = float(os.getenv("TR_LOW_PROXIMITY_PCT", "10.0"))  # Bottom Fishing: within this % of 52w low
+MID_RANGE_LO = float(os.getenv("TR_MID_RANGE_LO", "40.0"))            # Mid-Range Bounce band (retracement %)
+MID_RANGE_HI = float(os.getenv("TR_MID_RANGE_HI", "60.0"))
+DAILY_EMA_FAST = int(os.getenv("TR_DAILY_EMA_FAST", "20"))
+DAILY_EMA_SLOW = int(os.getenv("TR_DAILY_EMA_SLOW", "50"))
+WEEKLY_EMA_FAST = int(os.getenv("TR_WEEKLY_EMA_FAST", "20"))
+WEEKLY_EMA_SLOW = int(os.getenv("TR_WEEKLY_EMA_SLOW", "50"))
+EMA_TOUCH_TOL = float(os.getenv("TR_EMA_TOUCH_TOL", "0.02"))          # ±2% of an EMA counts as "touching" it
+RSI_PERIOD = int(os.getenv("TR_RSI_PERIOD", "14"))
+VOL_AVG_WINDOW = int(os.getenv("TR_VOL_AVG_WINDOW", "20"))            # 20-day average-volume denominator
+VOL_DRY_THRESH = float(os.getenv("TR_VOL_DRY_THRESH", "0.75"))         # flag volume contraction below this ratio
+LOOKBACK_52W = int(os.getenv("TR_LOOKBACK_52W", "252"))              # ~52 weeks of trading days
+SLOPE_LOOKBACK = int(os.getenv("TR_SLOPE_LOOKBACK", "5"))            # bars used to estimate EMA slope
+MIN_DAILY_BARS = int(os.getenv("TR_MIN_DAILY_BARS", "60"))            # minimum history for reliable daily signals
+MIN_WEEKLY_BARS = int(os.getenv("TR_MIN_WEEKLY_BARS", "40"))           # minimum history for weekly signals
 
 # ── "Consolidation / Flag" bucket + fresh-EMA-contact gauges ──────────────────
 DAILY_EMA_LONG = 200                  # 200-day EMA (uptrend definition)
@@ -97,21 +104,21 @@ TR_PRIOR = 10                         # prior true-range window (days)
 EMA_CROSS_BARS = 3                    # fresh EMA cross must occur within N bars
 
 # ── "Oversold BB20 Reclaim" bucket ────────────────────────────────────────────
-BB20_MID_PERIOD = 20                  # BB20 midline = 20-period SMA
-RSI_OVERSOLD = 35.0                   # RSI below this marks the oversold dip
-RSI_DIP_LOOKBACK = 15                 # lookback (days) for the oversold RSI dip
-RSI_RECLAIM = 50.0                    # RSI must be above this for the trigger
-WEEKLY_VOL_AVG = 10                   # 10-week average-volume denominator
-WEEKLY_VOL_DRY_THRESH = 0.80          # weekly volume contraction threshold
+BB20_MID_PERIOD = int(os.getenv("TR_BB20_MID_PERIOD", "20"))        # BB20 midline = 20-period SMA
+RSI_OVERSOLD = float(os.getenv("TR_RSI_OVERSOLD", "35.0"))           # RSI below this marks the oversold dip
+RSI_DIP_LOOKBACK = int(os.getenv("TR_RSI_DIP_LOOKBACK", "15"))        # lookback (days) for the oversold RSI dip
+RSI_RECLAIM = float(os.getenv("TR_RSI_RECLAIM", "50.0"))              # RSI must be above this for the trigger
+WEEKLY_VOL_AVG = int(os.getenv("TR_WEEKLY_VOL_AVG", "10"))            # 10-week average-volume denominator
+WEEKLY_VOL_DRY_THRESH = float(os.getenv("TR_WEEKLY_VOL_DRY_THRESH", "0.80"))  # weekly volume contraction threshold
 
 # ── "Mega Reversal (Weekly BB20)" bucket ──────────────────────────────────────
-WEEKLY_BB20_PERIOD = 20                # weekly BB20 midline = 20-week SMA
-WEEKLY_RSI_DIP_WEEKS = 15              # lookback (weeks) for weekly oversold RSI dip
-MEGA_WEEKLY_VOL_DRY = 0.85             # weekly volume exhaustion threshold
+WEEKLY_BB20_PERIOD = int(os.getenv("TR_WEEKLY_BB20_PERIOD", "20"))    # weekly BB20 midline = 20-week SMA
+WEEKLY_RSI_DIP_WEEKS = int(os.getenv("TR_WEEKLY_RSI_DIP_WEEKS", "15"))  # lookback (weeks) for weekly oversold RSI dip
+MEGA_WEEKLY_VOL_DRY = float(os.getenv("TR_MEGA_WEEKLY_VOL_DRY", "0.85"))  # weekly volume exhaustion threshold
 
 # ── "BB Lower Band Snap" buckets ──────────────────────────────────────────────
-BB_SNAP_RSI_MAX = 40.0                 # RSI must still be below this (oversold-ish)
-BB_SNAP_STD_MULT = 2.0                 # lower band = 20-SMA - 2 * std
+BB_SNAP_RSI_MAX = float(os.getenv("TR_BB_SNAP_RSI_MAX", "40.0"))       # RSI must still be below this (oversold-ish)
+BB_SNAP_STD_MULT = float(os.getenv("TR_BB_SNAP_STD_MULT", "2.0"))      # lower band = 20-SMA - 2 * std
 
 CATEGORY_ORDER = ["Bottom Fishing", "Oversold BB20 Reclaim",
                   "Mega Reversal (Weekly BB20)", "BB Lower Band Snap (Weekly)",
@@ -225,7 +232,12 @@ def _load_isin_map():
     if not os.path.exists(UNIVERSE_FILE):
         return {}
     try:
-        df = pd.read_csv(UNIVERSE_FILE, usecols=["Symbol", "ISIN Code"])
+        # BUG #2 FIX: Read without usecols — the original `usecols=["Symbol", "ISIN Code"]`
+        # crashed with ValueError if the CSV had differently-named columns (e.g.
+        # "SYMBOL", "isin_code"), and the except returned {} silently — every stock
+        # then reported 'no_file' with no explanation. Now read all columns and do
+        # flexible matching below.
+        df = pd.read_csv(UNIVERSE_FILE)
         df.columns = [str(c).strip() for c in df.columns]
         sym_col = next((c for c in df.columns if c.lower() == "symbol"), None)
         isin_col = next((c for c in df.columns if "isin" in c.lower()), None)
@@ -294,10 +306,13 @@ def _has_reversal_signature(df):
     """
     if len(df) < 12:
         return False
-    o = df["open"].astype(float)
-    h = df["high"].astype(float)
-    l = df["low"].astype(float)
-    c = df["close"].astype(float)
+    # ISSUE #10 FIX: Only convert the last 12 rows (was converting the entire
+    # DataFrame — 252+ rows of unnecessary .astype(float) per stock).
+    tail = df.tail(12)
+    o = tail["open"].astype(float)
+    h = tail["high"].astype(float)
+    l = tail["low"].astype(float)
+    c = tail["close"].astype(float)
 
     # 1) Long lower wick on any of the last 3 bars
     for i in range(-3, 0):
@@ -602,7 +617,11 @@ def _daily_metrics(df):
     vol_ratio = latest_vol / avg if (np.isfinite(avg) and avg > 0) else np.nan
     vol_dry = bool(np.isfinite(vol_ratio) and vol_ratio < VOL_DRY_THRESH)
 
-    ts_col = "timestamp" if "timestamp" in df.columns else None
+    # BUG #3 FIX: Use flexible date-column detection (was only checking "timestamp").
+    # If the parquet file's date column is named "date" or "datetime", the
+    # original code set ts_col=None and last_date="" — the output CSV had an
+    # empty last_date for every stock.
+    ts_col = next((c for c in df.columns if c in ("timestamp", "date", "datetime", "time")), None)
     last_date = (pd.Timestamp(df[ts_col].iloc[-1]).date().isoformat()
                  if ts_col else "")
 
@@ -747,7 +766,13 @@ def _align_weekly_to_daily(day_df, week_df, weekly_values):
         if weekly.empty or daily.empty:
             return None
         return pd.merge_asof(daily, weekly, on="ts", direction="backward")["val"]
-    except Exception:
+    # BUG #4 FIX: Log the exception instead of silently returning None. The
+    # original `except Exception: return None` swallowed merge_asof failures
+    # (duplicate timestamps, unsorted data, pandas version issue) — the
+    # caller then set aligned_weekly_bb20_mid = NaN, and the "Mega Reversal
+    # (Weekly BB20)" bucket silently never classified any stock.
+    except Exception as exc:
+        logger.warning("Weekly-to-daily alignment failed: %s", exc)
         return None
 
 
@@ -772,10 +797,14 @@ def _classify(d, w):
         return "Mega Reversal (Weekly BB20)"
     if w["is_weekly_snap"]:
         return "BB Lower Band Snap (Weekly)"
+    # ISSUE #11 FIX: Changed `elif` to `if` for consistency with the other
+    # buckets. The original `elif` was chained to `if d["is_daily_snap"]:` which
+    # was correct ("if NOT daily snap, check mid-range") but confusing because
+    # every other bucket uses plain `if`.
     if d["is_daily_snap"]:
         return "BB Lower Band Snap (Daily)"
-    elif (d["range_pos"] >= MID_RANGE_LO and d["range_pos"] <= MID_RANGE_HI
-          and d["strict_ema_bounce"] and d["vol_above_avg10"]):
+    if (d["range_pos"] >= MID_RANGE_LO and d["range_pos"] <= MID_RANGE_HI
+        and d["strict_ema_bounce"] and d["vol_above_avg10"]):
         return "Mid-Range Bounce"
     if w["ema_contact"] and w["trend_ok"] and (w["vcp"] or w["inside"]):
         return "VCP Breakout"

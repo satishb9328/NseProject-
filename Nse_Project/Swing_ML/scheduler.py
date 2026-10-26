@@ -37,6 +37,10 @@ def run_live_scanner():
         result = get_live_signals()
         if not isinstance(result, dict):
             raise ValueError('Swing_ML scanner must return a dict.')
+        if result.get('status') == 'error':
+            logger.error('Swing_ML scanner returned an error: %s', result.get('message', 'Unknown error'))
+            print('[ERROR] Swing_ML scanner returned an error:', result.get('message', 'Unknown error'))
+            return
 
         cache.set(
             SWING_ML_CACHE_KEY,

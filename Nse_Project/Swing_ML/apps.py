@@ -22,9 +22,8 @@ class SwingMlConfig(AppConfig):
         from .scheduler import get_scheduler
 
         scheduler = get_scheduler()
-        scheduler.start()
+        # scheduler.start()  # Disabled to prevent automatic scans on Django startup.
         self.scheduler = scheduler
-        print('[ACTIVE] Swing_ML scheduler started')
 
         self._start_sepa_rest_collector()
 

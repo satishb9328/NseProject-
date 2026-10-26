@@ -6,6 +6,7 @@ import json
 import logging
 import math
 import os
+import threading
 import pandas as pd
 import requests
 import time as std_time  # aliased to avoid clashing with `datetime.time` below
@@ -73,6 +74,7 @@ LIVE_OPTIONS_REDIS_COOLDOWN = float(os.getenv("LIVE_OPTIONS_REDIS_COOLDOWN", "5.
 LIVE_OPTIONS_COLD_BACKUP = Path(settings.BASE_DIR) / "live_options_data.json"
 
 _live_options_redis = None
+_live_options_redis_lock = threading.Lock()
 _redis_outage_logged = False
 _redis_retry_after = 0.0
 
@@ -161,7 +163,7 @@ def get_active_strike_bounds(force_refresh: bool = False) -> tuple | None:
     return _ACTIVE_STRIKE_BOUNDS
 
 
-# 1. డేటాను తీసుకొచ్చే ఫంక్షన్
+# 1. Data-fetch function
 def most_active_index_contracts():
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -181,6 +183,16 @@ def most_active_index_contracts():
 
         res_calls = session.get(calls_url, headers=headers, cookies=cookies, timeout=NSE_REQUEST_TIMEOUT)
         res_puts = session.get(puts_url, headers=headers, cookies=cookies, timeout=NSE_REQUEST_TIMEOUT)
+
+        # ISSUE #7 FIX: Check HTTP status before .json() — a 403/429/500 from NSE
+        # returns an HTML error page that causes JSONDecodeError, which was silently
+        # swallowed by the broad except below. Now we log the specific HTTP status.
+        if res_calls.status_code != 200:
+            logger.warning("NSE calls API returned HTTP %s", res_calls.status_code)
+            return None
+        if res_puts.status_code != 200:
+            logger.warning("NSE puts API returned HTTP %s", res_puts.status_code)
+            return None
 
         calls_list = res_calls.json().get('OPTIDX', {}).get('data', [])
         puts_list = res_puts.json().get('OPTIDX', {}).get('data', [])
@@ -342,6 +354,7 @@ PREOPEN_REDIS_CHANNEL = os.getenv("PREOPEN_REDIS_CHANNEL", "preopen:trap_updated
 PREOPEN_REDIS_TIMEOUT = float(os.getenv("PREOPEN_REDIS_TIMEOUT", "2.0"))
 
 _preopen_redis = None
+_preopen_redis_lock = threading.Lock()
 
 
 def _ist_today() -> date:
@@ -641,20 +654,30 @@ def live_signals_view(request):
 
 
 def _get_preopen_redis():
-    """Return the process-wide Redis client for the pre-open publisher, or None."""
+    """Return the process-wide Redis client for the pre-open publisher, or None.
+
+    BUG #1 FIX: Race condition — in Django's threaded request handler, two threads
+    could both see _preopen_redis is None and both create clients, orphaning one
+    (socket-pool leak). Now guarded by a Lock + double-check pattern.
+    """
     global _preopen_redis
 
+    if _preopen_redis is not None:
+        return _preopen_redis
     if redis is None:
         return None
-    if _preopen_redis is None:
+    with _preopen_redis_lock:
+        if _preopen_redis is not None:  # double-check after acquiring the lock
+            return _preopen_redis
         try:
             _preopen_redis = redis.Redis.from_url(
                 REDIS_URL,
                 decode_responses=True,
                 socket_connect_timeout=PREOPEN_REDIS_TIMEOUT,
                 socket_timeout=PREOPEN_REDIS_TIMEOUT,
+                health_check_interval=30,
             )
-        except Exception as exc:  # bad URL, unsupported scheme, ...
+        except Exception as exc:
             logger.warning("Could not build the pre-open Redis client: %s", exc)
             return None
     return _preopen_redis
@@ -726,13 +749,15 @@ def preopen_trap_api(request):
     agree, then falls back to a fresh on-disk computation while Redis is down or the
     snapshot has not been published yet. Any unexpected failure is returned as a JSON
     body (never an HTML 500), so the frontend poll can degrade gracefully.
+
+    ISSUE #9 FIX: Added Cache-Control: no-store.
     """
     try:
         cached = read_preopen_from_redis()
-        return JsonResponse(cached if cached is not None else _build_preopen_context())
+        response = JsonResponse(cached if cached is not None else _build_preopen_context())
     except Exception as exc:
         logger.error("preopen_trap_api failed; serving a neutral fallback.", exc_info=True)
-        return JsonResponse({
+        response = JsonResponse({
             "preopen_max": None,
             "preopen_min": None,
             "preopen_final": None,
@@ -744,6 +769,8 @@ def preopen_trap_api(request):
             "updated_at": None,
             "error": f"{type(exc).__name__}: {exc}",
         })
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 def get_live_options_redis():
@@ -752,20 +779,29 @@ def get_live_options_redis():
     Lazily created and then reused: building a client per request would add a TCP
     connect to every 1 Hz dashboard poll. redis-py pools connections internally and is
     thread-safe, so one module-level client is correct for Django's threaded server.
+
+    BUG #1 FIX: Race condition — two concurrent request threads could both see
+    _live_options_redis is None and both create clients, orphaning one (socket
+    leak). Now guarded by a Lock + double-check.
     """
     global _live_options_redis
 
+    if _live_options_redis is not None:
+        return _live_options_redis
     if redis is None:
         return None
-    if _live_options_redis is None:
+    with _live_options_redis_lock:
+        if _live_options_redis is not None:  # double-check after acquiring the lock
+            return _live_options_redis
         try:
             _live_options_redis = redis.Redis.from_url(
                 REDIS_URL,
                 decode_responses=True,
                 socket_connect_timeout=LIVE_OPTIONS_REDIS_TIMEOUT,
                 socket_timeout=LIVE_OPTIONS_REDIS_TIMEOUT,
+                health_check_interval=30,
             )
-        except Exception as exc:  # bad URL, unsupported scheme, ...
+        except Exception as exc:
             logger.warning("Could not build the live-options Redis client: %s", exc)
             return None
     return _live_options_redis
@@ -880,14 +916,33 @@ def get_nested(raw, path):
 
 
 def _to_number(value):
+    """Coerce a value to float, returning None for missing/unparseable/NaN/inf.
+
+    ISSUE #3 FIX: The original returned float('nan') for NaN inputs, which
+    propagated through calculations (NaN + x = NaN) and silently corrupted
+    percentages and totals. Now NaN/inf are rejected at the source.
+    """
+    if isinstance(value, bool):
+        return None
     if isinstance(value, (int, float)):
-        return float(value)
+        f = float(value)
+        return f if math.isfinite(f) else None
     if isinstance(value, str):
         try:
-            return float(value.replace(',', '').strip())
+            f = float(value.replace(',', '').strip())
+            return f if math.isfinite(f) else None
         except ValueError:
             return None
     return None
+
+
+def _has_activity(value) -> bool:
+    """True when value is a non-zero number (used to filter inactive strikes).
+
+    ISSUE #8 FIX: Moved from inside build_option_chain_rows() to module level
+    so it is not re-created on every 1Hz call.
+    """
+    return isinstance(value, (int, float)) and value != 0
 
 
 def _json_safe_value(value):
@@ -1066,8 +1121,8 @@ def build_option_chain_rows(
             row['call_coi_rel_pct'] = round((ce_oich_abs / coi_total) * 100, 1) if coi_total != 0 else 0.0
             row['put_coi_rel_pct'] = round((pe_oich_abs / coi_total) * 100, 1) if coi_total != 0 else 0.0
 
-    def has_activity(value):
-        return isinstance(value, (int, float)) and value != 0
+    # ISSUE #8 FIX: Moved to module level (was re-created on every 1Hz call).
+    # has_activity is now _has_activity, defined at the top of the file.
 
     if foreign_expiries:
         # This is the smoking gun for a second feed instance or a stale rollover: log it
@@ -1081,8 +1136,8 @@ def build_option_chain_rows(
     # expiry survives (possible only when the snapshot carries no active expiry at all).
     filtered = [
         row for _, row in sorted(rows.items(), key=lambda item: (item[0][0], item[0][1]))
-        if has_activity(row.get('call_oi')) or has_activity(row.get('call_volume')) or
-           has_activity(row.get('put_oi')) or has_activity(row.get('put_volume'))
+        if _has_activity(row.get('call_oi')) or _has_activity(row.get('call_volume')) or
+           _has_activity(row.get('put_oi')) or _has_activity(row.get('put_volume'))
     ]
 
     # Convert OI / COI share quantities into lots (NIFTY lot size = 65).
@@ -1095,7 +1150,10 @@ def build_option_chain_rows(
     return filtered
 
 
-def detect_deadly_combo_signals(options_chain_data, spot_price=None):
+def detect_deadly_combo_signals(
+    options_chain_data: list,
+    spot_price: float | None = None,
+) -> list:
     """Scans Compact Options Chain rows for 'Deadly Combo' intraday scalping setups.
 
     Only strikes within the ATM proximity zone (ATM +/- 200 pts, ~4 strikes) are
@@ -1110,8 +1168,11 @@ def detect_deadly_combo_signals(options_chain_data, spot_price=None):
     atm_strike = None
     if spot_price:
         try:
-            # Assumes a 50-point strike interval for NIFTY.
-            atm_strike = round(float(spot_price) / 50.0) * 50
+            # ISSUE #4 FIX: Use _round_to_strike (round-half-up) instead of Python's
+            # round() (banker's rounding, round-half-to-even). The gamma walls use
+            # _round_to_strike, so the ATM filter must too — otherwise the combo scan
+            # could miss signals at the adjacent strike.
+            atm_strike = _round_to_strike(float(spot_price), GAMMA_WALL_STRIKE_STEP)
         except (ValueError, TypeError):
             atm_strike = None
 
@@ -1164,23 +1225,30 @@ def live_option_chain_api(request):
     chain AND leaves no diagnostic anywhere. Any failure is therefore logged with a full
     traceback and returned as a normal JSON body carrying an ``error`` field, with every
     key the frontend expects still present.
+
+    ISSUE #9 FIX: Added Cache-Control: no-store so a CDN/proxy between the browser
+    and Django can never serve a stale 1Hz-poll response.
     """
     try:
-        return JsonResponse(_build_live_option_chain_payload())
+        response = JsonResponse(_build_live_option_chain_payload())
+        response["Cache-Control"] = "no-store"
+        return response
     except Exception as exc:
         logger.error(
             "live_option_chain_api failed; serving an empty chain with the error attached.",
             exc_info=True,
         )
-        return JsonResponse({
+        # BUG #2 FIX: String fields use "" (not 0) so the frontend doesn't crash
+        # on type mismatches (e.g., data.updated_at.substring(0, 10) on an int).
+        response = JsonResponse({
             "data_source": "error",
-            "updated_at": 0,
-            "expiry_date": 0,
+            "updated_at": "",
+            "expiry_date": "",
             "spot_price": 0,
-            "spot_source": 0,
-            "spot_updated_at": 0,
-            "poi_source": 0,
-            "poi_updated_at": 0,
+            "spot_source": "",
+            "spot_updated_at": "",
+            "poi_source": "",
+            "poi_updated_at": "",
             "poi_instruments": 0,
             "feed_connected": False,
             "feed_status": "api_error",
@@ -1209,10 +1277,10 @@ def live_option_chain_api(request):
             "strike_bounds": None,
             "option_chain": [],
             "deadly_combo_signals": [],
-            # Surfaced deliberately: the browser console/network tab then names the fault
-            # instead of showing an opaque 500, and the traceback is in the Django log.
             "error": f"{type(exc).__name__}: {exc}",
         })
+        response["Cache-Control"] = "no-store"
+        return response
 
 
 def _build_live_option_chain_payload() -> dict:

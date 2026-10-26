@@ -44,6 +44,10 @@ from Nse_Project.Live_dashboard.ai_candle_confirmation import (
     is_no_trade_zone,
     set_market_no_trade_probe,
 )
+from Nse_Project.Live_dashboard.fib_bounce_engine import (
+    FibBounceEngine,
+    resolve_gamma_side,
+)
 from Nse_Project.Live_dashboard.market_state import (
     load_market_state,
     market_state_key,    save_market_state,
@@ -324,6 +328,9 @@ live_state = {
     "seconds_since_last_tick": None,
     "stale": True,
     "instrument_data": {},
+    # Directional Fibonacci Bounce: anchor + directional Fib levels + last touch,
+    # folded in on every index tick by update_index_spot().
+    "fib_bounce": {},
 }
 # Websocket health, tracked on the monotonic clock so a system-clock change cannot make
 # a stale feed look fresh.
@@ -652,7 +659,15 @@ def find_nifty_weekly_option_keys() -> tuple[date, list[str]]:
 
     expiry_date = df['expiry'].min()
     filtered = df[df['expiry'] == expiry_date]
-    INSTRUMENT_METADATA.clear()
+        # BUG #2 FIX: Build the new metadata in a LOCAL dict and swap atomically.
+    # The original .clear() + repopulate created a race window: this function
+    # runs via run_in_executor (thread pool) while the event loop reads
+    # INSTRUMENT_METADATA on every tick (update_instrument_state).
+    # .clear() momentarily emptied the dict for any concurrent reader, so a
+    # tick arriving mid-rebuild saw meta={} → strike=None, option_type=None.
+    # An atomic pointer swap closes the window: CPython's GIL makes the
+    # STORE_GLOBAL bytecode (INSTRUMENT_METADATA = new_metadata) atomic.
+    new_metadata: dict[str, dict] = {}
 
     for _, row in filtered.iterrows():
         key = str(row[key_col])
@@ -672,16 +687,22 @@ def find_nifty_weekly_option_keys() -> tuple[date, list[str]]:
             # than storing the literal string "NAN" as an option type.
             symbol_text = str(row[symbol_col]).strip().upper()
             option_side = symbol_text[-2:] if symbol_text[-2:] in {"CE", "PE"} else None
-        INSTRUMENT_METADATA[key] = {
+        new_metadata[key] = {
             'strike': int(strike) if float(strike).is_integer() else float(strike),
             'option_type': option_side,
             'tradingsymbol': str(row[symbol_col]),
             'expiry': expiry_value,
         }
 
-    instrument_keys = [k for k in filtered[key_col].dropna().astype(str).unique().tolist() if k in INSTRUMENT_METADATA]
-    instrument_keys.sort(key=lambda key: INSTRUMENT_METADATA[key]['strike'])
+    # Atomic swap: the old dict is replaced in one GIL-protected STORE_GLOBAL
+    # instruction. Any concurrent reader sees either the OLD or the NEW dict,
+    # never an empty one.
+    global INSTRUMENT_METADATA
+    INSTRUMENT_METADATA = new_metadata
 
+    instrument_keys = [k for k in filtered[key_col].dropna().astype(str).unique().tolist() if k in new_metadata]
+    instrument_keys.sort(key=lambda key: new_metadata[key]['strike'])
+    
     logger.info(f"✅ Found {len(instrument_keys)} NIFTY option keys for expiry {expiry_date}")
     return expiry_date, instrument_keys
 
@@ -722,7 +743,7 @@ def atomic_write_json(path: str, data: dict) -> None:
     fd, tmp_path = tempfile.mkstemp(prefix=f".{os.path.basename(path)}.", suffix=".tmp", dir=directory)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2, default=str)
+            json.dump(data, fh, separators=(",", ":"), default=str)
             fh.flush()
             os.fsync(fh.fileno())
 
@@ -1114,8 +1135,6 @@ def refresh_previous_oi(expiry_date: date) -> None:
     On success the baseline is also persisted, which is what lets the NEXT restart
     compute COI from the very first tick instead of publishing None.
     """
-    global previous_oi_map
-
     fresh = fetch_previous_oi_map(expiry_date)
     if not fresh:
         # Nothing in memory yet (fresh start + failed REST call) is the case that used to
@@ -1128,7 +1147,10 @@ def refresh_previous_oi(expiry_date: date) -> None:
         )
         return
 
-    previous_oi_map = fresh
+    # BUG #3 FIX: In-place mutation instead of pointer swap to eliminate the
+    # race condition with the event loop's .clear() operation.
+    previous_oi_map.clear()
+    previous_oi_map.update(fresh)
     live_state["poi_source"] = "upstox_option_chain_prev_oi"
     live_state["poi_updated_at"] = datetime.now(IST).isoformat()
     live_state["poi_instruments"] = len(fresh)
@@ -1875,13 +1897,13 @@ def _on_cvd_candle(payload: dict) -> None:
 # WebSocket payload.
 AI_SETUP_CANDLE_SECONDS = 60                 # 1-minute option candles
 MOMENTUM_PULLBACK_DIP = 0.85                 # Momentum Pullback entry = LTP * 0.85 (15% dip)
-SUPP_RES_TRAP_DIP = 1.00                     # Supp/Res Trap fade = LIVE ATM premium (no dip)
 
 # setup_type strings MUST match live_signals.html resolveBox():
-#   contains "momentum" -> momentum-signal-box ; contains "supp"/"trap" -> suppres-signal-box
+#   contains "momentum" -> momentum-signal-box. The Directional Fibonacci Bounce is a
+#   separate engine (fib_bounce_engine.FibBounceEngine, setup_type "fib_bounce") and is
+#   NOT routed through the 1-minute option-candle engine below.
 MOMENTUM_PULLBACK_SETUP = "momentum_pullback"
-SUPP_RES_TRAP_SETUP = "supp_res_trap"
-_AI_SETUP_TYPES = (MOMENTUM_PULLBACK_SETUP, SUPP_RES_TRAP_SETUP)
+_AI_SETUP_TYPES = (MOMENTUM_PULLBACK_SETUP,)
 
 # (instrument_key, setup_type) -> CandleConfirmationEngine. Written from the
 # asyncio loop, read from the option-CVD worker thread, hence the lock.
@@ -1895,8 +1917,12 @@ _ai_ref_premium: dict[tuple, float] = {}
 
 
 def _ai_entry_factor(setup_type: str) -> float:
-    """Entry-price multiplier for a setup, always applied to the option LTP."""
-    return MOMENTUM_PULLBACK_DIP if setup_type == MOMENTUM_PULLBACK_SETUP else SUPP_RES_TRAP_DIP
+    """Entry-price multiplier for a setup, always applied to the option LTP.
+
+    Only Momentum Pullback remains on the 1-minute option-candle engine; the
+    Fibonacci Bounce engine owns its own entry factor (PREMIUM_DIP_FACTOR = 0.85).
+    """
+    return MOMENTUM_PULLBACK_DIP
 
 
 def _option_ltp(instrument_key: str, instrument_data: dict) -> float | None:
@@ -1955,9 +1981,21 @@ def _refresh_ai_engines(ai_option_cvd: "CVDEngine") -> None:
 
     The entry price is derived from a STABLE reference premium (anchored once per
     (key, setup_type)), not the live LTP, so the "15% dip" target is actually
-    reachable. Engines are re-used (history preserved) on ordinary premium drift and
-    only replaced on an ATM strike roll or option-side flip.
+    reachable. Engines are re-used (history preserved) on ordinary premium drift
+    and only replaced on an ATM strike roll or option-side flip.
+
+    Thread safety:
+      * Runs on the asyncio event loop (from run_streamer's 1-second while loop).
+      * Reads ``live_state`` and ``INSTRUMENT_METADATA`` WITHOUT ``state_lock`` —
+        safe because asyncio is single-threaded (can't interleave with
+        update_instrument_state), and INSTRUMENT_METADATA is atomically swapped
+        (Bug #2 fix: GIL-protected pointer read).
+      * The ``_ai_engines_lock`` guards the engine dict mutations against the CVD
+        worker thread's ``_route_ai_option_candle()`` call, which also holds the
+        lock during ``eng.on_candle()`` (Bug #7 fix), so ``eng.update_entry()``
+        here can't race with a concurrent candle evaluation.
     """
+    # ── Resolve the live spot + ATM CE/PE instrument keys ──────────────────────
     spot = live_state.get("spot_price")
     if isinstance(spot, bool):
         spot = None
@@ -1969,6 +2007,8 @@ def _refresh_ai_engines(ai_option_cvd: "CVDEngine") -> None:
     instrument_data = live_state.get("instrument_data") or {}
     ce_key, pe_key = _resolve_atm_option_keys(spot_f, instrument_data)
 
+    # ── Build the desired (key, setup_type) → (side, ltp) map OUTSIDE the lock ─
+    # Held only briefly inside the `with _ai_engines_lock:` block below.
     desired: dict[tuple, tuple[str, float]] = {}
     for key in (ce_key, pe_key):
         if not key:
@@ -1976,12 +2016,19 @@ def _refresh_ai_engines(ai_option_cvd: "CVDEngine") -> None:
         ltp = _option_ltp(key, instrument_data)
         if not ltp:
             continue
+        # INSTRUMENT_METADATA is atomically swapped (Bug #2 fix); .get() resolves
+        # the current pointer under the GIL, so this is safe even if a rollover
+        # swaps the dict mid-call.
         meta = INSTRUMENT_METADATA.get(key) or {}
         entry_data = instrument_data.get(key) or {}
-        side = str(meta.get("option_type") or entry_data.get("option_type") or "CE").strip().upper() or "CE"
+        side = (
+            str(meta.get("option_type") or entry_data.get("option_type") or "CE")
+            .strip().upper() or "CE"
+        )
         for setup_type in _AI_SETUP_TYPES:
             desired[(key, setup_type)] = (side, ltp)
 
+    # ── Apply the desired engine set under the lock ───────────────────────────
     with _ai_engines_lock:
         # Drop engines for keys/setups no longer tracked (ATM strike roll).
         for k in list(_ai_engines.keys()):
@@ -2000,13 +2047,16 @@ def _refresh_ai_engines(ai_option_cvd: "CVDEngine") -> None:
             eng = _ai_engines.get((key, setup_type))
             if eng is not None and eng.option_side == side:
                 # Same engine: refresh entry in place so rolling history survives.
+                # Bug #7 fix: _route_ai_option_candle() also holds _ai_engines_lock
+                # during on_candle(), so this update_entry() can't race with a
+                # concurrent candle evaluation on the CVD worker thread.
                 eng.update_entry(entry, option_side=side)
                 continue
             _ai_engines[(key, setup_type)] = CandleConfirmationEngine(
                 setup_type, entry, symbol=key, option_side=side, dispatch=True
             )
 
-    # Keep the option-candle feed allowlist in sync with the tracked ATM options.
+    # ── Keep the option-candle feed allowlist in sync ──────────────────────────
     if ai_option_cvd is not None:
         ai_option_cvd.set_symbol_allowlist({k for (k, _s) in desired})
 
@@ -2062,6 +2112,70 @@ def _ai_market_no_trade_probe() -> bool:
         market_state.get("momentum"),
         market_state.get("net_oi_bias"),
     )
+
+
+# ── Directional Fibonacci Bounce (index/spot 3-minute synthesis) ─────────────────
+# Independent from the option-premium CandleConfirmationEngine. Fed ONLY the live
+# Index/Spot tick (not option premiums). The engine owns the 09:15 anchor capture,
+# directional Fib math and 3-minute candle synthesis, and reuses the shared
+# trade-trigger dispatcher (same ai:trade_trigger channel).
+FIB_BOUNCE_SETUP = "fib_bounce"
+_fib_bounce_engine: FibBounceEngine | None = None
+
+
+def _extract_index_tick_timestamp(raw: object) -> datetime | None:
+    """Epoch-ms (``ltt``) of an index tick, or None when absent."""
+    if not isinstance(raw, dict):
+        return None
+    for path in (
+        ("fullFeed", "indexFF", "ltpc", "ltt"),
+        ("fullFeed", "marketFF", "ltpc", "ltt"),
+        ("ltpc", "ltt"),
+    ):
+        value = _nested(raw, path)
+        if isinstance(value, (int, float)) and value > 0:
+            if value > 1e12:  # milliseconds -> seconds
+                value /= 1000.0
+            return datetime.fromtimestamp(value, tz=IST)
+    return None
+
+
+def _fib_premium_provider(side: str) -> float | None:
+    """Live ATM option premium for the fib engine's STRICT 15% dip entry (x 0.85)."""
+    spot = live_state.get("spot_price")
+    if isinstance(spot, bool):
+        spot = None
+    try:
+        spot_f = float(spot) if spot is not None else None
+    except (TypeError, ValueError):
+        spot_f = None
+    instrument_data = live_state.get("instrument_data") or {}
+    ce_key, pe_key = _resolve_atm_option_keys(spot_f, instrument_data)
+    key = ce_key if str(side or "").upper() == "CE" else pe_key
+    return _option_ltp(key, instrument_data) if key else None
+
+
+def _fib_gamma_side_provider() -> str | None:
+    """Authoritative CE/PE direction from the live NIFTY DAY GAMMA (Day Bias).
+
+    Reads ``net_gex_ratio`` (net GEX / gross GEX) from the market state and maps it
+    with a relaxed ±0.10 neutral band (fib_bounce_engine.GAMMA_DAY_NEUTRAL_FRACTION):
+      * ratio <= -0.10 -> PE (bearish, draw Fib top->bottom)
+      * ratio >= +0.10 -> CE (bullish, draw Fib bottom->top)
+      * otherwise      -> None (🟡 Range-bound: Choppy / NO_TRADE — suspend Fib)
+    """
+    return resolve_gamma_side(market_state.get("net_gex_ratio"))
+
+
+def _route_fib_index_tick(ltp: float, raw: object = None) -> None:
+    """Feed a live index LTP into the fib engine (called from update_index_spot)."""
+    engine = _fib_bounce_engine
+    if engine is None:
+        return
+    try:
+        engine.on_index_tick(ltp, _extract_index_tick_timestamp(raw))
+    except Exception:
+        logger.exception("Fib bounce engine on_index_tick failed")
 
 
 def _compute_macro_metrics(instrument_data=None) -> dict:
@@ -2241,6 +2355,15 @@ async def publish_live_state(force: bool = False) -> None:
 
     Pass ``force=True`` to bypass the throttle - used by the periodic dump so the
     engine still receives a final update if ticks stop arriving.
+
+    BUG #4 FIX: The original called the synchronous redis-py pipeline +
+    _refresh_market_state() (which runs the full Black-Scholes gamma engine for
+    ~774 strikes) directly on the event loop, blocking it for ~30-85ms per
+    publish beat. Now the blocking work runs in loop.run_in_executor() so the
+    event loop can process ticks concurrently with the Redis I/O + gamma
+    computation. The snapshot + json.dumps() stay on the event loop (safe:
+    no concurrent mutation from other coroutines); the immutable serialized
+    string is passed to the executor.
     """
     global _last_redis_publish_ts
 
@@ -2256,12 +2379,54 @@ async def publish_live_state(force: bool = False) -> None:
         # produced", which is what every consumer actually wants.
         live_state["updated_at"] = datetime.now(IST).isoformat()
         refresh_liveness_fields()
+        # Snapshot + serialize on the event loop (safe: no concurrent mutation from
+        # other coroutines while we're running). The serialized string is immutable,
+        # so the executor can safely use it for Redis I/O without a race.
         payload, active_expiry = snapshot_for_publish()
         serialized_state = json.dumps(payload, default=str, separators=(",", ":"))
+        # The instrument_data in the payload is a shallow-copied outer dict from
+        # sanitized_instrument_data(); its key set is frozen. Individual entry reads
+        # are GIL-atomic, so the executor can safely iterate it for the sentiment
+        # computation without seeing a partially-mutated dict.
+        instrument_data = payload.get("instrument_data") or {}
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            _publish_and_persist_sync,
+            serialized_state,
+            active_expiry,
+            instrument_data,
+            now,
+        )
+    except redis.RedisError as exc:
+        logger.warning(f"⚠️ Failed to publish live state to Redis: {exc}")
+    except Exception as exc:
+        # A non-Redis failure (e.g. a NameError from a missing helper inside
+        # _refresh_market_state) must not silently kill the whole publish/persist
+        # beat. Log the full traceback and keep the worker alive for the next tick.
+        logger.exception(f"⚠️ Non-Redis failure while publishing/persisting live state: {exc}")
+
+
+def _publish_and_persist_sync(
+    serialized_state: str,
+    active_expiry: str | None,
+    instrument_data: dict,
+    now: float,
+) -> None:
+    """Synchronous Redis publish + market-state refresh. Runs in an executor.
+
+    BUG #4 FIX: The original publish_live_state() did all of this on the event
+    loop: json.dumps (~5ms) + Redis pipeline (~10ms) + _refresh_market_state
+    (gamma engine, ~30ms) + _persist_market_state (~5ms) = ~50ms of blocking
+    per 1Hz publish beat. Moving it to an executor frees the event loop to
+    process ticks concurrently with the Redis I/O + gamma computation.
+    """
+    global _last_redis_publish_ts
+    try:
         # Batch the Redis hop into ONE pipeline round-trip (mirror SET + primary SET +
-        # PUBLISH) instead of 2-3 sequential blocking calls per publish beat. The opt-in
-        # expiry-namespaced mirror is queued FIRST so the primary key stays the last write
-        # a consumer or a test observes.
+        # PUBLISH). The opt-in expiry-namespaced mirror is queued FIRST so the primary
+        # key stays the last write a consumer or a test observes.
         pipe = redis_client.pipeline(transaction=False)
         if REDIS_EXPIRY_NAMESPACE and active_expiry:
             pipe.set(REDIS_DATA_KEY_TEMPLATE.format(expiry=active_expiry), serialized_state)
@@ -2272,14 +2437,11 @@ async def publish_live_state(force: bool = False) -> None:
         # Persist the cumulative / peak market metrics on every published update so
         # they survive a restart and stay fresh for views.py's initial render. Use
         # the same sanitised (active-expiry) chain the dashboard renders.
-        _refresh_market_state(payload.get("instrument_data"))
+        _refresh_market_state(instrument_data)
         _persist_market_state()
     except redis.RedisError as exc:
         logger.warning(f"⚠️ Failed to publish live state to Redis: {exc}")
     except Exception as exc:
-        # A non-Redis failure (e.g. a NameError from a missing helper inside
-        # _refresh_market_state) must not silently kill the whole publish/persist
-        # beat. Log the full traceback and keep the worker alive for the next tick.
         logger.exception(f"⚠️ Non-Redis failure while publishing/persisting live state: {exc}")
 
 
@@ -2449,6 +2611,13 @@ async def update_index_spot(values: dict) -> None:
         # Keep the last index tick in the published snapshot. Without this there is no
         # way to tell a frozen spot apart from a frozen feed after the fact.
         live_state["index_raw_sample"] = raw
+
+    # Directional Fibonacci Bounce: consume the live index LTP (owns the 09:15 anchor,
+    # directional Fib grid + 3-minute synthesis). Routed OUTSIDE the lock because a
+    # rare BUY_NOW dispatch performs a blocking Redis publish.
+    _route_fib_index_tick(ltp, raw)
+    live_state["fib_bounce"] = _fib_bounce_engine.snapshot() if _fib_bounce_engine is not None else {}
+
     await write_live_state()
 
     # Log only on change: an index ticks many times a second, and a silent log is
@@ -2540,6 +2709,14 @@ async def dump_live_state() -> None:
     """
     while True:
         await asyncio.sleep(5)
+        # BUG #1 FIX: Only hold state_lock for the snapshot extraction (a few
+        # microseconds). The original held it across atomic_write_json() +
+        # publish_live_state(force=True) — blocking ALL tick processing for
+        # ~50-85ms every 5 seconds (Redis I/O + full gamma engine computation).
+        # Now the I/O and publish happen OUTSIDE the lock, matching the tick
+        # path's design (update_instrument_state also publishes outside the
+        # lock: "state_lock exists to protect live_state mutations; it never
+        # protected the publish itself").
         async with state_lock:
             live, age = refresh_liveness_fields()
             if live:
@@ -2548,41 +2725,45 @@ async def dump_live_state() -> None:
             # `dumped_at` records when the FILE was written, which is deliberately not the
             # same claim as `updated_at` ("when live data was produced").
             payload["dumped_at"] = datetime.now(IST).isoformat()
-            try:
-                atomic_write_json(JSON_PATH, payload)
-            except Exception as exc:
-                # Non-fatal by design: Redis already carries the live snapshot, so a
-                # failed cold backup costs nothing until the next restart.
-                logger.warning(f"⚠️ Failed to write the cold backup file: {exc}")
 
-            if live:
-                # Guaranteed floor for the throttled Redis hop: if ticks go quiet for a
-                # moment (illiquid strike, brief lull) the Gamma engine still gets a
-                # snapshot instead of being starved by the throttle.
-                await publish_live_state(force=True)
-                continue
+        # OUTSIDE the lock — file I/O and Redis publish don't need exclusive
+        # access to live_state. The payload is already a shallow-copied dict
+        # from snapshot_for_publish(), so mutations to live_state by other
+        # coroutines won't affect what we write/publish here.
+        try:
+            atomic_write_json(JSON_PATH, payload)
+        except Exception as exc:
+            # Non-fatal by design: Redis already carries the live snapshot, so a
+            # failed cold backup costs nothing until the next restart.
+            logger.warning(f"⚠️ Failed to write the cold backup file: {exc}")
 
-            # Publish once at startup so consumers are not stuck on an empty key while
-            # waiting for the first tick, then stay silent until the feed is live again.
-            if _last_redis_publish_ts == 0.0:
-                logger.info(
-                    "Seeding Redis with the startup snapshot (feed_status=%s); it is flagged stale.",
-                    live_state.get("feed_status"),
-                )
-                await publish_live_state(force=True)
-                continue
+        if live:
+            # Guaranteed floor for the throttled Redis hop: if ticks go quiet for a
+            # moment (illiquid strike, brief lull) the Gamma engine still gets a
+            # snapshot instead of being starved by the throttle.
+            await publish_live_state(force=True)
+            continue
 
-            feed_health["stale_publish_skips"] += 1
-            if feed_health["stale_publish_skips"] % 12 == 1:  # ~once a minute
-                logger.warning(
-                    "⏸️ Skipping the forced Redis publish: feed_status=%s, last tick %s ago "
-                    "(threshold %.0fs). Consumers keep the last live snapshot instead of a "
-                    "restamped stale one.",
-                    live_state.get("feed_status"),
-                    "never" if age is None else f"{age:.1f}s",
-                    STALE_FEED_SECONDS,
-                )
+        # Publish once at startup so consumers are not stuck on an empty key while
+        # waiting for the first tick, then stay silent until the feed is live again.
+        if _last_redis_publish_ts == 0.0:
+            logger.info(
+                "Seeding Redis with the startup snapshot (feed_status=%s); it is flagged stale.",
+                live_state.get("feed_status"),
+            )
+            await publish_live_state(force=True)
+            continue
 
+        feed_health["stale_publish_skips"] += 1
+        if feed_health["stale_publish_skips"] % 12 == 1:  # ~once a minute
+            logger.warning(
+                "⏸️ Skipping the forced Redis publish: feed_status=%s, last tick %s ago "
+                "(threshold %.0fs). Consumers keep the last live snapshot instead of a "
+                "restamped stale one.",
+                live_state.get("feed_status"),
+                "never" if age is None else f"{age:.1f}s",
+                STALE_FEED_SECONDS,
+            )
 
 def _parse_cvd_symbols():
     """Parse CVD_SYMBOLS (comma-separated) into a symbol allowlist.
@@ -2673,7 +2854,7 @@ def build_streamer(token: str, instrument_keys: list[str], expiry_date: date, lo
     streamer.on(streamer.Event["MESSAGE"], on_message)
     streamer.on(streamer.Event["ERROR"], on_error)
     streamer.on(streamer.Event["CLOSE"], on_close)
-    streamer.auto_reconnect(True, interval=5, retry_count=5)
+    streamer.auto_reconnect(True, interval=5, retry_count=1)
     return streamer
 
 
@@ -2856,6 +3037,18 @@ async def run_streamer(instrument_keys: list[str], expiry_date: date) -> None:
     ai_option_cvd.start()
     _refresh_ai_engines(ai_option_cvd)
     logger.info("🤖 AI Trade Setup confirmation engine started (1m option candles).")
+
+    # ── Directional Fibonacci Bounce (index/spot 3-minute synthesis) ───────────
+    global _fib_bounce_engine
+    _fib_bounce_engine = FibBounceEngine(
+        FIB_BOUNCE_SETUP,
+        entry_factor=MOMENTUM_PULLBACK_DIP,  # 0.85 — STRICT 15% dip, unchanged
+        premium_provider=_fib_premium_provider,
+        gamma_side_provider=_fib_gamma_side_provider,
+        no_trade_probe=_ai_market_no_trade_probe,
+        dispatch=True,
+    )
+    logger.info("🎯 Directional Fibonacci Bounce engine started (index 3m synthesis).")
 
     streamer = build_streamer(token, instrument_keys, expiry_date, loop, cvd_engine=cvd_engine, ai_option_cvd=ai_option_cvd, future_key=nifty_future_key)
     logger.info(f"🔌 Connecting to Upstox live feed for {len(instrument_keys) + 1} instruments (options + index spot)...")

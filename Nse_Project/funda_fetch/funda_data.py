@@ -17,6 +17,7 @@ NEEDS : pip install requests beautifulsoup4 pandas
 """
 import argparse
 import json
+import logging
 import os
 import random
 import re
@@ -27,6 +28,8 @@ from dataclasses import dataclass, asdict, field
 from datetime import date
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
+
+logger = logging.getLogger(__name__)
 
 import pandas as pd
 import requests
@@ -42,6 +45,8 @@ HEADERS = {
                    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.5",
+    # ISSUE #5 FIX: screener.in may 403 requests without a Referer.
+    "Referer": "https://www.screener.in/",
 }
 
 UNIVERSE_CSV   = "ind_nifty500list.csv"
@@ -50,23 +55,27 @@ PARTIAL_CSV    = "nifty500_swing_candidates_PARTIAL.csv"
 FAILURES_CSV   = "fetch_failures.csv"
 HISTORY_CSV    = "candidate_pool_history.csv"
 CACHE_DIR      = "fundamentals_cache"
-CACHE_TTL_DAYS = 20                                   # fundamentals are quarterly
+CACHE_TTL_DAYS = float(os.getenv("FUND_CACHE_TTL_DAYS", "20"))         # fundamentals are quarterly
 
-# Screening gates (fail-safe defaults: missing data => reject, never accept)
-SALES_GROWTH_MIN  = 10.0
-PROFIT_GROWTH_MIN = 15.0
-ROE_MIN           = 10.0
-DE_MAX            = 1.0
+# Screening gates (fail-safe defaults: missing data => reject, never accept).
+# ISSUE #10 FIX: all thresholds are now env-overridable for tuning without code changes.
+SALES_GROWTH_MIN  = float(os.getenv("FUND_SALES_GROWTH_MIN", "10.0"))
+PROFIT_GROWTH_MIN = float(os.getenv("FUND_PROFIT_GROWTH_MIN", "15.0"))
+ROE_MIN           = float(os.getenv("FUND_ROE_MIN", "10.0"))
+DE_MAX            = float(os.getenv("FUND_DE_MAX", "1.0"))
+# ISSUE #4 FIX: Turnaround sentinel is now 999.0 (kept for JSON serialization
+# compatibility — float('inf') is not valid JSON). The downstream validator
+# should check the `turnaround` flag (True/False) before interpreting this value.
 TURNAROUND_SENTINEL = 999.0                           # loss -> profit marker
 
 FINANCIAL_INDUSTRY = "Financial Services"
 
-REQUEST_TIMEOUT  = 15
-MAX_RETRIES      = 3
+REQUEST_TIMEOUT  = float(os.getenv("FUND_REQUEST_TIMEOUT", "15"))
+MAX_RETRIES      = int(os.getenv("FUND_MAX_RETRIES", "3"))
 BACKOFF_429      = [20, 45, 90]                       # escalating cooldowns
 SLEEP_RANGE      = (1.2, 2.5)                         # politeness jitter before a fetch
-MAX_WORKERS      = 10                                 # concurrent fetch threads
-INCREMENT_EVERY  = 25                                 # crash-safe partial saves
+MAX_WORKERS      = int(os.getenv("FUND_MAX_WORKERS", "10"))               # concurrent fetch threads
+INCREMENT_EVERY  = int(os.getenv("FUND_INCREMENT_EVERY", "25"))            # crash-safe partial saves
 
 
 @dataclass
@@ -216,7 +225,10 @@ class IndianStockScreener:
                         prevq = next((i for i in sorted(pos)
                                       if pos[i] == prev_quarter(mth, yr)), None)
 
-                        top = series.get("Sales", series.get("Revenue", {}))
+                        # ISSUE #7 FIX: Use `or` for short-circuit evaluation
+                        # (the original eagerly evaluated series.get("Revenue", {})
+                        # even when "Sales" existed).
+                        top = series.get("Sales") or series.get("Revenue") or {}
                         prof = series.get("Net Profit", {})
                         opm = series.get("OPM %", {})
 
@@ -237,17 +249,26 @@ class IndianStockScreener:
                         if latest in opm:
                             ratios["opm"] = opm[latest]
                         # acceleration: latest YoY minus previous-quarter YoY (sales)
+                        # BUG #2 FIX: prev_quarter() can now return None on
+                        # unknown month abbreviations; guard against it so the
+                        # generator doesn't match pos[i] == None (which would
+                        # match unparseable headers and produce wrong results).
                         if prevq is not None and yago is not None:
+                            pq_result = prev_quarter(*pos[prevq])
                             p_yago = next((i for i in sorted(pos)
-                                           if pos[i] == prev_quarter(*pos[prevq])), None)
+                                           if pq_result is not None and pos[i] == pq_result), None) if pq_result else None
                             if None not in (prevq, p_yago) and \
                                prevq in top and p_yago in top and top[p_yago] > 0 and \
                                latest in top and yago in top and top[yago] > 0:
                                 y1 = (top[latest] - top[yago]) / top[yago] * 100
                                 y2 = (top[prevq] - top[p_yago]) / top[p_yago] * 100
                                 ratios["sales_accel"] = round(y1 - y2, 2)
-            except Exception:
-                pass
+            # ISSUE #3 FIX: Log the exception instead of silently swallowing.
+            # The original `except Exception: pass` lost the entire quarters
+            # table silently — the operator had no idea why a previously-passing
+            # stock suddenly failed.
+            except Exception as exc:
+                logger.warning("Quarters parse failed for %s: %s", symbol, exc)
 
         # 4) derived ratios (only when denominator valid)
         price = ratios.get("current_price", 0)
@@ -319,7 +340,11 @@ class IndianStockScreener:
     # ── the screen ─────────────────────────────────────────────────────────────
     def passes(self, p: StockProfile) -> bool:
         """Sector-aware gates. Missing data fails safely (NaN D/E, 0 growth...)."""
-        if p.current_price >= 2000:                          # swing-friendly price cap
+        # BUG #1 FIX: Reject missing price (0.0) in addition to the price cap.
+        # The original `>= 2000` check passed 0.0 (missing data) through the
+        # price gate — a stock with no price data could pass if other gates
+        # happened to be met (unlikely but not fail-safe).
+        if p.current_price <= 0 or p.current_price >= 2000:  # swing-friendly price cap
             return False
         if p.qtr_profit_growth < PROFIT_GROWTH_MIN:          # sentinel 999 passes
             return False
@@ -359,6 +384,12 @@ class IndianStockScreener:
         }
 
     def screen(self, symbols: List[str], industry_map: Dict[str, str]) -> pd.DataFrame:
+        # ISSUE #8 FIX: Clean up stale partial CSV at the START (was at the end
+        # of main()). If the script crashed mid-screen, the stale partial file
+        # from the previous run would persist on disk.
+        if os.path.exists(PARTIAL_CSV):
+            os.remove(PARTIAL_CSV)
+
         results, failed = [], []
         n_fin = 0
         total = len(symbols)
@@ -431,10 +462,17 @@ class IndianStockScreener:
 
 
 def prev_quarter(mon: str, yr: int):
-    """('sep', 2024) -> ('jun', 2024)"""
+    """('sep', 2024) -> ('jun', 2024). Returns None on unknown month."""
     order = ["jan", "feb", "mar", "apr", "may", "jun",
              "jul", "aug", "sep", "oct", "nov", "dec"]
-    i = order.index(mon)
+    # BUG #2 FIX: list.index() raises ValueError on unknown months (e.g. "Sept"
+    # instead of "Sep"). The original crash was caught by the broad except in
+    # _parse_page, silently losing the ENTIRE quarters table. Now returns None
+    # so the caller can skip just the acceleration calculation.
+    try:
+        i = order.index(mon.lower()[:3])
+    except ValueError:
+        return None
     return (order[i - 3], yr - 1) if i < 3 else (order[i - 3], yr)
 
 

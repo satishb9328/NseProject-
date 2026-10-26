@@ -2,12 +2,15 @@ import datetime
 import tempfile
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+import pandas as pd
 
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from . import live_ml_scanner
 from .live_ml_scanner import qualifies_mega_reversal
 from .models import LiveSignal, TrendSetup
 
@@ -24,6 +27,64 @@ class MegaReversalConditionTests(TestCase):
 
     def test_rejects_non_positive_midline(self):
         self.assertFalse(qualifies_mega_reversal(99.0, 100.0, 0.0))
+
+
+class LiveScannerDataTests(TestCase):
+    def test_upstox_utc_timestamps_are_normalized_to_ist(self):
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {
+            "data": {
+                "candles": [[
+                    "2026-10-20T03:45:00Z",
+                    "100",
+                    "101",
+                    "99",
+                    "100.5",
+                    "1200",
+                    "0",
+                ], [
+                    "2026-10-20T03:46:00Z",
+                    "100",
+                    "98",
+                    "97",
+                    "99",
+                    "800",
+                    "0",
+                ]]
+            }
+        }
+
+        with patch.object(live_ml_scanner.requests, "get", return_value=response):
+            result = live_ml_scanner.fetch_latest_1m_data("NSE_EQ|TEST", {}, "TEST")
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.iloc[0]["Datetime"], pd.Timestamp("2026-10-20 09:15"))
+        self.assertEqual(result.iloc[0]["Volume"], 1200)
+
+    def test_2h_bars_align_to_market_open_and_drop_forming_candle(self):
+        timestamps = pd.date_range(
+            "2026-10-20 09:15",
+            "2026-10-20 15:25",
+            freq="5min",
+        )
+        candles = pd.DataFrame({
+            "Datetime": timestamps,
+            "Open": 100.0,
+            "High": 101.0,
+            "Low": 99.0,
+            "Close": 100.5,
+            "Volume": 1000,
+            "OI": 0,
+        })
+        ist = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+
+        frame = live_ml_scanner.build_2h_frame(
+            candles,
+            datetime.datetime(2026, 10, 20, 12, 0, tzinfo=ist),
+        )
+
+        self.assertEqual(list(frame.index), [pd.Timestamp("2026-10-20 09:15")])
 
 
 class LiveSignalEndpointTests(TestCase):
