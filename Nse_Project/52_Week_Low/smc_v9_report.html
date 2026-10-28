@@ -1,0 +1,22 @@
+<!DOCTYPE html><html><head><meta charset='utf-8'><title>SMC v9.1 Report</title><style>
+body{font-family:'Segoe UI',Arial,sans-serif;background:#0f172a;color:#e2e8f0;margin:24px}
+h1{font-size:20px;color:#38bdf8;margin-bottom:4px} h2{font-size:15px;color:#94a3b8;margin-top:28px}
+.meta{background:#1e293b;padding:10px 14px;border-radius:8px;font-size:13px;line-height:1.8}
+table.t{border-collapse:collapse;width:100%;font-size:12px;margin-top:10px}
+th{background:#334155;padding:6px 8px;text-align:left;cursor:pointer;position:sticky;top:0}
+td{padding:5px 8px;border-bottom:1px solid #334155;white-space:nowrap}
+tr:hover{background:#1e293b}
+.LONG{color:#4ade80;font-weight:600}.SHORT{color:#f87171;font-weight:600}
+.BENCH{color:#fbbf24}.note{color:#64748b;font-size:11px}
+</style>
+<script>
+function sortTable(tid,col){
+ const tb=document.querySelector('#'+tid+' tbody');let dir=1;
+ if(tb.dataset.key===tid+'-'+col){dir=-(+tb.dataset.dir);}
+ tb.dataset.key=tid+'-'+col;tb.dataset.dir=dir;
+ const rows=[...tb.rows];
+ rows.sort((a,b)=>{const x=a.cells[col].innerText.trim(),y=b.cells[col].innerText.trim();
+  const nx=parseFloat(x.replace(/[^0-9.\-]/g,'')),ny=parseFloat(y.replace(/[^0-9.\-]/g,''));
+  return (!isNaN(nx)&&!isNaN(ny))?(nx-ny)*dir:x.localeCompare(y)*dir;});
+ rows.forEach(r=>tb.appendChild(r));}
+</script></head><body><h1>SMC Swing Scanner v9.1 — Report</h1><div class='meta'><b>Data as-of:</b> 2026-10-23 &nbsp;|&nbsp; <b>Vol regime:</b> OFF &nbsp;|&nbsp; <b>Index regime:</b> NIFTY BELOW 200-SMA as-of 2026-10-28 (22699 vs 24073) &nbsp;|&nbsp; <b>Scoring:</b> LEARNED sigmoid (n=973, AUC=0.57)<br><b>Capital:</b> &#8377;100,000 &nbsp;|&nbsp; <b>Guard:</b> risk &ge; 1.00% and 1.0&times;ATR &nbsp;|&nbsp; <b>RR band:</b> 2.0&ndash;10.0 &nbsp;|&nbsp; <b>Gates:</b> RSI&le;55/&ge;45, crash±25%/10d, hammer +5, dryup +3 &nbsp;|&nbsp; <b>Portfolio cap:</b> 10 active</div><h2>Valid setups (0)</h2><p class='note'>none</p><h2>Near-miss watchlist (8)</h2><table id='t2' class='t'><thead><tr><th onclick="sortTable('t2',0)">Date</th><th onclick="sortTable('t2',1)">Symbol</th><th onclick="sortTable('t2',2)">Side</th><th onclick="sortTable('t2',3)">Price</th><th onclick="sortTable('t2',4)">Diag</th><th onclick="sortTable('t2',5)">Status</th></tr></thead><tbody><tr><td>2026-09-30</td><td>AEGISVOPAK</td><td class='SHORT'>SHORT</td><td>296.8</td><td>no_choch</td><td>SHORT base building — sweep+VolOB done, needs CHoCH < 258.30</td></tr><tr><td>2026-10-23</td><td>ANANDRATHI</td><td class='SHORT'>SHORT</td><td>2235.0</td><td>no_choch</td><td>SHORT base building — sweep+VolOB done, needs CHoCH < 2007.00</td></tr><tr><td>2026-10-23</td><td>COFORGE</td><td class='SHORT'>SHORT</td><td>1900.5</td><td>no_choch</td><td>SHORT base building — sweep+VolOB done, needs CHoCH < 1717.00</td></tr><tr><td>2026-10-23</td><td>FEDERALBNK</td><td class='SHORT'>SHORT</td><td>340.9</td><td>no_choch</td><td>SHORT base building — sweep+VolOB done, needs CHoCH < 313.75</td></tr><tr><td>2026-09-30</td><td>GRANULES</td><td class='SHORT'>SHORT</td><td>846.55</td><td>no_choch</td><td>SHORT base building — sweep+VolOB done, needs CHoCH < 816.00</td></tr><tr><td>2026-10-23</td><td>HAL</td><td class='SHORT'>SHORT</td><td>4725.0</td><td>no_choch</td><td>SHORT base building — sweep+VolOB done, needs CHoCH < 4549.30</td></tr><tr><td>2026-10-23</td><td>IPCALAB</td><td class='SHORT'>SHORT</td><td>1953.3</td><td>razor_stop</td><td>Stop only 33.58 pts (1.72%, 0.48 ATR) inside noise — setup skipped</td></tr><tr><td>2026-10-23</td><td>ZYDUSLIFE</td><td class='SHORT'>SHORT</td><td>1129.4</td><td>no_choch</td><td>SHORT base building — sweep+VolOB done, needs CHoCH < 1086.00</td></tr></tbody></table><p class='note'>EOD research tool — backtest before trading. Not financial advice. Click any column header to sort.</p></body></html>

@@ -1,14 +1,10 @@
-"""
-ASGI config for MyProject2 project.
-"""
+"""ASGI config for MyProject2 project."""
 import os
 
 from django.core.asgi import get_asgi_application
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Nse_Project.settings')
 
-# Prefer the Channels ASGI stack (WebSocket) when it is installed; otherwise fall
-# back to the plain Django ASGI app so the WSGI ``runserver`` keeps working unchanged.
 try:
     from channels.routing import ProtocolTypeRouter, URLRouter
 
@@ -23,4 +19,3 @@ try:
     )
 except Exception:
     application = get_asgi_application()
-

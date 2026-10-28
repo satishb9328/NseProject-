@@ -214,6 +214,47 @@ CONFIG = {
     # faster scalp composite).
     "scalp_score_bull": float(os.getenv("GAMMA_SCALP_SCORE_BULL", "1.5")),
     "scalp_score_bear": float(os.getenv("GAMMA_SCALP_SCORE_BEAR", "-1.5")),
+
+    # --- V4: ATR seeding (Fix #2) -------------------------------------------
+    # The 2-min ATR(14) needs ~28 minutes of live candles before it can emit
+    # a value. During that cold-start window the scalp card was hard-locked to
+    # NO TRADE ZONE — even during fast opening moves. V4 seeds the ATR with a
+    # fallback chain so it is NEVER None:
+    #   1. Live 2-min ATR (14 bars) — primary, most accurate
+    #   2. Prior session close ATR — persisted to Redis at every candle close
+    #   3. 5-day average intraday ATR — daily macro vol reference
+    #   4. Default NIFTY ATR (25 pts) — last-resort sane default
+    # Set GAMMA_SCALP_ATR_SEED=off to disable seeding and keep v3 behavior.
+    "scalp_atr_seed_mode": os.getenv("GAMMA_SCALP_ATR_SEED", "on").strip().lower() in ("on", "1", "true", "yes"),
+    "scalp_atr_default_pts": float(os.getenv("GAMMA_SCALP_ATR_DEFAULT_PTS", "25")),
+    "scalp_atr_prior_close_key": os.getenv("GAMMA_SCALP_ATR_PRIOR_KEY", "gamma:atr_prior_close"),
+    "scalp_atr_5d_avg_key": os.getenv("GAMMA_SCALP_ATR_5D_KEY", "gamma:atr_5d_avg"),
+
+    # --- V4: Impulse Override Engine (Fix #1) -------------------------------
+    # Parallel fast-path detector that fires REGARDLESS of composite bias when
+    # an extreme event happens. Catches the kind of move the composite misses
+    # because of cold-start ATR / choppy regime gates / aggregate-vs-local
+    # gamma mismatch.
+    #
+    # Each trigger has its own threshold so you can tune them independently.
+    # Set any threshold to 0 to disable that specific trigger.
+    # Premium acceleration: ATM CE/PE premium moves >=X% in 30s.
+    "scalp_impulse_premium_pct": float(os.getenv("GAMMA_SCALP_IMPULSE_PREMIUM_PCT", "8")),
+    "scalp_impulse_premium_window": int(os.getenv("GAMMA_SCALP_IMPULSE_PREMIUM_WINDOW", "30")),
+    # Volume surge extreme: current volume >= X * rolling baseline (default 5x,
+    # tighter than the regular 3x volume surge alert).
+    "scalp_impulse_volume_mult": float(os.getenv("GAMMA_SCALP_IMPULSE_VOLUME_MULT", "5")),
+    # Spot velocity extreme: 10s velocity >= X pts/sec (default 2.0).
+    "scalp_impulse_spot_velocity": float(os.getenv("GAMMA_SCALP_IMPULSE_SPOT_VEL", "2.0")),
+    # Strike-local gamma flip: |per-strike GEX| >= X Cr when spot crosses it.
+    "scalp_impulse_local_gex_crore": float(os.getenv("GAMMA_SCALP_IMPULSE_LOCAL_GEX", "2.0")),
+    # IV spike: ATM IV jumps >= X% in 60s.
+    "scalp_impulse_iv_spike_pct": float(os.getenv("GAMMA_SCALP_IMPULSE_IV_SPIKE", "2.0")),
+    "scalp_impulse_iv_window": int(os.getenv("GAMMA_SCALP_IMPULSE_IV_WINDOW", "60")),
+    # Override score magnitude (typically ±2.5 — strong enough to force trade).
+    "scalp_impulse_override_score": float(os.getenv("GAMMA_SCALP_IMPULSE_OVERRIDE_SCORE", "2.5")),
+    # Cooldown seconds between impulse overrides (prevents rapid-fire duplicates).
+    "scalp_impulse_cooldown_sec": float(os.getenv("GAMMA_SCALP_IMPULSE_COOLDOWN", "30")),
 }
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
@@ -727,29 +768,38 @@ class COIVelocity:
 
 
 @dataclass
-class ScalpSignals:
-    """All scalping signals for a single Redis update, in one place.
+class ScalpSetup:
+    """One of the three scalp setups: Pullback / Reversal / Breakout.
 
-    A scalper reads `bias` + `bias_score` for the one-line read, then drills
-    into `alerts` / `top_coi_velocity` / `spot_velocity` for confirmation.
-    `enabled=False` means the scalping module is OFF (GAMMA_SCALP_MODE=off);
-    every other field is then empty/zero.
+    V5 introduces a structured per-setup object so the dashboard can render
+    three independent cards with their own confidence score, entry/SL/target,
+    and an "ACTIVE" flag showing which one is currently firing.
     """
+    name: str = ""              # "Pullback" / "Reversal" / "Breakout"
+    active: bool = False        # True when this setup is the recommended trade this update
+    confidence_pct: float = 0.0 # 0-100, how strong the setup is right now
+    direction: str = "NEUTRAL"  # BULLISH / BEARISH / NEUTRAL
+    option_side: str = "NO_TRADE"  # CE / PE / NO_TRADE
+    strike: float = 0.0
+    entry: float = 0.0
+    sl: float = 0.0
+    target: float = 0.0
+    reason: str = ""            # one-line explanation
+
+
+@dataclass
+class ScalpSignals:
+    """All scalping signals for a single Redis update, in one place."""
     enabled: bool = False
-    # Raw GEX flip alert (bypasses V2 persistence). None if no flip this update.
     raw_gex_flip: Optional[str] = None
-    # Wall proximity alert. None if spot is far from both walls.
     wall_proximity_alert: Optional[str] = None
-    # Per-strike volume surge alerts.
     volume_surge_alerts: List[str] = field(default_factory=list)
-    # 2-min OHLC ATR (None until enough candles have formed).
     atr_2min: Optional[float] = None
     atr_candles_used: int = 0
-    # Spot velocity per window, in points/sec.
+    # V4: source of the ATR value (live / prior_close / 5d_avg / default / warming_up).
+    atr_source: str = "warming_up"
     spot_velocity: Dict[int, float] = field(default_factory=dict)
-    # Top-N most active COI strikes (sorted by max |ΔCOI| across windows).
     top_coi_velocity: List[COIVelocity] = field(default_factory=list)
-    # Combined scalp bias.
     bias: str = "NEUTRAL"  # BULLISH / BEARISH / NEUTRAL
     bias_score: float = 0.0
     bias_reasons: List[str] = field(default_factory=list)
@@ -757,6 +807,37 @@ class ScalpSignals:
     alerts: List[str] = field(default_factory=list)
     # Timestamps for traceability.
     evaluated_at: Optional[str] = None
+    # --- V4: Impulse Override (Fix #1) ---
+    # When non-None, an extreme event fired this update and forced the bias.
+    # The dashboard can render "⚡ IMPULSE BUY CE" instead of "NO TRADE ZONE".
+    impulse_override: Optional["ImpulseOverride"] = None
+    # --- V5: Three structured scalp setups (Pullback / Reversal / Breakout) ---
+    # Each carries its own confidence score + entry/SL/target + active flag.
+    # `active_setup` names which one the operator should trade right now.
+    pullback_setup: Optional["ScalpSetup"] = None
+    reversal_setup: Optional["ScalpSetup"] = None
+    breakout_setup: Optional["ScalpSetup"] = None
+    active_setup: str = "NONE"  # "Pullback" / "Reversal" / "Breakout" / "NONE"
+
+
+@dataclass
+class ImpulseOverride:
+    """Fires when an extreme event is detected, regardless of composite bias.
+
+    This is the fast-path that catches moves the composite misses due to:
+      - ATR cold-start blind window
+      - "Choppy" macro regime hard gate
+      - Aggregate vs. strike-local gamma mismatch
+    """
+    fired: bool = False
+    direction: str = "NEUTRAL"  # BULLISH / BEARISH
+    score: float = 0.0
+    triggers: List[str] = field(default_factory=list)
+    # Which sub-engine fired (premium_accel / volume_surge / spot_velocity /
+    # local_gamma_flip / iv_spike).
+    source: str = ""
+    # Cooldown tracking — epoch seconds when the next override is allowed.
+    cooldown_until: float = 0.0
 
 
 # === GammaProcessor ========================================================
@@ -1344,9 +1425,15 @@ class VolumeSurgeDetector:
 class ATRCalculator:
     """2-minute OHLC ATR (Average True Range) for stop placement.
 
-    Groups incoming spot ticks into N-second candles (default 120s), builds
-    OHLC, then computes classic Wilder ATR over the last `period` candles.
-    Until `period + 1` candles have formed, returns None.
+    V4 CHANGE (Fix #2 — ATR seeding): the calculator is now NEVER None.
+    Until enough live candles have formed (period + 1), it returns a seeded
+    fallback value in this priority order:
+      1. Live 2-min ATR (14 bars) — primary, most accurate
+      2. Prior session close ATR — persisted to Redis at every candle close
+      3. 5-day average intraday ATR — daily macro vol reference
+      4. Default NIFTY ATR (25 pts) — last-resort sane default
+    Set GAMMA_SCALP_ATR_SEED=off to disable seeding and keep v3 behavior
+    (ATR returns None during warmup → card shows "warming up").
     """
 
     def __init__(self, candle_sec: int = 120, period: int = 14) -> None:
@@ -1356,21 +1443,106 @@ class ATRCalculator:
             maxlen=self.period + 5
         )  # (open_ts, open, high, low, close)
         self._current_candle: Optional[List[float]] = None  # [open_ts, o, h, l, c]
+        # V4: seeded fallback values (set externally via set_seed)
+        self._seed_prior_close: Optional[float] = None
+        self._seed_5d_avg: Optional[float] = None
+        self._default_atr: float = float(CONFIG.get("scalp_atr_default_pts", 25.0))
+        self._seed_enabled: bool = bool(CONFIG.get("scalp_atr_seed_mode", True))
+        # V4: optional Redis client for persistence (set externally)
+        self._redis_client: Any = None
+        self._prior_close_key: str = str(CONFIG.get("scalp_atr_prior_close_key", "gamma:atr_prior_close"))
+        self._5d_avg_key: str = str(CONFIG.get("scalp_atr_5d_avg_key", "gamma:atr_5d_avg"))
 
-    def update(self, spot: float, now_epoch: float) -> Optional[float]:
+    def set_redis_client(self, client: Any) -> None:
+        """Attach a Redis client so the calculator can load/persist seeds."""
+        self._redis_client = client
+        if client is not None:
+            self._load_seeds_from_redis()
+
+    def _load_seeds_from_redis(self) -> None:
+        """Load prior-close and 5-day-avg ATR seeds from Redis on startup."""
+        if self._redis_client is None:
+            return
+        try:
+            raw_prior = self._redis_client.get(self._prior_close_key)
+            if raw_prior:
+                val = float(raw_prior)
+                if math.isfinite(val) and val > 0:
+                    self._seed_prior_close = val
+                    logger.info("ATR seed loaded: prior_close=%.2f", val)
+        except (TypeError, ValueError, Exception):
+            pass
+        try:
+            raw_5d = self._redis_client.get(self._5d_avg_key)
+            if raw_5d:
+                val = float(raw_5d)
+                if math.isfinite(val) and val > 0:
+                    self._seed_5d_avg = val
+                    logger.info("ATR seed loaded: 5d_avg=%.2f", val)
+        except (TypeError, ValueError, Exception):
+            pass
+        # If no prior-close seed, fall back to 5d_avg as the prior.
+        if self._seed_prior_close is None and self._seed_5d_avg is not None:
+            self._seed_prior_close = self._seed_5d_avg
+
+    def _persist_atr_to_redis(self, atr_val: float) -> None:
+        """Persist the current live ATR so the next session can seed from it."""
+        if self._redis_client is None:
+            return
+        if not math.isfinite(atr_val) or atr_val <= 0:
+            return
+        try:
+            self._redis_client.set(self._prior_close_key, str(round(atr_val, 4)))
+        except Exception:
+            pass
+
+    def set_seeds(self, prior_close: Optional[float] = None,
+                  avg_5d: Optional[float] = None) -> None:
+        """Manually set seed values (for testing or non-Redis deployments)."""
+        if prior_close is not None and math.isfinite(prior_close) and prior_close > 0:
+            self._seed_prior_close = prior_close
+        if avg_5d is not None and math.isfinite(avg_5d) and avg_5d > 0:
+            self._seed_5d_avg = avg_5d
+
+    def update(self, spot: float, now_epoch: float) -> Tuple[Optional[float], str]:
+        """Returns (atr_value, source). source is one of:
+        'live' / 'prior_close' / '5d_avg' / 'default' / 'warming_up'.
+        V4: never returns (None, 'warming_up') when seeding is enabled —
+        always returns a usable value with a labeled source.
+        """
         if spot <= 0:
-            return None
+            # Spot invalid — return best available seed.
+            return self._fallback_atr()
         candle_start = (now_epoch // self.candle_sec) * self.candle_sec
+        candle_rolled = False
         if self._current_candle is None or self._current_candle[0] != candle_start:
-            # Close the previous candle (if any) and start a new one.
             if self._current_candle is not None:
+                # Close the previous candle — persist ATR for next session seed.
                 self._candles.append(tuple(self._current_candle))
+                candle_rolled = True
             self._current_candle = [candle_start, spot, spot, spot, spot]
         else:
-            self._current_candle[2] = max(self._current_candle[2], spot)  # high
-            self._current_candle[3] = min(self._current_candle[3], spot)  # low
-            self._current_candle[4] = spot                              # close
-        return self._atr()
+            self._current_candle[2] = max(self._current_candle[2], spot)
+            self._current_candle[3] = min(self._current_candle[3], spot)
+            self._current_candle[4] = spot
+        live_atr = self._atr()
+        if live_atr is not None:
+            # Persist every few candle rolls (cheap — only on candle close).
+            if candle_rolled:
+                self._persist_atr_to_redis(live_atr)
+            return (live_atr, "live")
+        # No live ATR yet — use seeded fallback.
+        return self._fallback_atr()
+
+    def _fallback_atr(self) -> Tuple[Optional[float], str]:
+        """Return the best available fallback ATR (or None if seeding disabled)."""
+        if not self._seed_enabled:
+            return (None, "warming_up")
+        if self._seed_prior_close is not None:
+            return (self._seed_prior_close, "prior_close")
+        if self._seed_5d_avg is not None:
+            return (self._seed_5d_avg, "5d_avg")
+        return (self._default_atr, "default")
 
     def _atr(self) -> Optional[float]:
         if len(self._candles) < self.period + 1:
@@ -1388,8 +1560,6 @@ class ATRCalculator:
             trs.append(tr)
         if not trs:
             return None
-        # Simple average of TRs (Wilder smoothing would also work but adds
-        # state; for scalp stops the simple average is good enough).
         return sum(trs) / len(trs)
 
 
@@ -1422,6 +1592,241 @@ class SpotMomentumTracker:
                 dt = max(1e-6, current_ts - target_ts)
                 out[w] = (current_spot - past_spot) / dt
         return out
+
+
+class ImpulseOverrideEngine:
+    """V4 Fix #1 — Fast-path detector that fires on extreme events.
+
+    Runs ALONGSIDE the composite bias. When an extreme trigger fires, it
+    overrides the composite bias with a forced BULLISH/BEARISH read + score.
+    Catches moves the composite misses due to:
+      - ATR cold-start blind window (Fix #2 mitigates, this is the backstop)
+      - "Choppy" macro regime hard gate
+      - Aggregate vs. strike-local gamma mismatch
+
+    Triggers (each independently tunable via env vars):
+      1. Premium acceleration: ATM CE/PE premium moves >=X% in N seconds
+      2. Volume surge extreme: current volume >= X * rolling baseline
+      3. Spot velocity extreme: 10s velocity >= X pts/sec
+      4. Strike-local gamma flip: |per-strike GEX| >= X Cr when spot crosses
+      5. IV spike: ATM IV jumps >= X% in N seconds
+    """
+
+    def __init__(self) -> None:
+        # Premium acceleration tracker: (strike, side) -> deque[(ts, ltp)]
+        self._premium_history: Dict[Tuple[float, str], Deque[Tuple[float, float]]] = {}
+        self._premium_window: int = int(CONFIG.get("scalp_impulse_premium_window", 30))
+        self._premium_pct: float = float(CONFIG.get("scalp_impulse_premium_pct", 8.0))
+        # IV tracker: ATM IV history
+        self._iv_history: Deque[Tuple[float, float]] = deque(maxlen=120)
+        self._iv_window: int = int(CONFIG.get("scalp_impulse_iv_window", 60))
+        self._iv_spike_pct: float = float(CONFIG.get("scalp_impulse_iv_spike_pct", 2.0))
+        # Volume surge — reuse the existing detector with tighter mult
+        self._volume_mult: float = float(CONFIG.get("scalp_impulse_volume_mult", 5.0))
+        self._volume_history: Dict[Tuple[float, str], Deque[float]] = {}
+        self._volume_window: int = int(CONFIG.get("scalp_volume_window", 10))
+        # Spot velocity threshold
+        self._spot_vel_thr: float = float(CONFIG.get("scalp_impulse_spot_velocity", 2.0))
+        # Strike-local gamma
+        self._local_gex_crore: float = float(CONFIG.get("scalp_impulse_local_gex_crore", 2.0))
+        self._previous_spot: Optional[float] = None
+        # Cooldown tracking
+        self._cooldown_sec: float = float(CONFIG.get("scalp_impulse_cooldown_sec", 30.0))
+        self._last_override_epoch: float = 0.0
+        # Override score magnitude
+        self._override_score: float = float(CONFIG.get("scalp_impulse_override_score", 2.5))
+
+    def evaluate(self, profile: GammaProfile, scalp: ScalpSignals,
+                 now_epoch: float) -> Optional[ImpulseOverride]:
+        """Run all 5 triggers. Returns an ImpulseOverride if any fire, else None."""
+        # Cooldown check — don't fire another override within cooldown window
+        if now_epoch < self._last_override_epoch + self._cooldown_sec:
+            return None
+
+        triggers: List[Tuple[str, str, float]] = []
+        # (source, direction, magnitude) tuples; direction is BULLISH/BEARISH
+
+        # --- Trigger 1: Premium acceleration ---
+        if self._premium_pct > 0:
+            trig = self._check_premium_acceleration(profile, now_epoch)
+            if trig:
+                triggers.append(trig)
+
+        # --- Trigger 2: Volume surge extreme ---
+        if self._volume_mult > 0:
+            trig = self._check_volume_surge_extreme(profile)
+            if trig:
+                triggers.append(trig)
+
+        # --- Trigger 3: Spot velocity extreme ---
+        if self._spot_vel_thr > 0:
+            trig = self._check_spot_velocity(scalp)
+            if trig:
+                triggers.append(trig)
+
+        # --- Trigger 4: Strike-local gamma flip ---
+        if self._local_gex_crore > 0:
+            trig = self._check_local_gamma_flip(profile)
+            if trig:
+                triggers.append(trig)
+
+        # --- Trigger 5: IV spike ---
+        if self._iv_spike_pct > 0:
+            trig = self._check_iv_spike(profile, now_epoch)
+            if trig:
+                triggers.append(trig)
+
+        if not triggers:
+            return None
+
+        # Aggregate: pick the strongest trigger (highest magnitude).
+        # Direction tie-break: BULLISH wins (more aggressive on catch-up).
+        triggers.sort(key=lambda t: t[2], reverse=True)
+        best_source, best_dir, best_mag = triggers[0]
+
+        override = ImpulseOverride(
+            fired=True,
+            direction=best_dir,
+            score=self._override_score if best_dir == "BULLISH" else -self._override_score,
+            triggers=[f"{s}={m:+.2f} ({d})" for s, d, m in triggers],
+            source=best_source,
+            cooldown_until=now_epoch + self._cooldown_sec,
+        )
+        self._last_override_epoch = now_epoch
+        return override
+
+    def _check_premium_acceleration(self, profile: GammaProfile,
+                                    now_epoch: float) -> Optional[Tuple[str, str, float]]:
+        """ATM CE/PE premium moved >= threshold % in window seconds."""
+        if not profile.strikes or profile.spot <= 0:
+            return None
+        atm = min(profile.strikes, key=lambda s: abs(s.strike - profile.spot))
+        window_start = now_epoch - self._premium_window
+        results: List[Tuple[str, str, float]] = []
+        for side, ltp in (("CE", atm.call_ltp), ("PE", atm.put_ltp)):
+            if ltp <= 0:
+                continue
+            dq = self._premium_history.setdefault((atm.strike, side), deque(maxlen=120))
+            # Prune old entries
+            while dq and dq[0][0] < window_start - 10:
+                dq.popleft()
+            # Find oldest entry in window
+            oldest_in_window: Optional[Tuple[float, float]] = None
+            for ts, val in dq:
+                if ts >= window_start:
+                    oldest_in_window = (ts, val)
+                    break
+            dq.append((now_epoch, ltp))
+            if oldest_in_window is None or oldest_in_window[1] <= 0:
+                continue
+            pct_change = ((ltp - oldest_in_window[1]) / oldest_in_window[1]) * 100.0
+            if abs(pct_change) >= self._premium_pct:
+                direction = "BULLISH" if (side == "CE" and pct_change > 0) or (side == "PE" and pct_change < 0) else "BEARISH"
+                # Magnitude = absolute % change
+                results.append((f"premium_{side.lower()}_accel", direction, abs(pct_change)))
+        if not results:
+            return None
+        # Return the strongest
+        results.sort(key=lambda r: r[2], reverse=True)
+        return results[0]
+
+    def _check_volume_surge_extreme(self, profile: GammaProfile) -> Optional[Tuple[str, str, float]]:
+        """Volume >= impulse_mult * baseline for any near-ATM strike."""
+        if not profile.strikes or profile.spot <= 0:
+            return None
+        # Only check strikes within 200 pts of spot (avoid far-OTM noise)
+        near_atm = [s for s in profile.strikes if abs(s.strike - profile.spot) <= 200]
+        for s in near_atm:
+            for side, vol in (("CE", s.call_vol), ("PE", s.put_vol)):
+                dq = self._volume_history.setdefault((s.strike, side), deque(maxlen=self._volume_window + 1))
+                if len(dq) >= 2:
+                    baseline = sum(list(dq)[:-1]) / max(1, len(dq) - 1)
+                    if baseline > 0 and vol >= self._volume_mult * baseline:
+                        # CE volume surge = bearish (panic hedging)
+                        # PE volume surge = bullish (writing puts = support)
+                        direction = "BULLISH" if side == "PE" else "BEARISH"
+                        return (f"volume_surge_{side.lower()}", direction, vol / baseline)
+                dq.append(vol)
+        return None
+
+    def _check_spot_velocity(self, scalp: ScalpSignals) -> Optional[Tuple[str, str, float]]:
+        """10s spot velocity exceeds threshold."""
+        v10 = scalp.spot_velocity.get(10, 0.0)
+        if abs(v10) >= self._spot_vel_thr:
+            direction = "BULLISH" if v10 > 0 else "BEARISH"
+            return ("spot_velocity_10s", direction, abs(v10))
+        return None
+
+    def _check_local_gamma_flip(self, profile: GammaProfile) -> Optional[Tuple[str, str, float]]:
+        """Spot crossed a strike with |per-strike GEX| >= threshold Cr.
+
+        Uses the chain-wide per-strike net_gex. Convert raw GEX to Cr for the
+        threshold check (raw is per-contract shares * spot * gamma — large).
+        The threshold is in Cr (1 Cr = 1e7), so we divide raw by 1e7.
+        """
+        if not profile.strikes or profile.spot <= 0:
+            return None
+        if self._previous_spot is None:
+            self._previous_spot = profile.spot
+            return None
+        crossed_strike: Optional[OptionStrike] = None
+        for s in profile.strikes:
+            # Did spot cross this strike between previous and current?
+            prev_side = self._previous_spot - s.strike
+            curr_side = profile.spot - s.strike
+            if (prev_side == 0) or (curr_side == 0):
+                continue
+            if (prev_side > 0) != (curr_side > 0):
+                # Crossed! Check if this strike has high local GEX.
+                local_gex_crore = abs(s.net_gex) / 1e7
+                if local_gex_crore >= self._local_gex_crore:
+                    if crossed_strike is None or local_gex_crore > abs(crossed_strike.net_gex) / 1e7:
+                        crossed_strike = s
+        self._previous_spot = profile.spot
+        if crossed_strike is None:
+            return None
+        # Direction: crossing UP through a positive-GEX strike = bullish
+        # (dealers long gamma, buy dips); crossing DOWN through negative-GEX
+        # strike = bearish (dealers short gamma, sell rips).
+        crossed_up = profile.spot > crossed_strike.strike
+        if crossed_strike.net_gex > 0:
+            direction = "BULLISH" if crossed_up else "BEARISH"
+        else:
+            # Negative GEX strike — opposite effect ( dealers short gamma )
+            direction = "BEARISH" if crossed_up else "BULLISH"
+        magnitude = abs(crossed_strike.net_gex) / 1e7
+        return (f"local_gamma_flip_{crossed_strike.strike:.0f}", direction, magnitude)
+
+    def _check_iv_spike(self, profile: GammaProfile,
+                        now_epoch: float) -> Optional[Tuple[str, str, float]]:
+        """ATM IV jumped >= threshold % in window seconds."""
+        if not profile.strikes or profile.spot <= 0:
+            return None
+        atm = min(profile.strikes, key=lambda s: abs(s.strike - profile.spot))
+        atm_iv = (atm.call_iv + atm.put_iv) / 2.0
+        if atm_iv <= 0:
+            return None
+        window_start = now_epoch - self._iv_window
+        # Prune
+        while self._iv_history and self._iv_history[0][0] < window_start - 10:
+            self._iv_history.popleft()
+        oldest_in_window: Optional[Tuple[float, float]] = None
+        for ts, val in self._iv_history:
+            if ts >= window_start:
+                oldest_in_window = (ts, val)
+                break
+        self._iv_history.append((now_epoch, atm_iv))
+        if oldest_in_window is None or oldest_in_window[1] <= 0:
+            return None
+        pct_change = ((atm_iv - oldest_in_window[1]) / oldest_in_window[1]) * 100.0
+        if abs(pct_change) >= self._iv_spike_pct:
+            # IV spike = fear → typically bearish (but can be bullish if spot
+            # is also rising — that's a gamma squeeze). We treat raw IV spike
+            # as BEARISH by default; the spot_velocity trigger handles the
+            # bullish case.
+            direction = "BEARISH"
+            return ("iv_spike", direction, abs(pct_change))
+        return None
 
 
 class ScalpSignalEngine:
@@ -1462,6 +1867,8 @@ class ScalpSignalEngine:
         self.spot_momentum = SpotMomentumTracker(
             windows_sec=windows_spot, history_sec=max(history_sec, 120)
         )
+        # V4: Impulse Override Engine (Fix #1)
+        self.impulse_engine = ImpulseOverrideEngine()
         self._previous_weekly_gex: Optional[float] = None
         self._previous_day_gex: Optional[float] = None
         self._previous_expiry: Optional[str] = None
@@ -1472,6 +1879,15 @@ class ScalpSignalEngine:
         now_epoch = now_epoch if now_epoch is not None else time.time()
         out = ScalpSignals(enabled=True)
         out.evaluated_at = datetime.now(LOCAL_TZ).isoformat(timespec="seconds")
+
+        # V5: capture the PREVIOUS spot BEFORE the impulse engine's local gamma
+        # flip check overwrites _previous_spot with the current spot. This lets
+        # the breakout setup detect wall crosses between prev_spot and current
+        # spot — without this, the breakout check would always see prev_spot
+        # == current_spot (no cross detected).
+        self._prev_spot_for_breakout = (
+            self.impulse_engine._previous_spot if self.impulse_engine else None
+        )
 
         # Reset per-expiry state when the chain rolls.
         if profile.expiry != self._previous_expiry:
@@ -1497,9 +1913,10 @@ class ScalpSignalEngine:
         out.volume_surge_alerts = self.volume_surge.update(profile.strikes)
         out.alerts.extend(out.volume_surge_alerts)
 
-        # --- 4. ATR (2-min) ---
-        atr = self.atr_calc.update(profile.spot, now_epoch)
-        out.atr_2min = atr
+        # --- 4. ATR (2-min) --- V4: now returns (value, source); never None
+        atr_val, atr_source = self.atr_calc.update(profile.spot, now_epoch)
+        out.atr_2min = atr_val
+        out.atr_source = atr_source
         out.atr_candles_used = max(0, len(self.atr_calc._candles))
 
         # --- 5. Spot momentum ---
@@ -1514,6 +1931,29 @@ class ScalpSignalEngine:
 
         # --- 7. Combined scalp bias ---
         self._compute_bias(profile, out)
+
+        # --- 8. V4: Impulse Override (Fix #1) --- runs AFTER composite bias
+        # so it can override when an extreme event fires. The override wins
+        # unconditionally when fired — composite becomes a confirmation layer,
+        # not a gate.
+        impulse = self.impulse_engine.evaluate(profile, out, now_epoch)
+        if impulse is not None and impulse.fired:
+            out.impulse_override = impulse
+            # Override the composite bias
+            out.bias = impulse.direction
+            out.bias_score = impulse.score
+            out.bias_reasons = [
+                f"⚡ IMPULSE OVERRIDE ({impulse.source})",
+                f"  → forced {impulse.direction} (score {impulse.score:+.2f})",
+                *impulse.triggers,
+            ]
+            out.alerts.insert(0, f"⚡ IMPULSE {impulse.direction} — source: {impulse.source}")
+
+        # --- 9. V5: Three structured scalp setups (Pullback / Reversal / Breakout) ---
+        # Computes per-setup confidence scores (0-100), entry/SL/target, and
+        # an "active" flag showing which one the operator should trade right now.
+        # The dashboard renders all three side-by-side and highlights the active one.
+        self._compute_setups(profile, out)
 
         # Stash for next update's flip detection.
         self._previous_weekly_gex = weekly_gex
@@ -1538,7 +1978,6 @@ class ScalpSignalEngine:
         return " | ".join(msgs) if msgs else None
 
     def _compute_bias(self, profile: GammaProfile, out: ScalpSignals) -> None:
-        """Combine the scalp sub-signals into a single bias + score + reasons."""
         score = 0.0
         reasons: List[str] = []
         thr = float(CONFIG.get("scalp_momentum_threshold", 0.5))
@@ -1608,6 +2047,200 @@ class ScalpSignalEngine:
             out.bias = "BEARISH"
         else:
             out.bias = "NEUTRAL"
+
+    # ====================================================================
+    # V5: Three structured scalp setups (Pullback / Reversal / Breakout)
+    # ====================================================================
+
+    def _compute_setups(self, profile: GammaProfile, out: ScalpSignals) -> None:
+        """Compute all 3 scalp setups with confidence scores + entry/SL/target.
+
+        Each setup independently scores its own confidence (0-100). The setup
+        with the highest confidence becomes the `active_setup` — the one the
+        operator should trade right now. The dashboard renders all three
+        side-by-side and highlights the active one.
+
+        Setups:
+          1. Pullback — trend continuation (buy the dip in an existing trend)
+          2. Reversal — counter-trend fade at a wall (support bounce / resistance rejection)
+          3. Breakout — trade WITH the wall break (spot crosses Call Wall up / Put Wall down)
+        """
+        # Find ATM strike for entry pricing
+        atm_strike = 0.0
+        atm_call_ltp = 0.0
+        atm_put_ltp = 0.0
+        if profile.strikes and profile.spot > 0:
+            atm = min(profile.strikes, key=lambda s: abs(s.strike - profile.spot))
+            atm_strike = atm.strike
+            atm_call_ltp = atm.call_ltp
+            atm_put_ltp = atm.put_ltp
+
+        atr = out.atr_2min if (out.atr_2min is not None and out.atr_2min > 0) else 0.0
+        atr_quality = 1.0 if out.atr_source == "live" else 0.7  # seeded ATR is less reliable
+        bias = out.bias
+        bias_score = out.bias_score
+        spot = profile.spot
+        call_wall = profile.call_wall
+        put_wall = profile.put_wall
+        day_flip = profile.day_gamma.gamma_flip_level
+        wall_alert = out.wall_proximity_alert
+        impulse_fired = out.impulse_override is not None and out.impulse_override.fired
+
+        # === Setup 1: PULLBACK (trend continuation) ===
+        pullback = ScalpSetup(name="Pullback")
+        if bias in ("BULLISH", "BEARISH") and atm_strike > 0:
+            is_bull = bias == "BULLISH"
+            ltp = atm_call_ltp if is_bull else atm_put_ltp
+            if ltp > 0:
+                pullback.direction = bias
+                pullback.option_side = "CE" if is_bull else "PE"
+                pullback.strike = atm_strike
+                pullback.entry = ltp
+                pullback.sl = max(0, ltp - atr) if atr > 0 else ltp * 0.80
+                pullback.target = ltp + atr * 1.5 if atr > 0 else ltp * 1.40
+                # Confidence: bias strength + spot-vs-flip alignment + velocity + impulse + ATR quality
+                conf = 50.0  # base
+                if abs(bias_score) >= 2.5:
+                    conf += 25
+                elif abs(bias_score) >= 1.5:
+                    conf += 15
+                elif abs(bias_score) >= 1.0:
+                    conf += 8
+                # Spot-vs-flip alignment
+                if day_flip is not None and day_flip > 0:
+                    if is_bull and spot > day_flip:
+                        conf += 10
+                    elif not is_bull and spot < day_flip:
+                        conf += 10
+                # Spot velocity confirms
+                v10 = out.spot_velocity.get(10, 0.0)
+                if (is_bull and v10 > 0.5) or (not is_bull and v10 < -0.5):
+                    conf += 8
+                # Impulse override fired in this direction
+                if impulse_fired and out.impulse_override.direction == bias:
+                    conf += 15
+                # ATR quality adjustment
+                conf *= atr_quality
+                pullback.confidence_pct = round(min(99.0, max(0.0, conf)), 1)
+                pullback.reason = f"{bias} trend continuation, bias_score {bias_score:+.2f}"
+                # Active threshold = 50% (lower than 60% so seeded-ATR scenarios
+                # with atr_quality=0.7 can still trigger when conviction is high).
+                pullback.active = pullback.confidence_pct >= 50.0
+
+        # === Setup 2: REVERSAL (counter-trend fade at wall) ===
+        reversal = ScalpSetup(name="Reversal")
+        if wall_alert and atm_strike > 0:
+            # Wall test → expect bounce/rejection (counter-trend)
+            if "Put Wall" in wall_alert and bias == "BULLISH":
+                # Put Wall test + bullish bias = support bounce candidate
+                ltp = atm_call_ltp
+                if ltp > 0:
+                    reversal.direction = "BULLISH"
+                    reversal.option_side = "CE"
+                    reversal.strike = atm_strike
+                    reversal.entry = ltp
+                    reversal.sl = max(0, ltp - atr) if atr > 0 else ltp * 0.80
+                    reversal.target = ltp + atr * 1.5 if atr > 0 else ltp * 1.40
+                    conf = 55.0  # base for wall-aligned reversal
+                    if abs(bias_score) >= 1.5:
+                        conf += 12
+                    if impulse_fired and out.impulse_override.direction == "BULLISH":
+                        conf += 10
+                    conf *= atr_quality
+                    reversal.confidence_pct = round(min(95.0, max(0.0, conf)), 1)
+                    reversal.reason = f"Put Wall test ({put_wall:.0f}) + BULLISH bias → bounce"
+                    reversal.active = reversal.confidence_pct >= 50.0
+            elif "Call Wall" in wall_alert and bias == "BEARISH":
+                # Call Wall test + bearish bias = resistance rejection candidate
+                ltp = atm_put_ltp
+                if ltp > 0:
+                    reversal.direction = "BEARISH"
+                    reversal.option_side = "PE"
+                    reversal.strike = atm_strike
+                    reversal.entry = ltp
+                    reversal.sl = max(0, ltp - atr) if atr > 0 else ltp * 0.80
+                    reversal.target = ltp + atr * 1.5 if atr > 0 else ltp * 1.40
+                    conf = 55.0
+                    if abs(bias_score) >= 1.5:
+                        conf += 12
+                    if impulse_fired and out.impulse_override.direction == "BEARISH":
+                        conf += 10
+                    conf *= atr_quality
+                    reversal.confidence_pct = round(min(95.0, max(0.0, conf)), 1)
+                    reversal.reason = f"Call Wall test ({call_wall:.0f}) + BEARISH bias → rejection"
+                    reversal.active = reversal.confidence_pct >= 50.0
+
+        # === Setup 3: BREAKOUT (trade WITH the wall break) ===
+        breakout = ScalpSetup(name="Breakout")
+        # Breakout = spot crossed ABOVE Call Wall (bullish) OR BELOW Put Wall (bearish)
+        # Uses _prev_spot_for_breakout (captured at evaluate() start, before the
+        # impulse engine's local-gamma-flip check overwrote _previous_spot).
+        prev_spot = getattr(self, "_prev_spot_for_breakout", None)
+        if prev_spot is not None and atm_strike > 0:
+            # Bullish breakout: previous spot was below Call Wall, current spot is above
+            if call_wall is not None and prev_spot < call_wall <= spot:
+                ltp = atm_call_ltp
+                if ltp > 0:
+                    breakout.direction = "BULLISH"
+                    breakout.option_side = "CE"
+                    breakout.strike = atm_strike
+                    breakout.entry = ltp
+                    breakout.sl = max(0, ltp - atr) if atr > 0 else ltp * 0.80
+                    breakout.target = ltp + atr * 1.5 if atr > 0 else ltp * 1.40
+                    conf = 60.0  # base for confirmed wall break
+                    # Volume surge on a near-ATM strike = strong breakout confirmation
+                    if any("surge" in a.lower() for a in out.volume_surge_alerts):
+                        conf += 15
+                    if impulse_fired and out.impulse_override.direction == "BULLISH":
+                        conf += 12
+                    # Spot velocity confirms (rising)
+                    v10 = out.spot_velocity.get(10, 0.0)
+                    if v10 > 0.5:
+                        conf += 8
+                    conf *= atr_quality
+                    breakout.confidence_pct = round(min(95.0, max(0.0, conf)), 1)
+                    breakout.reason = f"Broke ABOVE Call Wall {call_wall:.0f} (was {prev_spot:.0f})"
+                    breakout.active = breakout.confidence_pct >= 50.0
+            # Bearish breakout: previous spot was above Put Wall, current spot is below
+            elif put_wall is not None and prev_spot > put_wall >= spot:
+                ltp = atm_put_ltp
+                if ltp > 0:
+                    breakout.direction = "BEARISH"
+                    breakout.option_side = "PE"
+                    breakout.strike = atm_strike
+                    breakout.entry = ltp
+                    breakout.sl = max(0, ltp - atr) if atr > 0 else ltp * 0.80
+                    breakout.target = ltp + atr * 1.5 if atr > 0 else ltp * 1.40
+                    conf = 60.0
+                    if any("surge" in a.lower() for a in out.volume_surge_alerts):
+                        conf += 15
+                    if impulse_fired and out.impulse_override.direction == "BEARISH":
+                        conf += 12
+                    v10 = out.spot_velocity.get(10, 0.0)
+                    if v10 < -0.5:
+                        conf += 8
+                    conf *= atr_quality
+                    breakout.confidence_pct = round(min(95.0, max(0.0, conf)), 1)
+                    breakout.reason = f"Broke BELOW Put Wall {put_wall:.0f} (was {prev_spot:.0f})"
+                    breakout.active = breakout.confidence_pct >= 50.0
+
+        out.pullback_setup = pullback
+        out.reversal_setup = reversal
+        out.breakout_setup = breakout
+
+        # Pick the active setup = highest confidence among the ones that are `active`
+        candidates = []
+        if pullback.active:
+            candidates.append(("Pullback", pullback.confidence_pct))
+        if reversal.active:
+            candidates.append(("Reversal", reversal.confidence_pct))
+        if breakout.active:
+            candidates.append(("Breakout", breakout.confidence_pct))
+        if candidates:
+            candidates.sort(key=lambda c: c[1], reverse=True)
+            out.active_setup = candidates[0][0]
+        else:
+            out.active_setup = "NONE"
 
 
 # === Payload normalization ================================================
@@ -1763,6 +2396,10 @@ class RedisGammaBot:
         self.scalp_engine: Optional[ScalpSignalEngine] = (
             ScalpSignalEngine() if self.scalp_enabled else None
         )
+        # V4: wire the Redis client into the scalp engine's ATR calculator
+        # so it can load prior-session ATR seeds on startup and persist the
+        # live ATR on every candle close. Done lazily in start() once the
+        # Redis client is created.
 
         self.last_profile: Optional[Dict[str, Any]] = None
         self.gamma_alerts: Deque[Dict[str, Any]] = deque(maxlen=50)
@@ -1770,41 +2407,39 @@ class RedisGammaBot:
         self.processed_updates = 0
 
     def start(self) -> bool:
-        with self._lock:
-            if self.is_running:
-                return False
-            if redis is None:
-                raise GammaBotError(
-                    "redis-py is not installed; install the 'redis' package in the active environment."
-                )
-            # socket_timeout / socket_connect_timeout keep a dead Redis from blocking
-            # this thread (and any status()/start() caller) forever.
-            self._redis_client = redis.Redis.from_url(
-                self.redis_url,
-                decode_responses=True,
-                health_check_interval=30,
-                socket_timeout=5,
-                socket_connect_timeout=5,
+        if self.is_running:
+            return False
+        if redis is None:
+            raise GammaBotError(
+                "redis-py is not installed; install the 'redis' package in the active environment."
             )
-            try:
-                self._redis_client.ping()
-            except Exception as exc:
-                raise GammaBotError(f"Redis is unavailable at {self.redis_url}: {exc}") from exc
-            self._stop_event.clear()
 
-        # Prime the in-memory profile from Redis OUTSIDE the lifecycle lock: it calls
-        # _process_message(), which now takes the state lock only for its final commit.
-        # Done before the listener thread starts so priming and listening never run
-        # concurrently.
-        self._prime_from_redis()
+        redis_client = redis.Redis.from_url(
+            self.redis_url, decode_responses=True, health_check_interval=30
+        )
+        try:
+            redis_client.ping()
+        except Exception as exc:
+            raise GammaBotError(f"Redis is unavailable at {self.redis_url}: {exc}") from exc
 
         with self._lock:
             if self.is_running:
                 return False
+            self._redis_client = redis_client
+            self._stop_event.clear()
+            # V4: wire Redis client into the scalp engine's ATR calculator
+            # so it can load prior-session ATR seeds. After this call, ATR is
+            # NEVER None — even on the very first update of the session.
+            if self.scalp_engine is not None:
+                self.scalp_engine.atr_calc.set_redis_client(self._redis_client)
             self._thread = threading.Thread(
                 target=self._listen, name="gamma-redis-listener", daemon=True
             )
             self._thread.start()
+
+        # Important: do not hold self._lock while priming Redis; _process_message()
+        # grabs the same lock for its brief commit phase and would deadlock here.
+        self._prime_from_redis()
         return True
 
     def stop(self) -> bool:
@@ -1812,7 +2447,20 @@ class RedisGammaBot:
             if not self.is_running:
                 return False
             self._stop_event.set()
-            return True
+            thread = self._thread
+
+        if thread is not None:
+            thread.join(timeout=2.0)
+
+        with self._lock:
+            if self._thread is thread:
+                self._thread = None
+            if self._redis_client is not None and not thread.is_alive():
+                try:
+                    self._redis_client.close()
+                except Exception:
+                    pass
+        return True
 
     @property
     def is_running(self) -> bool:
@@ -1839,8 +2487,7 @@ class RedisGammaBot:
             if raw:
                 self._process_message(raw)
         except Exception as exc:
-            with self._lock:
-                self.last_error = str(exc)
+            self.last_error = str(exc)
             logger.exception("Prime from Redis failed")
 
     def _listen(self) -> None:
@@ -1861,11 +2508,12 @@ class RedisGammaBot:
             logger.exception("Listener thread crashed")
 
     def _process_message(self, message_data: Any) -> None:
-        # Do all the expensive work OUTSIDE the lock (JSON parse, a possible Redis
-        # read, option-chain analytics, GEX, scalp evaluation) so a slow update can
-        # never block status() from taking the lock for a quick snapshot. The lock is
-        # held only for the final, cheap state commit below.
+        # STABLE FIX: Do all heavy work (JSON parsing, Black-Scholes math, scalp engine)
+        # OUTSIDE the lock. Only acquire the lock for the brief microsecond it takes
+        # to swap the final last_profile dict. This prevents /gamma/status/ from hanging
+        # when the dashboard polls while the bot is processing a 177KB option chain.
         try:
+            # === HEAVY WORK (OUTSIDE LOCK) ===
             raw_payload = (
                 json.loads(message_data)
                 if isinstance(message_data, str) and message_data.strip().startswith("{")
@@ -1882,38 +2530,23 @@ class RedisGammaBot:
             if not profile:
                 raise ValueError("Redis payload is missing valid spot, expiry, or strike data")
 
-            new_alerts: List[Dict[str, Any]] = [
-                {
-                    "timestamp": datetime.now(LOCAL_TZ).isoformat(timespec="seconds"),
-                    "message": message,
-                }
-                for message in self.alert_engine.evaluate_gamma_alerts(profile)
-            ]
+            # Evaluate alerts and scalp signals outside the lock
+            alerts = self.alert_engine.evaluate_gamma_alerts(profile)
 
-            # V3: run the scalping engines when enabled. Failures here must
-            # NOT take down the V2 pipeline — wrap in try/except so a bug
-            # in the scalp module doesn't break the intraday engine.
             scalp_dict: Optional[Dict[str, Any]] = None
             if self.scalp_engine is not None:
                 try:
                     scalp_signals = self.scalp_engine.evaluate(profile)
                     profile.scalp_signals = scalp_signals
                     scalp_dict = asdict(scalp_signals)
-                    # Surface scalp alerts in the shared gamma_alerts deque
-                    # too, so a single consumer sees everything.
-                    ts_now = datetime.now(LOCAL_TZ).isoformat(timespec="seconds")
-                    for alert in scalp_signals.alerts:
-                        new_alerts.append({
-                            "timestamp": ts_now,
-                            "message": alert,
-                            "source": "scalp",
-                        })
                 except Exception as exc:
                     logger.exception("Scalp engine failure (non-fatal): %s", exc)
                     scalp_dict = {"enabled": True, "error": str(exc)}
 
+            # Build the final dictionary OUTSIDE the lock
+            ts_now = datetime.now(LOCAL_TZ).isoformat(timespec="seconds")
             last_profile = {
-                "timestamp": datetime.now(LOCAL_TZ).isoformat(timespec="seconds"),
+                "timestamp": ts_now,
                 "spot": profile.spot,
                 "expiry": profile.expiry,
                 "dte": profile.dte,
@@ -1930,32 +2563,43 @@ class RedisGammaBot:
                 "exposure_units": CONFIG["exposure_units"],
                 "weekly_gamma": asdict(profile.weekly_gamma),
                 "day_gamma": asdict(profile.day_gamma),
-                # V2: surface the combined (weekly+day) signal at the top
-                # level so dashboards don't have to drill in.
                 "combined_signal": profile.day_gamma.combined_signal,
                 "combined_reasons": profile.day_gamma.combined_reasons,
                 "day_signal_score": profile.day_gamma.day_signal_score,
                 "day_signal_reasons": profile.day_gamma.day_signal_reasons,
-                # V3: scalping signals at the top level (None when module off).
                 "scalp_enabled": self.scalp_enabled,
                 "scalp_signals": scalp_dict,
                 "foreign_expiry_rows": payload.get("foreign_expiry_rows", 0),
                 "foreign_expiries": payload.get("foreign_expiries", []),
                 "foreign_underlying_rows": payload.get("foreign_underlying_rows", 0),
             }
+
+            # === BRIEF COMMIT PHASE (INSIDE LOCK) ===
+            # Only acquire the lock for the microsecond it takes to swap the
+            # last_profile dict and append alerts. This ensures /gamma/status/
+            # never waits more than a few microseconds for the lock.
+            with self._lock:
+                for message in alerts:
+                    self.gamma_alerts.append({
+                        "timestamp": ts_now,
+                        "message": message,
+                    })
+                if scalp_dict and isinstance(scalp_dict, dict) and "alerts" in scalp_dict:
+                    for alert in scalp_dict["alerts"]:
+                        self.gamma_alerts.append({
+                            "timestamp": ts_now,
+                            "message": alert,
+                            "source": "scalp",
+                        })
+
+                self.last_profile = last_profile
+                self.processed_updates += 1
+                self.last_error = None
+
         except Exception as exc:
             with self._lock:
                 self.last_error = str(exc)
             logger.exception("Failed to process Redis message")
-            return
-
-        # Atomic commit of the shared state — the only part that needs the lock.
-        with self._lock:
-            for alert in new_alerts:
-                self.gamma_alerts.append(alert)
-            self.last_profile = last_profile
-            self.processed_updates += 1
-            self.last_error = None
 
 
 _default_bot: Optional[RedisGammaBot] = None
@@ -2013,7 +2657,27 @@ def main() -> None:
             CONFIG["scalp_coi_windows_sec"],
             CONFIG["scalp_spot_windows_sec"],
         )
-        logger.info("  -> scalpers read last_profile.scalp_signals.bias / bias_score / alerts")
+        logger.info(
+            "V4 Impulse Override: premium_pct=%.1f%%/%ds, vol_mult=%.1fx, "
+            "spot_vel=%.1fpts/s, local_gex=%.1fCr, iv_spike=%.1f%%/%ds, "
+            "override_score=%.1f, cooldown=%.0fs",
+            CONFIG["scalp_impulse_premium_pct"],
+            CONFIG["scalp_impulse_premium_window"],
+            CONFIG["scalp_impulse_volume_mult"],
+            CONFIG["scalp_impulse_spot_velocity"],
+            CONFIG["scalp_impulse_local_gex_crore"],
+            CONFIG["scalp_impulse_iv_spike_pct"],
+            CONFIG["scalp_impulse_iv_window"],
+            CONFIG["scalp_impulse_override_score"],
+            CONFIG["scalp_impulse_cooldown_sec"],
+        )
+        logger.info(
+            "V4 ATR seeding: %s (default=%.1fpts, prior_close_key=%s)",
+            "ON" if CONFIG.get("scalp_atr_seed_mode") else "OFF",
+            CONFIG["scalp_atr_default_pts"],
+            CONFIG["scalp_atr_prior_close_key"],
+        )
+        logger.info("  -> scalpers read last_profile.scalp_signals.bias / bias_score / alerts / impulse_override")
     else:
         logger.info(
             "V3 SCALP module OFF (set GAMMA_SCALP_MODE=on to enable). "

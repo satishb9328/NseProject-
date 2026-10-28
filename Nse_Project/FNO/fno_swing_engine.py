@@ -899,6 +899,61 @@ class SwingDB:
             pass
 
 
+def get_eod_participant_bias() -> Optional[dict]:
+    """Return the latest EOD participant setup for the pre-open trap matrix.
+
+    Single read-only entry point for ``Live_dashboard.views``: exposes the
+    newest ``cross_signals`` row (FII Net OI ``fii_npf``, FII Net Vol
+    ``fii_net_vol``, ``retail_trap``) and derives ``action_type`` /
+    ``tomorrow_bias`` with the same ``get_tomorrow_matrix()`` the daily FNO
+    report uses. Returns ``None`` when the database is missing or empty so the
+    caller can degrade to a neutral pre-open read instead of raising.
+    """
+    if not os.path.isfile(CFG.db_path):
+        return None
+
+    db = SwingDB(CFG.db_path)
+    try:
+        sigs = db.latest_signals(1)
+        if not sigs:
+            return None
+        latest = sigs[0]
+
+        fii_net_oi = latest.get('fii_npf') or 0
+        fii_net_vol = latest.get('fii_net_vol') or 0
+
+        # PRO totals feed get_tomorrow_matrix's divergence guard (same recipe
+        # as SwingEngine.report() and FNO/views._load_daily_report()).
+        pro_rows = db.latest_participant('PRO', 1)
+        pro_row = pro_rows[0] if pro_rows else {}
+        if pro_row.get('date') != latest.get('date'):
+            pro_row = {}
+        pro_total_oi = (pro_row.get('nopo') or 0) + (pro_row.get('npf') or 0)
+        pro_net_vol = latest.get('pro_net_vol') or 0
+
+        action_type, tomorrow_bias, tomorrow_note = get_tomorrow_matrix(
+            fii_net_oi, fii_net_vol, pro_total_oi, pro_net_vol
+        )
+
+        return {
+            'date': latest.get('date'),
+            'fii_net_oi': fii_net_oi,
+            'fii_net_vol': fii_net_vol,
+            'retail_trap': bool(latest.get('retail_trap')),
+            'action_type': action_type,
+            'tomorrow_bias': tomorrow_bias,
+            'tomorrow_note': tomorrow_note,
+            'pro_net_oi': pro_total_oi,
+            'pro_net_vol': pro_net_vol,
+            'smart_money_score': latest.get('smart_money_score'),
+            'fii_short_pct': latest.get('fii_short_pct'),
+            'ai_sentiment': latest.get('ai_sentiment'),
+            'alignment_direction': latest.get('alignment_direction'),
+        }
+    finally:
+        db.close()
+
+
 # ══════════════════════════════════════════════════════════════════════
 # 7. HIGH-LEVEL ENGINE API
 # ══════════════════════════════════════════════════════════════════════

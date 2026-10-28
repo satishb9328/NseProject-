@@ -20,54 +20,6 @@
   .metric-bear { color: #f87171; }
   .metric-neutral { color: #facc15; }
 
-  /* ---- Elastic sentiment bars with peak-hold (ghost) ---- */
-  .elastic-bar {
-    --bar-color: #4ade80;
-    position: relative;
-    flex: 1 1 auto;
-    min-width: 0;
-    height: 16px;
-    border-radius: 999px;
-    background: rgba(148, 163, 184, .16);
-    box-shadow: inset 0 0 0 1px rgba(148, 163, 184, .22);
-    overflow: hidden;
-  }
-  .elastic-marker {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 50%;
-    width: 1px;
-    margin-left: -.5px;
-    background: rgba(226, 232, 240, .6);
-    z-index: 3;
-    pointer-events: none;
-  }
-  .elastic-bar .active-bar,
-  .elastic-bar .shadow-bar {
-    position: absolute;
-    top: 1px;
-    bottom: 1px;
-    left: 50%;
-    width: 0;
-    border-radius: 999px;
-    transition: left .3s ease, width .3s ease;
-    will-change: left, width;
-  }
-  .elastic-bar .active-bar {
-    z-index: 2;
-    background: var(--bar-color);
-    box-shadow: 0 0 6px var(--bar-color), 0 0 10px var(--bar-color);
-  }
-  .elastic-bar .shadow-bar {
-    z-index: 1;
-    background: var(--bar-color);
-    opacity: .28;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .elastic-bar .active-bar, .elastic-bar .shadow-bar { transition: none; }
-  }
-
   /* ---- Smart Market Insight strip ---- */
   .sentiment-insight {
     border-radius: .55rem;
@@ -99,14 +51,122 @@
   .compact-chain-table th.strike-header, .compact-chain-table td.strike-cell { color: #cbd5e1; }
   .compact-chain-table tr.atm-row td { background-color: rgba(6, 182, 212, 0.1); box-shadow: inset 0 0 0 1px rgba(56, 189, 248, .6); color: #e0f2fe; font-weight: 700; }
 
-  /* ---- High-Water Mark (peak-hold) COI% cell — pure CSS, zero-JS animation ---- */
-  .hwm-cell { position: relative; min-width: 60px; padding-bottom: 8px !important; }
-  .hwm-track { position: absolute; left: 0; right: 0; bottom: 1px; height: 4px; border-radius: 999px; background: rgba(148, 163, 184, .16); overflow: hidden; }
-  .hwm-fill { height: 100%; width: 0; border-radius: inherit; will-change: width; }
-  .hwm-fill.call { background: linear-gradient(90deg, rgba(34, 211, 238, .06), rgba(59, 130, 246, .10)); }
-  .hwm-fill.put  { background: linear-gradient(90deg, rgba(251, 191, 36, .06), rgba(249, 115, 22, .10)); }
-  .hwm-marker { position: absolute; bottom: 1px; height: 4px; width: 2px; transform: translateX(-50%); background: #fff; box-shadow: 0 0 4px #fff, 0 0 9px rgba(255, 255, 255, .85); z-index: 2; pointer-events: none; }
-  .hwm-text { position: relative; z-index: 3; text-shadow: 0 1px 2px rgba(2, 6, 23, .95), 0 0 6px rgba(2, 6, 23, .6); }
+  /* ---- COI REL% intraday peak engine + mini SVG sparkline cells ---- */
+  /* Style reset: the old red/green/amber dominance badges are removed and these
+     two columns render on a dark/transparent background so the SVG sparkline
+     sits cleanly behind the text. */
+  .compact-chain-table td.coi-rel-cell {
+    background: transparent !important;
+    background-color: transparent !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  .coi-rel-cell {
+    --coi-color: #00ff88;
+    position: relative;
+    overflow: hidden;
+    min-width: 62px;
+    padding: 2px 3px !important;
+    background: transparent !important;
+    vertical-align: middle;
+    text-align: center;
+    line-height: 1.15;
+  }
+  .coi-rel-cell .coi-sparkline {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    pointer-events: none;
+  }
+  .coi-rel-cell .coi-spark-area {
+    fill: var(--coi-color);
+    opacity: .08;
+  }
+  .coi-rel-cell .coi-spark-line {
+    fill: none;
+    stroke: var(--coi-color);
+    stroke-width: 1.4;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    filter: drop-shadow(0 0 2px var(--coi-color));
+  }
+  .coi-rel-cell .coi-peak-line {
+    stroke: var(--coi-color);
+    stroke-width: .5;
+    stroke-dasharray: 2 2;
+    opacity: .7;
+  }
+  .coi-rel-cell .coi-pk-tag {
+    position: absolute;
+    left: 1px;
+    z-index: 1;
+    font-size: 6px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: .02em;
+    color: var(--coi-color);
+    text-shadow: 0 0 4px var(--coi-color);
+    transform: translateY(-100%);
+    pointer-events: none;
+  }
+  .coi-rel-cell .coi-main {
+    position: relative;
+    z-index: 2;
+    display: block;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--coi-color);
+    text-shadow: 0 0 5px var(--coi-color), 0 0 9px var(--coi-color);
+  }
+  .coi-rel-cell .coi-drawdown {
+    position: relative;
+    z-index: 2;
+    display: block;
+    margin-top: 1px;
+    font-size: 8.5px;
+    font-weight: 600;
+    color: #ff6b6b;
+    letter-spacing: .02em;
+    white-space: nowrap;
+  }
+
+  /* ---- Neon pulse animations (box-shadow + text-shadow) ---- */
+  @keyframes coi-neon-pulse {
+    0%, 100% { box-shadow: 0 0 3px var(--coi-glow, #00ff88); }
+    50% { box-shadow: 0 0 12px var(--coi-glow, #00ff88), inset 0 0 8px var(--coi-glow, #00ff88); }
+  }
+  @keyframes coi-text-pulse {
+    0%, 100% { text-shadow: 0 0 5px var(--coi-glow, #00ff88); }
+    50% { text-shadow: 0 0 12px var(--coi-glow, #00ff88), 0 0 20px var(--coi-glow, #00ff88); }
+  }
+  @keyframes coi-peak-breakout {
+    0% { box-shadow: 0 0 0 rgba(255, 215, 0, 0); }
+    35% { box-shadow: 0 0 18px rgba(255, 215, 0, .9), 0 0 30px rgba(0, 255, 255, .55), inset 0 0 10px rgba(0, 255, 255, .4); }
+    100% { box-shadow: 0 0 0 rgba(255, 215, 0, 0); }
+  }
+  @keyframes coi-peak-text-breakout {
+    0% { text-shadow: 0 0 0 transparent; }
+    35% { text-shadow: 0 0 14px #ffd700, 0 0 24px #00ffff; }
+    100% { text-shadow: 0 0 0 transparent; }
+  }
+  .coi-rel-cell.flash-up { --coi-glow: #00ff88; animation: coi-neon-pulse .45s ease-out; }
+  .coi-rel-cell.flash-down { --coi-glow: #ff4444; animation: coi-neon-pulse .45s ease-out; }
+  .coi-rel-cell.flash-up .coi-main,
+  .coi-rel-cell.flash-down .coi-main { animation: coi-text-pulse .45s ease-out; }
+  .coi-rel-cell.flash-peak-breakout { animation: coi-peak-breakout .9s ease-out; }
+  .coi-rel-cell.flash-peak-breakout .coi-main { animation: coi-peak-text-breakout .9s ease-out; }
+  @media (prefers-reduced-motion: reduce) {
+    .coi-rel-cell.flash-up,
+    .coi-rel-cell.flash-down,
+    .coi-rel-cell.flash-peak-breakout,
+    .coi-rel-cell.flash-up .coi-main,
+    .coi-rel-cell.flash-down .coi-main,
+    .coi-rel-cell.flash-peak-breakout .coi-main { animation: none; }
+  }
 
   /* ---- Math Console: horizontal metric cards ---- */
   .math-console-metrics { display: grid; gap: .375rem; }
@@ -119,7 +179,6 @@
   .math-metric-badge { display: inline-block; margin-left: .35rem; color: #f87171; font-size: 9px; font-weight: 800; letter-spacing: .08em; }
   .math-progress { min-width: 0; }
   .math-progress-track { position: relative; height: 18px; overflow: visible; border: 1px solid rgba(100, 116, 139, .5); border-radius: 999px; background: rgba(30, 41, 59, .9); box-shadow: inset 0 2px 6px rgba(2, 6, 23, .85); }
-  .math-progress-track.hatched { background: repeating-linear-gradient(135deg, rgba(74, 222, 128, .12) 0 4px, rgba(15, 23, 42, .9) 4px 8px); }
   .math-progress-track .math-fill { position: absolute; left: 0; top: 0; height: 100%; width: 0; border-radius: inherit; transition: left .4s ease-out, width .4s ease-out; will-change: left, width; }
   .math-progress-track .math-fill.pos { background: linear-gradient(90deg, #facc15, #4ade80); }
   .math-progress-track .math-fill.neg { background: linear-gradient(90deg, #ef4444, #facc15); }
@@ -349,6 +408,205 @@
   .scalp-metric-row:last-child { border-bottom: 0; }
   .scalp-metric-row .sm-label { color: #94a3b8; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; font-size: 9.5px; }
   .scalp-metric-row .sm-value { color: #f8fafc; font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  /* =====================================================================
+     V4: Impulse Override Badge + ATR Source Pill
+     ===================================================================== */
+
+  /* Flashing ⚡ badge shown when impulse override fires. Pulsing red/green
+     glow makes the override impossible to miss in peripheral vision. */
+  .impulse-badge {
+    display: none;
+    align-items: center;
+    gap: .35rem;
+    padding: .35rem .65rem;
+    border-radius: .45rem;
+    border: 1px solid;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    animation: impulse-flash 1.0s ease-in-out infinite;
+    white-space: nowrap;
+  }
+  .impulse-badge.is-active { display: inline-flex; }
+  .impulse-badge.impulse-bull {
+    color: #4ade80;
+    background: rgba(34, 197, 94, .18);
+    border-color: rgba(34, 197, 94, .85);
+    box-shadow: 0 0 12px rgba(34, 197, 94, .45), inset 0 0 0 1px rgba(34, 197, 94, .25);
+  }
+  .impulse-badge.impulse-bear {
+    color: #f87171;
+    background: rgba(239, 68, 68, .18);
+    border-color: rgba(239, 68, 68, .85);
+    box-shadow: 0 0 12px rgba(239, 68, 68, .45), inset 0 0 0 1px rgba(239, 68, 68, .25);
+  }
+  @keyframes impulse-flash {
+    0%, 100% { filter: brightness(1); transform: scale(1); }
+    50%      { filter: brightness(1.6); transform: scale(1.04); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .impulse-badge.is-active { animation: none; }
+  }
+
+  /* Small pill next to ATR showing the source (live / prior_close / 5d_avg /
+     default / warming_up). Color-coded so the operator can tell at a glance
+     whether the ATR is real-time or seeded from yesterday's session. */
+  .atr-source-pill {
+    display: inline-block;
+    margin-left: .35rem;
+    padding: .1rem .35rem;
+    border-radius: 999px;
+    font-size: 8.5px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    vertical-align: middle;
+    border: 1px solid;
+  }
+  .atr-source-pill.src-live        { color: #4ade80; background: rgba(34,197,94,.10); border-color: rgba(34,197,94,.45); }
+  .atr-source-pill.src-prior_close { color: #fde047; background: rgba(250,204,21,.10); border-color: rgba(250,204,21,.45); }
+  .atr-source-pill.src-5d_avg      { color: #fdba74; background: rgba(251,146,60,.10); border-color: rgba(251,146,60,.45); }
+  .atr-source-pill.src-default     { color: #94a3b8; background: rgba(148,163,184,.10); border-color: rgba(148,163,184,.45); }
+  .atr-source-pill.src-warming_up  { color: #f87171; background: rgba(239,68,68,.10); border-color: rgba(239,68,68,.45); }
+
+  /* Impulse trigger chip list — shown when impulse_override fires. Each chip
+     is one trigger that fired this update (premium accel, spot velocity, etc). */
+  .impulse-trigger-list {
+    margin: .35rem 0 0 0;
+    padding: .35rem .5rem;
+    border-radius: .4rem;
+    border: 1px dashed rgba(250, 204, 21, .35);
+    background: rgba(250, 204, 21, .05);
+    font-size: 10px;
+    line-height: 1.4;
+    color: #fef3c7;
+  }
+  .impulse-trigger-list .trigger-title {
+    display: block;
+    font-weight: 800;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: #fde047;
+    margin-bottom: .15rem;
+  }
+  .impulse-trigger-list .trigger-item {
+    display: block;
+    padding: .1rem 0 .1rem .5rem;
+    border-left: 2px solid rgba(250, 204, 21, .4);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  /* =====================================================================
+     V5: Three structured scalp setup cards (Pullback / Reversal / Breakout)
+     ===================================================================== */
+
+  /* Each setup card has a colored border + an "ACTIVE" flag + confidence bar.
+     The active card gets a glowing border + scale-up animation so the
+     operator's eye snaps to the recommended trade instantly. */
+  .scalp-setup-card {
+    position: relative;
+    border-radius: .55rem;
+    border: 1px solid;
+    padding: .5rem .6rem;
+    transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+  }
+  .scalp-setup-card.setup-pullback { border-color: rgba(34, 211, 238, .35); background: rgba(8, 47, 73, .25); }
+  .scalp-setup-card.setup-reversal { border-color: rgba(251, 191, 36, .35); background: rgba(69, 26, 3, .18); }
+  .scalp-setup-card.setup-breakout { border-color: rgba(168, 85, 247, .35); background: rgba(46, 16, 101, .22); }
+
+  .scalp-setup-card.is-active {
+    transform: scale(1.03);
+    box-shadow: 0 0 14px rgba(250, 204, 21, .35), inset 0 0 0 1px rgba(250, 204, 21, .55);
+    border-color: rgba(250, 204, 21, .85);
+    animation: setup-active-pulse 2.0s ease-in-out infinite;
+  }
+  @keyframes setup-active-pulse {
+    0%, 100% { box-shadow: 0 0 14px rgba(250, 204, 21, .35), inset 0 0 0 1px rgba(250, 204, 21, .55); }
+    50%      { box-shadow: 0 0 22px rgba(250, 204, 21, .55), inset 0 0 0 1px rgba(250, 204, 21, .75); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .scalp-setup-card.is-active { animation: none; }
+  }
+
+  .scalp-setup-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .35rem;
+    margin-bottom: .25rem;
+  }
+  .scalp-setup-title {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+  .setup-pullback .scalp-setup-title { color: #67e8f9; }
+  .setup-reversal .scalp-setup-title { color: #fde047; }
+  .setup-breakout .scalp-setup-title { color: #c4b5fd; }
+
+  .scalp-active-flag {
+    display: none;
+    padding: .1rem .4rem;
+    border-radius: 999px;
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: #1a1a1a;
+    background: #fde047;
+    box-shadow: 0 0 8px rgba(250, 204, 21, .65);
+  }
+  .is-active .scalp-active-flag { display: inline-block; }
+
+  .scalp-confidence-bar {
+    position: relative;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, .20);
+    overflow: hidden;
+    margin: .25rem 0 .35rem 0;
+  }
+  .scalp-confidence-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 0%;
+    border-radius: inherit;
+    transition: width .4s ease-out;
+  }
+  .setup-pullback .scalp-confidence-fill { background: linear-gradient(90deg, #06b6d4, #22d3ee); }
+  .setup-reversal .scalp-confidence-fill { background: linear-gradient(90deg, #f59e0b, #fde047); }
+  .setup-breakout .scalp-confidence-fill { background: linear-gradient(90deg, #7c3aed, #a855f7); }
+
+  .scalp-confidence-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 8.5px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: #94a3b8;
+    margin-bottom: .25rem;
+  }
+  .scalp-confidence-value {
+    color: #f8fafc;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .scalp-setup-reason {
+    margin-top: .2rem;
+    padding: .15rem .35rem;
+    border-radius: .25rem;
+    background: rgba(0, 0, 0, .35);
+    font-size: 9px;
+    line-height: 1.3;
+    color: #cbd5e1;
+    font-style: italic;
+  }
 </style>
 {% endblock %}
 
@@ -675,8 +933,20 @@
       <!-- ================================================================ -->
       <section id="scalp-trade-setups" class="flex h-full flex-col rounded-xl border border-cyan-700/60 bg-slate-900/40 p-4 lg:col-start-3 lg:row-start-2">
         <div class="mb-2 flex items-center justify-between gap-3">
-          <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-cyan-300">⚡ Scalp Signals (V3)</h2>
-          <span class="flex items-center gap-1.5 text-xs"><span class="uppercase tracking-wider text-slate-400">🎯 ATR(2m):</span> <span id="scalp-atr" class="font-mono font-semibold text-amber-300">--</span></span>
+          <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-cyan-300">⚡ Scalp Signals (V4)</h2>
+          <div class="flex items-center gap-2">
+            <!-- V4: Impulse override badge — only visible when impulse_override.fired === true -->
+            <span id="impulse-badge" class="impulse-badge impulse-bull" role="status" aria-live="polite">
+              <span>⚡</span><span id="impulse-badge-text">IMPULSE BULLISH</span>
+            </span>
+            <span class="flex items-center gap-1.5 text-xs"><span class="uppercase tracking-wider text-slate-400">🎯 ATR(2m):</span> <span id="scalp-atr" class="font-mono font-semibold text-amber-300">--</span><span id="scalp-atr-source" class="atr-source-pill src-warming_up">warming_up</span></span>
+          </div>
+        </div>
+
+        <!-- V4: Impulse trigger breakdown — shown only when impulse fires -->
+        <div id="impulse-trigger-list" class="impulse-trigger-list" style="display:none;">
+          <span class="trigger-title">⚡ Impulse Triggers Fired</span>
+          <div id="impulse-trigger-items"></div>
         </div>
 
         <!-- Combined scalp bias gauge -->
@@ -694,25 +964,57 @@
           </ul>
         </div>
 
-        <!-- Scalp AI setups (Mom Pullback + Fib Bounce — same shape as intraday card) -->
-        <div class="mt-2 grid grid-cols-1 gap-2 lg:grid-cols-2">
-          <div class="rounded-lg border border-cyan-500/30 bg-cyan-950/15 p-2">
-            <p class="mb-1 text-[10px] font-bold uppercase tracking-wider text-cyan-300">⚡ Scalp Pullback (ATR stop)</p>
-            <div class="space-y-1 text-xs">
+        <!-- V5: Three structured scalp setup cards (Pullback / Reversal / Breakout) -->
+        <div class="mt-2 grid grid-cols-1 gap-2 lg:grid-cols-3">
+          <!-- Setup 1: Pullback (trend continuation) -->
+          <div id="scalp-setup-pullback" class="scalp-setup-card setup-pullback">
+            <div class="scalp-setup-header">
+              <span class="scalp-setup-title">⚡ Pullback</span>
+              <span class="scalp-active-flag">ACTIVE</span>
+            </div>
+            <div class="space-y-1 text-[10.5px]">
               <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Strike</span><span id="scalp-mom-strike" class="text-right font-mono font-semibold text-slate-50">--</span></div>
               <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Entry</span><span id="scalp-mom-entry" class="text-right font-mono font-semibold text-[11px] text-slate-50">--</span></div>
-              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">SL (1×ATR)</span><span id="scalp-mom-sl" class="text-right font-mono font-semibold text-rose-300">--</span></div>
-              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Target (1.5×ATR)</span><span id="scalp-mom-target" class="text-right font-mono font-semibold text-emerald-300">--</span></div>
+              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">SL</span><span id="scalp-mom-sl" class="text-right font-mono font-semibold text-rose-300">--</span></div>
+              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Target</span><span id="scalp-mom-target" class="text-right font-mono font-semibold text-emerald-300">--</span></div>
             </div>
+            <div class="scalp-confidence-label"><span>Confidence</span><span class="scalp-confidence-value" id="scalp-mom-conf">0%</span></div>
+            <div class="scalp-confidence-bar"><div id="scalp-mom-fill" class="scalp-confidence-fill"></div></div>
+            <div id="scalp-mom-reason" class="scalp-setup-reason">—</div>
           </div>
-          <div class="rounded-lg border border-amber-500/30 bg-amber-950/15 p-2">
-            <p class="mb-1 text-[10px] font-bold uppercase tracking-wider text-amber-300">📐 Scalp Reversal (Wall test)</p>
-            <div class="space-y-1 text-xs">
+
+          <!-- Setup 2: Reversal (counter-trend wall fade) -->
+          <div id="scalp-setup-reversal" class="scalp-setup-card setup-reversal">
+            <div class="scalp-setup-header">
+              <span class="scalp-setup-title">📐 Reversal</span>
+              <span class="scalp-active-flag">ACTIVE</span>
+            </div>
+            <div class="space-y-1 text-[10.5px]">
               <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Strike</span><span id="scalp-fib-strike" class="text-right font-mono font-semibold text-slate-50">--</span></div>
               <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Entry</span><span id="scalp-fib-entry" class="text-right font-mono font-semibold text-[11px] text-slate-50">--</span></div>
-              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">SL (1×ATR)</span><span id="scalp-fib-sl" class="text-right font-mono font-semibold text-rose-300">--</span></div>
-              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Target (1.5×ATR)</span><span id="scalp-fib-target" class="text-right font-mono font-semibold text-emerald-300">--</span></div>
+              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">SL</span><span id="scalp-fib-sl" class="text-right font-mono font-semibold text-rose-300">--</span></div>
+              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Target</span><span id="scalp-fib-target" class="text-right font-mono font-semibold text-emerald-300">--</span></div>
             </div>
+            <div class="scalp-confidence-label"><span>Confidence</span><span class="scalp-confidence-value" id="scalp-fib-conf">0%</span></div>
+            <div class="scalp-confidence-bar"><div id="scalp-fib-fill" class="scalp-confidence-fill"></div></div>
+            <div id="scalp-fib-reason" class="scalp-setup-reason">—</div>
+          </div>
+
+          <!-- Setup 3: Breakout (trade WITH wall break) -->
+          <div id="scalp-setup-breakout" class="scalp-setup-card setup-breakout">
+            <div class="scalp-setup-header">
+              <span class="scalp-setup-title">🚀 Breakout</span>
+              <span class="scalp-active-flag">ACTIVE</span>
+            </div>
+            <div class="space-y-1 text-[10.5px]">
+              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Strike</span><span id="scalp-brk-strike" class="text-right font-mono font-semibold text-slate-50">--</span></div>
+              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Entry</span><span id="scalp-brk-entry" class="text-right font-mono font-semibold text-[11px] text-slate-50">--</span></div>
+              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">SL</span><span id="scalp-brk-sl" class="text-right font-mono font-semibold text-rose-300">--</span></div>
+              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Target</span><span id="scalp-brk-target" class="text-right font-mono font-semibold text-emerald-300">--</span></div>
+            </div>
+            <div class="scalp-confidence-label"><span>Confidence</span><span class="scalp-confidence-value" id="scalp-brk-conf">0%</span></div>
+            <div class="scalp-confidence-bar"><div id="scalp-brk-fill" class="scalp-confidence-fill"></div></div>
+            <div id="scalp-brk-reason" class="scalp-setup-reason">—</div>
           </div>
         </div>
 
@@ -953,7 +1255,7 @@
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
     const v = clamp(Number.isFinite(value) ? value : 0, min, max);
 
-    const fill = bar.querySelector('.active-bar') || bar.querySelector('.math-fill');
+    const fill = bar.querySelector('.math-fill');
     if (fill) {
       const valuePct = ((v - min) / span) * 100;
       if (bipolar) {
@@ -974,9 +1276,6 @@
       }
       fill.style.transition = 'left .4s ease-out, width .4s ease-out';
     }
-    const shadow = bar.querySelector('.shadow-bar');
-    if (shadow) shadow.style.width = '0%';
-
     const marker = bar.querySelector('.math-marker');
     if (marker) {
       const hasPeak = Number.isFinite(peak) && peak !== null && peak !== undefined && Math.abs(peak) > 0;
@@ -995,10 +1294,6 @@
   // Bipolar center-origin wrapper (BIAS).
   function renderElasticBar(bar, value, min, max, peak) {
     renderBar(bar, { bipolar: true, value, min, max, peak });
-  }
-  // Unipolar left-origin wrapper (MOMENTUM).
-  function renderUnipolarBar(bar, value, min, max, peak) {
-    renderBar(bar, { bipolar: false, value, min, max, peak });
   }
 
   function renderThetaDecay() {
@@ -1034,11 +1329,6 @@
     renderThetaDecay();
     renderSentiment(data);
     renderGammaGreeks(data);
-  }
-
-  // Unipolar left-origin wrapper (SCORE 0–100).
-  function renderScoreBar(bar, score, peak) {
-    renderBar(bar, { bipolar: false, value: score, min: 0, max: 100, peak });
   }
 
   function renderSentiment(data) {
@@ -1086,7 +1376,7 @@
     const v = clamp(Number.isFinite(value) ? value : 0, min, max);
     const valuePct = ((v - min) / span) * 100;
 
-    const fill = bar.querySelector('.math-fill') || bar.querySelector('.active-bar');
+    const fill = bar.querySelector('.math-fill');
     if (fill) {
       fill.style.left = '0%';
       fill.style.width = Math.max(0, Math.min(100, valuePct)) + '%';
@@ -1251,14 +1541,6 @@
     lastSpotValue = n;
   }
 
-  // ---- 🤖 AI TRADE SETUPS (LIVE TEST) — A/B entry models ----
-  // Reads live sentiment, spot, weekly walls and the ATM option's LTP, then
-  // renders two candidate entry calculations side-by-side for live comparison.
-  function aiParsePrice(element) {
-    const raw = element && element.textContent ? element.textContent : '';
-    const parsed = Number(String(raw).replace(/[^0-9.-]/g, ''));
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
   function aiAtmRow() {
     if (!Number.isFinite(currentSpot) || !allRows.length) return null;
     return allRows.reduce((closest, row) => {
@@ -1539,9 +1821,24 @@
     updateMathConsole(currentTradeState);
   }
 
+  // V5 FIX: AbortController prevents ERR_INSUFFICIENT_RESOURCES by cancelling
+  // any in-flight request before firing the next one. Without this, slow server
+  // responses pile up (1s poll but 1.5s response = overlap), exhausting Chrome's
+  // 6-connection-per-host limit after a few minutes.
+  let optionsAbortController = null;
+
   async function refreshOptions() {
+    // Cancel any previous request that's still in flight
+    if (optionsAbortController) {
+      optionsAbortController.abort();
+    }
+    optionsAbortController = new AbortController();
+
     try {
-      const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store' });
+      const response = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { 
+        cache: 'no-store',
+        signal: optionsAbortController.signal 
+      });
       if (!response.ok) throw new Error(response.statusText);
       const data = await response.json();
       updateSpotPrice(data);
@@ -1560,12 +1857,27 @@
         );
       }
     } catch (error) {
-      console.warn('Option-chain fetch failed:', error);
+      // AbortError is expected when a new request supersedes this one — don't log it
+      if (error.name !== 'AbortError') {
+        console.warn('Option-chain fetch failed:', error);
+      }
     }
   }
+  // V5 FIX: AbortController for gamma/status polling — same pattern as refreshOptions
+  let gammaAbortController = null;
+
   async function refreshGamma() {
+    // Cancel any previous request that's still in flight
+    if (gammaAbortController) {
+      gammaAbortController.abort();
+    }
+    gammaAbortController = new AbortController();
+
     try {
-      const response = await fetch('/gamma/status/', { cache: 'no-store' });
+      const response = await fetch('/gamma/status/', { 
+        cache: 'no-store',
+        signal: gammaAbortController.signal 
+      });
       if (!response.ok) throw new Error(response.statusText);
       const data = await response.json();
       const status = data?.status || data;
@@ -1584,7 +1896,9 @@
       }
       if (Array.isArray(status?.gamma_alerts)) status.gamma_alerts.forEach(renderSignal);
       if (status?.last_signal != null) renderSignal(status.last_signal);
-    } catch (error) { console.warn('Gamma status fetch failed:', error); }
+    } catch (error) {
+      if (error.name !== 'AbortError') { console.warn('Gamma status fetch failed:', error); }
+    }
   }
 
   // ====================================================================
@@ -1592,6 +1906,66 @@
   // All scalp_signals data comes from /gamma/status/ (refreshGamma, above).
   // The 1 Hz option-chain poll only contributes the ATM row (LTP/strike) so
   // scalp entries can use a fresh premium between gamma-status ticks.
+  // ====================================================================
+
+  // ====================================================================
+  // V4: Impulse Override rendering helpers + ATR source pill
+  // ====================================================================
+
+  function setAtrSourcePill(source) {
+    const pill = document.getElementById('scalp-atr-source');
+    if (!pill) return;
+    const src = String(source || 'warming_up').toLowerCase();
+    pill.textContent = src;
+    pill.className = 'atr-source-pill src-' + src;
+  }
+
+  function hideImpulseUI() {
+    const badge = document.getElementById('impulse-badge');
+    if (badge) badge.classList.remove('is-active');
+    const list = document.getElementById('impulse-trigger-list');
+    if (list) list.style.display = 'none';
+  }
+
+  function renderImpulseOverride(impulse) {
+    const badge = document.getElementById('impulse-badge');
+    const badgeText = document.getElementById('impulse-badge-text');
+    const list = document.getElementById('impulse-trigger-list');
+    const items = document.getElementById('impulse-trigger-items');
+
+    // No impulse fired this update — hide all impulse UI.
+    if (!impulse || !impulse.fired) {
+      hideImpulseUI();
+      return;
+    }
+
+    // Impulse fired — show flashing badge with direction.
+    const dir = String(impulse.direction || 'NEUTRAL').toUpperCase();
+    if (badge) {
+      badge.classList.remove('impulse-bull', 'impulse-bear');
+      badge.classList.add(dir === 'BULLISH' ? 'impulse-bull' : 'impulse-bear');
+      badge.classList.add('is-active');
+    }
+    if (badgeText) {
+      badgeText.textContent = '⚡ IMPULSE ' + dir;
+    }
+
+    // Trigger list — show every trigger that fired this update.
+    const triggers = Array.isArray(impulse.triggers) ? impulse.triggers : [];
+    if (list && items && triggers.length > 0) {
+      list.style.display = 'block';
+      items.innerHTML = triggers.map(t => {
+        const text = String(t || '');
+        const cls = /BULLISH/i.test(text) ? 'pos' : /BEARISH/i.test(text) ? 'neg' : '';
+        return '<div class="trigger-item ' + cls + '">' + text + '</div>';
+      }).join('');
+    } else if (list) {
+      list.style.display = 'none';
+    }
+  }
+
+  // ====================================================================
+  // end V4 helpers
   // ====================================================================
 
   function applyScalperMode() {
@@ -1633,6 +2007,13 @@
       if (reasonsEl) reasonsEl.innerHTML = '<li class="text-slate-500">Waiting for scalp signals…</li>';
       const feed = document.getElementById('scalp-alerts-feed');
       if (feed) feed.innerHTML = '<p class="text-[10px] text-slate-500">No scalp alerts yet…</p>';
+      // V4: hide impulse UI when no data
+      hideImpulseUI();
+      setAtrSourcePill('warming_up');
+      // V5: reset all three setup cards
+      renderScalpSetup(null, 'mom', false);
+      renderScalpSetup(null, 'fib', false);
+      renderScalpSetup(null, 'brk', false);
       return;
     }
 
@@ -1664,9 +2045,20 @@
 
     // ATR + candles + evaluated_at
     const atrVal = (scalp.atr_2min === null || scalp.atr_2min === undefined) ? null : Number(scalp.atr_2min);
-    setText('scalp-atr', atrVal !== null && Number.isFinite(atrVal) ? atrVal.toFixed(2) : '-- (warming up)');
+    setText('scalp-atr', atrVal !== null && Number.isFinite(atrVal) ? atrVal.toFixed(2) : '--');
     setText('scalp-atr-candles', String(scalp.atr_candles_used || 0));
     setText('scalp-evaluated-at', scalp.evaluated_at || '--');
+    // V4: ATR source pill (live / prior_close / 5d_avg / default / warming_up)
+    setAtrSourcePill(scalp.atr_source || 'warming_up');
+
+    // V4: Impulse Override badge + trigger list
+    renderImpulseOverride(scalp.impulse_override);
+
+    // V5: Render the three structured scalp setup cards
+    const activeSetupName = scalp.active_setup || 'NONE';
+    renderScalpSetup(scalp.pullback_setup, 'mom', activeSetupName === 'Pullback');
+    renderScalpSetup(scalp.reversal_setup, 'fib', activeSetupName === 'Reversal');
+    renderScalpSetup(scalp.breakout_setup, 'brk', activeSetupName === 'Breakout');
 
     // Spot velocity
     const v = scalp.spot_velocity || {};
@@ -1752,32 +2144,15 @@
   }
 
   function updateAITradesScalp(data) {
-    // data is the 1 Hz option-chain payload (for the ATM row). When called from
-    // refreshGamma() with null, fall back to the cached allRows so scalp entries
-    // still update between option-chain ticks.
-    const rows = (data && Array.isArray(data.option_chain)) ? data.option_chain : allRows;
-    const atm = (rows && rows.length) ? rows.reduce((closest, row) => {
-      const cd = Math.abs(number(closest.strike) - currentSpot);
-      const d = Math.abs(number(row.strike) - currentSpot);
-      return d < cd ? row : closest;
-    }, rows[0]) : null;
-    const atmStrike = atm ? number(atm.strike) : 0;
-    const px = value => `₹${value.toFixed(2)}`;
-    const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
-
-    // Drive everything from scalp_signals.bias (BULLISH / BEARISH / NEUTRAL).
+    // V5: All three setup cards are now populated by renderScalpSignals() from
+    // the structured ScalpSetup objects sent by the V5 backend. This function
+    // now only handles voice-alert transitions + math-console score mirroring.
+    // The actual entry/SL/target/confidence rendering moved into renderScalpSignals()
+    // so all three cards stay in sync from a single source of truth.
     const scalp = currentScalpSignals;
     const bias = scalp && scalp.bias ? String(scalp.bias).toUpperCase() : 'NEUTRAL';
     const noTrade = bias === 'NEUTRAL' || !scalp;
     const optionSide = bias === 'BEARISH' ? 'PE' : bias === 'BULLISH' ? 'CE' : 'NO_TRADE';
-
-    // ATR stop + target (1×ATR stop, 1.5×ATR target — the scalp standard).
-    const atrValRaw = scalp ? scalp.atr_2min : null;
-    const atr = (atrValRaw !== null && atrValRaw !== undefined && Number.isFinite(Number(atrValRaw)))
-      ? Number(atrValRaw) : 0;
-
-    // ATM premium — use the side that matches the bias.
-    const ltp = atm ? (bias === 'BEARISH' ? number(atm.put_ltp) : number(atm.call_ltp)) : 0;
 
     // Voice-alert transitions in scalper mode fire on bias change.
     const currentBias = bias;
@@ -1787,58 +2162,22 @@
     }
     previousScalpBias = currentBias;
 
-    // Card A — Scalp Pullback: enter at ATM premium, ATR stops.
-    // Long option logic: SL below entry by 1×ATR, target above by 1.5×ATR.
-    const aEntry = ltp > 0 ? ltp : 0;
-    const aSl = atr > 0 ? Math.max(0, aEntry - atr) : (aEntry ? aEntry * 0.80 : 0);
-    const aTarget = atr > 0 ? aEntry + atr * 1.5 : (aEntry ? aEntry * 1.40 : 0);
-
-    // Card B — Scalp Reversal (wall test): same ATM premium + ATR stops. The
-    // wall context is implied by the bias (bear bias = call-wall rejection,
-    // bull bias = put-wall bounce) — visible in the alerts feed above.
-    const bEntry = aEntry;
-    const bSl = aSl;
-    const bTarget = aTarget;
-
-    const strikeText = noTrade
-      ? '🚫 NO TRADE ZONE'
-      : (atmStrike > 0 ? `${atmStrike.toLocaleString('en-IN')} ${optionSide}` : '--');
-
-    const render = (prefix, entry, sl, target) => {
-      setText(`${prefix}-strike`, strikeText);
-      if (noTrade) {
-        setText(`${prefix}-entry`, 'WAIT');
-        setText(`${prefix}-sl`, 'WAIT');
-        setText(`${prefix}-target`, 'WAIT');
-        return;
-      }
-      const entryText = ltp > 0
-        ? (atr > 0 ? `${px(Math.max(0, entry - atr * 0.5))} - ${px(entry + atr * 0.5)}` : px(entry))
-        : '--';
-      setText(`${prefix}-entry`, entryText);
-      setText(`${prefix}-sl`, ltp > 0 ? px(sl) : '--');
-      setText(`${prefix}-target`, ltp > 0 ? px(target) : '--');
-    };
-    render('scalp-mom', aEntry, aSl, aTarget);
-    render('scalp-fib', bEntry, bSl, bTarget);
-
-    // Update trade-state badge + math-console score (scalp mode shows the
-    // composite scalp bias_score in the same console slot as the V2 score so
-    // the operator's eye stays on the same bar).
+    // Update trade-state badge (top-level summary, mirrors active_setup if present).
+    const activeSetup = scalp ? (scalp.active_setup || 'NONE') : 'NONE';
     const stateEl = document.getElementById('scalp-trade-state');
     if (stateEl) {
-      stateEl.textContent = noTrade ? 'NO_TRADE' : optionSide;
+      const displayText = activeSetup !== 'NONE'
+        ? `${activeSetup.toUpperCase()} (${optionSide})`
+        : (noTrade ? 'NO_TRADE' : optionSide);
+      stateEl.textContent = displayText;
       stateEl.classList.remove('text-emerald-300', 'text-rose-300', 'text-slate-200');
       stateEl.classList.add(noTrade ? 'text-slate-200' : optionSide === 'PE' ? 'text-rose-300' : 'text-emerald-300');
     }
-    // Mirror the scalp bias score into the Math Console's Score row (visible
-    // only when the AI TRADE SETUPS card is hidden, but kept in sync so a mode
-    // toggle shows the right number instantly).
+
+    // Mirror the scalp bias score into the Math Console's Score row.
     const scoreEl = document.getElementById('math-score');
     if (scoreEl) {
       const s = scalp ? Number(scalp.bias_score || 0) : 0;
-      // Map scalp bias_score (~ -2.5 .. +2.5) onto a 0-100 visual scale so the
-      // unipolar Score bar still renders meaningfully: 0 = -2.5, 50 = 0, 100 = +2.5.
       const visual = Math.max(0, Math.min(100, 50 + (s * 20)));
       scoreEl.textContent = `${s.toFixed(2)}`;
       scoreEl.style.color = s >= 1.5 ? '#00ff00' : s <= -1.5 ? '#ff0000' : '#ffffff';
@@ -1852,10 +2191,54 @@
     // Trade state badge in Math Console mirrors scalp state too.
     const consoleStateEl = document.getElementById('math-trade-state');
     if (consoleStateEl) {
-      consoleStateEl.textContent = noTrade ? 'NO_TRADE' : optionSide;
+      consoleStateEl.textContent = activeSetup !== 'NONE' ? `${activeSetup.toUpperCase()} ${optionSide}` : (noTrade ? 'NO_TRADE' : optionSide);
       consoleStateEl.classList.remove('text-emerald-300', 'text-rose-300', 'text-slate-200');
       consoleStateEl.classList.add(noTrade ? 'text-slate-200' : optionSide === 'PE' ? 'text-rose-300' : 'text-emerald-300');
     }
+  }
+
+  // ====================================================================
+  // V5: Render the three structured scalp setup cards (Pullback/Reversal/Breakout)
+  // ====================================================================
+
+  function renderScalpSetup(setup, prefix, isActive) {
+    // prefix is 'mom' / 'fib' / 'brk' (the legacy field-id prefix)
+    // setupName is 'pullback' / 'reversal' / 'breakout' (the card container id)
+    const setupName = prefix === 'mom' ? 'pullback' : prefix === 'fib' ? 'reversal' : 'breakout';
+    const fullPrefix = prefix === 'mom' ? 'scalp-mom' : prefix === 'fib' ? 'scalp-fib' : 'scalp-brk';
+    const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+    const px = value => `₹${Number(value).toFixed(2)}`;
+    const card = document.getElementById(`scalp-setup-${setupName}`);
+
+    // Toggle the is-active class for the glowing border + ACTIVE flag
+    if (card) {
+      card.classList.toggle('is-active', !!isActive);
+    }
+
+    if (!setup || !setup.active) {
+      setText(`${fullPrefix}-strike`, '--');
+      setText(`${fullPrefix}-entry`, 'WAIT');
+      setText(`${fullPrefix}-sl`, 'WAIT');
+      setText(`${fullPrefix}-target`, 'WAIT');
+      setText(`${fullPrefix}-conf`, '0%');
+      setText(`${fullPrefix}-reason`, 'Setup inactive — waiting for alignment');
+      const fill = document.getElementById(`${fullPrefix}-fill`);
+      if (fill) fill.style.width = '0%';
+      return;
+    }
+
+    // Setup is active — populate strike/entry/SL/target/confidence
+    const strikeText = setup.strike > 0
+      ? `${Number(setup.strike).toLocaleString('en-IN')} ${setup.option_side || ''}`
+      : '--';
+    setText(`${fullPrefix}-strike`, strikeText);
+    setText(`${fullPrefix}-entry`, setup.entry > 0 ? px(setup.entry) : '--');
+    setText(`${fullPrefix}-sl`, setup.sl > 0 ? px(setup.sl) : '--');
+    setText(`${fullPrefix}-target`, setup.target > 0 ? px(setup.target) : '--');
+    setText(`${fullPrefix}-conf`, `${Number(setup.confidence_pct || 0).toFixed(1)}%`);
+    setText(`${fullPrefix}-reason`, setup.reason || '');
+    const fill = document.getElementById(`${fullPrefix}-fill`);
+    if (fill) fill.style.width = `${Math.min(100, Math.max(0, Number(setup.confidence_pct || 0)))}%`;
   }
 
   // Blink whichever of MAX/MIN IEP the Final IEP settled closest to.
@@ -1912,7 +2295,27 @@
       }
     }
   }
-  async function refreshPreopen() { try { const response = await fetch('{% url "live_dashboard:preopen_trap_api" %}', { cache: 'no-store' }); if (!response.ok) throw new Error(response.statusText); updatePreopen(await response.json()); } catch (error) { console.warn('Pre-open fetch failed:', error); } }
+  // V5 FIX: AbortController for preopen polling — same pattern as the other two
+  let preopenAbortController = null;
+
+  async function refreshPreopen() {
+    // Cancel any previous request that's still in flight
+    if (preopenAbortController) {
+      preopenAbortController.abort();
+    }
+    preopenAbortController = new AbortController();
+
+    try {
+      const response = await fetch('{% url "live_dashboard:preopen_trap_api" %}', { 
+        cache: 'no-store',
+        signal: preopenAbortController.signal 
+      });
+      if (!response.ok) throw new Error(response.statusText);
+      updatePreopen(await response.json());
+    } catch (error) {
+      if (error.name !== 'AbortError') { console.warn('Pre-open fetch failed:', error); }
+    }
+  }
 
   // Render the restored peak extremes immediately (using neutral current values)
   // so the "Peak: …" readouts and ghost bars show the persisted session peaks
@@ -2150,39 +2553,91 @@
       return `${n.toFixed(1)}%`;
     };
 
-    // Session high-water mark (peak) per strike per side, keyed by strike price.
-    // Peaks persist across the 1 Hz re-renders so a dropping COI% leaves its marker behind.
-    const peakMap = new Map(); // strike -> { call, put }
+    // ====================================================================
+    // Intraday Peak Tracking Engine + Mini SVG Sparkline renderer for the
+    // CALL/PUT COI REL% cells. window.coiRelHistory holds every strike's
+    // rolling tick history and its day peak; drawdown is measured vs that peak.
+    // ====================================================================
+    window.coiRelHistory = window.coiRelHistory || {};
 
-    // Clamp a magnitude ratio into a safe percentage for CSS width/left.
-    const pctWidth = (value, max) => {
-      if (!Number.isFinite(value) || !Number.isFinite(max) || value <= 0 || max <= 0) return 0;
-      return Math.min(100, (value / max) * 100);
-    };
+    const COI_SPARK_W = 100;    // SVG viewBox width (arbitrary units)
+    const COI_SPARK_H = 36;     // SVG viewBox height
+    const COI_SPARK_PAD = 3;    // top/bottom padding inside the viewBox
+    const COI_MAX_TICKS = 240;  // rolling sparkline window; the session peak is NOT trimmed
+    const COI_SVG_NS = 'http://www.w3.org/2000/svg';
 
-    // Bias-neutral COI% cell: background fill = current magnitude, 2px neon-white
-    // marker = session high-water mark (peak). Pure CSS; no JS animation in the loop.
-    function coiCell(text, side, current, peak, max) {
-      const td = document.createElement('td');
-      td.className = `${side}-side font-mono font-semibold hwm-cell text-[11px]`;
-      const track = document.createElement('div');
-      track.className = 'hwm-track';
-      const fill = document.createElement('div');
-      fill.className = `hwm-fill ${side}`;
-      fill.style.width = `${pctWidth(current, max)}%`;
-      const marker = document.createElement('div');
-      marker.className = 'hwm-marker';
-      const peakPct = pctWidth(peak, max);
-      marker.style.left = `${Math.min(99.5, Math.max(0.5, peakPct))}%`;
-      marker.style.opacity = peak > 0 ? '1' : '0';
-      const label = document.createElement('span');
-      label.className = 'hwm-text';
-      label.textContent = text;
-      track.appendChild(fill);
-      td.appendChild(track);
-      td.appendChild(marker);
-      td.appendChild(label);
-      return td;
+    function coiLeg(strike, type) {
+      const key = String(strike);
+      let bucket = window.coiRelHistory[key];
+      if (!bucket) {
+        bucket = { call: { ticks: [], peak: 0 }, put: { ticks: [], peak: 0 } };
+        window.coiRelHistory[key] = bucket;
+      }
+      return bucket[type === 'call' ? 'call' : 'put'];
+    }
+
+    function coiSparkY(v) {
+      const clamped = Math.max(0, Math.min(100, v));
+      return COI_SPARK_H - COI_SPARK_PAD - (clamped / 100) * (COI_SPARK_H - COI_SPARK_PAD * 2);
+    }
+
+    function coiSparkLinePath(ticks) {
+      const n = ticks.length;
+      if (!n) return '';
+      if (n === 1) {
+        const y = coiSparkY(ticks[0]).toFixed(2);
+        return `M0 ${y} L${COI_SPARK_W} ${y}`;
+      }
+      let d = '';
+      for (let i = 0; i < n; i += 1) {
+        const x = (i / (n - 1)) * COI_SPARK_W;
+        const y = coiSparkY(ticks[i]);
+        d += `${i === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)} `;
+      }
+      return d.trim();
+    }
+
+    function coiSparkAreaPath(ticks) {
+      if (!ticks.length) return '';
+      return `${coiSparkLinePath(ticks)} L${COI_SPARK_W} ${COI_SPARK_H} L0 ${COI_SPARK_H} Z`;
+    }
+
+    function coiLerpColor(a, b, t) {
+      return `rgb(${Math.round(a[0] + (b[0] - a[0]) * t)},${Math.round(a[1] + (b[1] - a[1]) * t)},${Math.round(a[2] + (b[2] - a[2]) * t)})`;
+    }
+
+    // Glowing green while within 2% of the peak; interpolates toward soft
+    // orange/red (#ff4444) the further the value droops below the peak.
+    function coiRelColor(drawdownPct) {
+      if (drawdownPct >= -2) return '#00ff88';
+      if (drawdownPct <= -20) return '#ff4444';
+      const t = (drawdownPct + 2) / (-20 + 2);
+      return coiLerpColor([0, 255, 136], [255, 68, 68], t);
+    }
+
+    // Batched DOM writes: every cell update is deferred to a single
+    // requestAnimationFrame, so a fast tick never causes multiple synchronous
+    // layout reflows. SVG paths are updated as strings only (no re-creation).
+    const coiRenderQueue = new Map();
+    let coiRafScheduled = false;
+
+    function coiQueueRender(element, snapshot) {
+      coiRenderQueue.set(element, snapshot);
+      if (coiRafScheduled) return;
+      coiRafScheduled = true;
+      requestAnimationFrame(() => {
+        coiRafScheduled = false;
+        coiRenderQueue.forEach((snap, el) => coiApplyRender(el, snap));
+        coiRenderQueue.clear();
+      });
+    }
+
+    function coiFlash(element, cls) {
+      if (!cls) return;
+      element.classList.remove('flash-up', 'flash-down', 'flash-peak-breakout');
+      // Two frames guarantee the class removal is committed before the re-add,
+      // restarting the CSS animation without a synchronous reflow.
+      requestAnimationFrame(() => requestAnimationFrame(() => element.classList.add(cls)));
     }
 
     function compactCell(text, cls) {
@@ -2190,6 +2645,166 @@
       td.className = `${cls} text-[11px]`;
       td.textContent = text;
       return td;
+    }
+
+    function coiEnsureCell(element, type) {
+      if (element.__coiRefs) return element.__coiRefs;
+      element.className = `coi-rel-cell ${type === 'call' ? 'call-side' : 'put-side'} text-[11px]`;
+
+      const svg = document.createElementNS(COI_SVG_NS, 'svg');
+      svg.setAttribute('class', 'coi-sparkline');
+      svg.setAttribute('viewBox', `0 0 ${COI_SPARK_W} ${COI_SPARK_H}`);
+      svg.setAttribute('preserveAspectRatio', 'none');
+      svg.setAttribute('aria-hidden', 'true');
+
+      const areaPath = document.createElementNS(COI_SVG_NS, 'path');
+      areaPath.setAttribute('class', 'coi-spark-area');
+      const linePath = document.createElementNS(COI_SVG_NS, 'path');
+      linePath.setAttribute('class', 'coi-spark-line');
+      const peakLine = document.createElementNS(COI_SVG_NS, 'line');
+      peakLine.setAttribute('class', 'coi-peak-line');
+      peakLine.setAttribute('x1', '0');
+      peakLine.setAttribute('x2', String(COI_SPARK_W));
+      peakLine.setAttribute('y1', '0');
+      peakLine.setAttribute('y2', '0');
+
+      svg.append(areaPath, linePath, peakLine);
+
+      const pkTag = document.createElement('span');
+      pkTag.className = 'coi-pk-tag';
+      pkTag.textContent = 'PK';
+
+      const main = document.createElement('span');
+      main.className = 'coi-main';
+      main.textContent = '-';
+
+      const drawdown = document.createElement('span');
+      drawdown.className = 'coi-drawdown';
+      drawdown.hidden = true;
+
+      element.append(svg, pkTag, main, drawdown);
+
+      const refs = { areaPath, linePath, peakLine, pkTag, main, drawdown };
+      element.__coiRefs = refs;
+      return refs;
+    }
+
+    function coiApplyRender(element, snap) {
+      if (snap.empty) {
+        const refs = coiEnsureCell(element, snap.type);
+        refs.main.textContent = '-';
+        refs.drawdown.hidden = true;
+        refs.areaPath.setAttribute('d', '');
+        refs.linePath.setAttribute('d', '');
+        refs.peakLine.setAttribute('y1', '0');
+        refs.peakLine.setAttribute('y2', '0');
+        refs.pkTag.style.display = 'none';
+        return;
+      }
+
+      const refs = coiEnsureCell(element, snap.type);
+      element.style.setProperty('--coi-color', snap.color);
+
+      refs.linePath.setAttribute('d', snap.lineD);
+      refs.areaPath.setAttribute('d', snap.areaD);
+
+      const peakY = coiSparkY(snap.peak);
+      refs.peakLine.setAttribute('y1', peakY.toFixed(2));
+      refs.peakLine.setAttribute('y2', peakY.toFixed(2));
+      refs.pkTag.style.top = `${((peakY / COI_SPARK_H) * 100).toFixed(2)}%`;
+      refs.pkTag.style.display = snap.peak > 0 ? '' : 'none';
+
+      refs.main.textContent = snap.label;
+
+      if (snap.showDrawdown) {
+        refs.drawdown.textContent = snap.drawdownLabel;
+        refs.drawdown.hidden = false;
+      } else {
+        refs.drawdown.hidden = true;
+      }
+
+      if (snap.flash) coiFlash(element, snap.flash);
+    }
+
+    // Public entry point — builds or updates one CALL/PUT COI REL% cell.
+    function renderCoiRelCell(element, currentVal, strike, type) {
+      if (!element) return;
+      coiEnsureCell(element, type); // build the shell synchronously (cheap)
+
+      const hasValue = !(currentVal === null || currentVal === undefined || currentVal === '-' || currentVal === '');
+      const val = toNumber(currentVal);
+
+      if (!hasValue) {
+        coiQueueRender(element, { empty: true, type });
+        return;
+      }
+
+      const leg = coiLeg(strike, type);
+      const firstTick = leg.ticks.length === 0;
+      const prev = firstTick ? val : leg.ticks[leg.ticks.length - 1];
+
+      leg.ticks.push(val);
+      if (leg.ticks.length > COI_MAX_TICKS) leg.ticks.shift();
+
+      let isNewPeak = false;
+      if (firstTick) {
+        leg.peak = val; // seed the peak without a fake breakout flash
+      } else if (val > leg.peak) {
+        leg.peak = val;
+        isNewPeak = true;
+      }
+
+      const peak = leg.peak;
+      const drawdownPct = peak > 0 ? ((val - peak) / peak) * 100 : 0;
+      const color = coiRelColor(drawdownPct);
+
+      let flash = null;
+      if (!firstTick) {
+        if (isNewPeak) flash = 'flash-peak-breakout';
+        else if (val > prev) flash = 'flash-up';
+        else if (val < prev) flash = 'flash-down';
+      }
+
+      const showDrawdown = val < peak && drawdownPct < -0.05;
+
+      coiQueueRender(element, {
+        empty: false,
+        type,
+        color,
+        label: fmtCoiRel(val),
+        peak,
+        lineD: coiSparkLinePath(leg.ticks),
+        areaD: coiSparkAreaPath(leg.ticks),
+        showDrawdown,
+        drawdownLabel: `${drawdownPct.toFixed(1)}% from Pk`,
+        flash,
+      });
+    }
+
+    // Cached row/column nodes keyed by strike. A 1Hz refresh updates text and
+    // SVG paths in place instead of rebuilding the whole <tbody> every tick,
+    // avoiding layout reflows during fast order-book updates.
+    const rowCache = new Map();
+
+    function ensureRow(strike) {
+      const key = String(strike);
+      let entry = rowCache.get(key);
+      if (entry) return entry;
+
+      const tr = document.createElement('tr');
+      const cells = {
+        coiCall: compactCell('', 'call-side font-mono font-semibold'),
+        ltpCall: compactCell('', 'call-side font-mono'),
+        relCall: document.createElement('td'),
+        strikeCell: compactCell('', 'strike-cell font-mono font-bold'),
+        relPut: document.createElement('td'),
+        ltpPut: compactCell('', 'put-side font-mono'),
+        coiPut: compactCell('', 'put-side font-mono font-semibold'),
+      };
+      tr.append(cells.coiCall, cells.ltpCall, cells.relCall, cells.strikeCell, cells.relPut, cells.ltpPut, cells.coiPut);
+      entry = { tr, cells };
+      rowCache.set(key, entry);
+      return entry;
     }
 
     function renderCompactChain(rows, spot, signals = []) {
@@ -2210,18 +2825,6 @@
 
       const sorted = rows.slice().sort((a, b) => toNumber(a.strike) - toNumber(b.strike));
 
-      // Fold this tick into the session high-water marks and derive a stable,
-      // monotonic side scale (max peak magnitude) so the marker never jumps around.
-      let callMax = 0, putMax = 0;
-      sorted.forEach((row) => {
-        const strike = toNumber(row.strike);
-        const entry = peakMap.get(strike) || { call: 0, put: 0 };
-        entry.call = Math.max(entry.call, Math.abs(toNumber(row.call_coi_pct)));
-        entry.put = Math.max(entry.put, Math.abs(toNumber(row.put_coi_pct)));
-        peakMap.set(strike, entry);
-        if (entry.call > callMax) callMax = entry.call;
-        if (entry.put > putMax) putMax = entry.put;
-      });
       let atmIndex = Math.floor(sorted.length / 2);
       if (Number.isFinite(spot) && spot > 0) {
         atmIndex = sorted.reduce((best, row, i) =>
@@ -2235,18 +2838,26 @@
       const fragment = document.createDocumentFragment();
       windowRows.forEach((row) => {
         const strike = toNumber(row.strike);
-        const peak = peakMap.get(strike) || { call: 0, put: 0 };
-        const tr = document.createElement('tr');
-        if (strike === atmStrike) tr.className = 'atm-row';
+        const entry = ensureRow(strike);
+        const tr = entry.tr;
+        const cells = entry.cells;
+
+        // Reset per-tick row state: ATM highlight + any Deadly Combo glow.
+        tr.className = '';
+        if (strike === atmStrike) tr.classList.add('atm-row');
         const signalGlow = signalClassByStrike.get(String(row.strike));
         if (signalGlow) tr.classList.add(signalGlow);
-        tr.appendChild(coiCell(fmtCoi(row.call_coi_pct), 'call', Math.abs(toNumber(row.call_coi_pct)), peak.call, callMax));
-        tr.appendChild(compactCell(fmtLtp(row.call_ltp), 'call-side font-mono'));
-        tr.appendChild(compactCell(fmtCoiRel(row.call_coi_rel_pct), 'call-side font-mono'));
-        tr.appendChild(compactCell(fmtStrike(row.strike), 'strike-cell font-mono font-bold'));
-        tr.appendChild(compactCell(fmtCoiRel(row.put_coi_rel_pct), 'put-side font-mono'));
-        tr.appendChild(compactCell(fmtLtp(row.put_ltp), 'put-side font-mono'));
-        tr.appendChild(coiCell(fmtCoi(row.put_coi_pct), 'put', Math.abs(toNumber(row.put_coi_pct)), peak.put, putMax));
+
+        // CALL/PUT COI% + LTP stay lightweight plain text; the two COI REL%
+        // columns render through the intraday peak engine + mini sparkline.
+        cells.coiCall.textContent = fmtCoi(row.call_coi_pct);
+        cells.ltpCall.textContent = fmtLtp(row.call_ltp);
+        renderCoiRelCell(cells.relCall, row.call_coi_rel_pct, strike, 'call');
+        cells.strikeCell.textContent = fmtStrike(row.strike);
+        renderCoiRelCell(cells.relPut, row.put_coi_rel_pct, strike, 'put');
+        cells.ltpPut.textContent = fmtLtp(row.put_ltp);
+        cells.coiPut.textContent = fmtCoi(row.put_coi_pct);
+
         fragment.appendChild(tr);
       });
       compactBody.replaceChildren(fragment);
@@ -2273,6 +2884,8 @@
     // before the first 1Hz tick; the setInterval is removed because
     // refreshOptions() now drives both renders from one HTTP request.
     window.renderCompactChain = renderCompactChain;
+    // Exposed so an external WebSocket handler can drive a single cell directly.
+    window.renderCoiRelCell = renderCoiRelCell;
     refreshCompactChain();
   }
 

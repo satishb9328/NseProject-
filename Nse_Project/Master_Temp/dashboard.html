@@ -12,7 +12,19 @@
 
   <div class="relative max-w-4xl">
     <div class="mt-0 text-left">
-      <div class="mb-2 text-left text-sm font-semibold text-[#00ff9d]">Expiry: {{ current_expiry }}</div>
+      <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 class="font-display text-xl font-bold text-slate-100">Option Chain</h1>
+          <p class="text-sm font-semibold text-[#00ff9d]">Expiry: {{ current_expiry }}</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <span id="option-chain-status" class="text-xs font-medium text-slate-400" aria-live="polite">Paused</span>
+          <div class="inline-flex rounded-lg border border-ink-600 bg-ink-900/80 p-1" role="group" aria-label="Option chain auto-refresh">
+            <button id="option-chain-run" type="button" aria-pressed="false" class="rounded-md px-3 py-1.5 text-xs font-bold text-slate-400 transition-colors hover:bg-neon-green/10 hover:text-neon-green">Run</button>
+            <button id="option-chain-stop" type="button" aria-pressed="true" class="rounded-md bg-red-500/20 px-3 py-1.5 text-xs font-bold text-red-300 transition-colors">Stop</button>
+          </div>
+        </div>
+      </div>
       <style>
         .option-chain-table { font-size: 11px; width: 100%; text-align: center; border-collapse: collapse; }
         .option-chain-table th { font-weight: 600; padding: 6px 4px; border: 1px solid #333; white-space: nowrap; text-transform: uppercase; }
@@ -69,7 +81,7 @@
         <span class="opacity-60"> | </span>
         <span>SCORE: <span id="sentiment-score">50/100</span> <span id="sentiment-score-label">(Fair / Neutral Zone)</span></span>
       </div>
-      <div class="overflow-x-auto">
+      <div id="option-chain-content" class="overflow-x-auto opacity-60 transition-opacity duration-200">
         <table id="option-chain-table" class="option-chain-table w-full text-center border-collapse text-[11px]">
           <thead>
             <tr>
@@ -102,6 +114,10 @@
       const liveOptionsBody = document.getElementById('live-options-tbody');
       const liveUrl = '{% url "live_dashboard:live_option_chain_api" %}';
       const syncLabel = document.getElementById('live-synced');
+      const optionChainRunButton = document.getElementById('option-chain-run');
+      const optionChainStopButton = document.getElementById('option-chain-stop');
+      const optionChainStatus = document.getElementById('option-chain-status');
+      let optionChainInterval = null;
       let currentSpot = null;
 
       function formatNumber(value) {
@@ -137,44 +153,14 @@
       }
 
       // ---- Live index SPOT -------------------------------------------------
-      // Driven by the fast option-chain poll (data.spot_price), which comes straight
-      // from the NSE_INDEX|Nifty 50 websocket tick. Previously SPOT was only written
-      // by renderGammaProfile() from the slower /gamma/status/ endpoint, so it froze
-      // whenever the Gamma worker lagged or stopped.
-      const spotPriceEl = document.getElementById('live-spot-price');
-      let lastSpotValue = null;
-      let haveIndexSpot = false;
-
-      function formatSpot(value) {
-        const n = Number(value);
-        if (!Number.isFinite(n) || n <= 0) return '--';
-        return n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      }
-
       function updateSpotPrice(data) {
         const n = Number(data && data.spot_price);
-        // Keep the last good value rather than blanking the readout on a bad payload.
         if (!Number.isFinite(n) || n <= 0) return;
 
-        haveIndexSpot = true;
-        // The real index tick is the best ATM reference we have.
         if (n !== currentSpot) {
           currentSpot = n;
           highlightAtmRow();
         }
-
-        const text = formatSpot(n);
-        if (spotPriceEl && spotPriceEl.textContent !== text) {
-          spotPriceEl.classList.remove('text-neon-green', 'text-neon-red', 'text-slate-50');
-          if (lastSpotValue !== null && n > lastSpotValue) spotPriceEl.classList.add('text-neon-green');
-          else if (lastSpotValue !== null && n < lastSpotValue) spotPriceEl.classList.add('text-neon-red');
-          else spotPriceEl.classList.add('text-slate-50');
-          spotPriceEl.textContent = text;
-        }
-        // Mirror into the legacy hidden node so anything still reading it agrees.
-        const legacy = document.getElementById('live-spot');
-        if (legacy && legacy.textContent !== text) legacy.textContent = text;
-        lastSpotValue = n;
       }
 
       function toNumber(value) {
@@ -428,177 +414,40 @@
         }
       }
 
-      const gammaUrl = '/gamma/status/';
-      const gammaAlerts = document.getElementById('live-gamma-alerts');
-      const seenGammaSignals = new Set();
-
-      function formatGammaValue(value) {
-        if (value === null || value === undefined) return '--';
-        if (typeof value === 'number') return value.toLocaleString('en-IN', { maximumFractionDigits: 2 });
-        return value;
+      function updateOptionChainPollingUI(isRunning) {
+        optionChainRunButton.setAttribute('aria-pressed', String(isRunning));
+        optionChainStopButton.setAttribute('aria-pressed', String(!isRunning));
+        optionChainRunButton.className = isRunning
+          ? 'rounded-md bg-neon-green px-3 py-1.5 text-xs font-bold text-ink-950 transition-colors'
+          : 'rounded-md px-3 py-1.5 text-xs font-bold text-slate-400 transition-colors hover:bg-neon-green/10 hover:text-neon-green';
+        optionChainStopButton.className = isRunning
+          ? 'rounded-md px-3 py-1.5 text-xs font-bold text-slate-400 transition-colors hover:bg-red-500/10 hover:text-red-300'
+          : 'rounded-md bg-red-500/20 px-3 py-1.5 text-xs font-bold text-red-300 transition-colors';
+        optionChainStatus.textContent = isRunning ? 'Live' : 'Paused';
+        optionChainStatus.className = isRunning
+          ? 'text-xs font-medium text-neon-green'
+          : 'text-xs font-medium text-slate-400';
+        document.getElementById('option-chain-content').classList.toggle('opacity-60', !isRunning);
       }
 
-      const GEX_NEUTRAL_THRESHOLD = 75000000; // ~7.5 Cr of per-contract net GEX
-
-      // The Gamma engine reports exposures per CONTRACT (it divides out the lot factor
-      // the feed bakes into OI/COI), so this gate is 65x smaller than the old 5-billion
-      // share-scaled one. It is only a fallback: when the engine publishes its own
-      // regime `signal` that verdict wins.
-      function netGexTier(value) {
-        const num = typeof value === 'number' ? value : Number(value);
-        if (!Number.isFinite(num)) {
-          return { colorClass: 'text-slate-50', summary: '--' };
-        }
-        if (num > GEX_NEUTRAL_THRESHOLD) {
-          return { colorClass: 'text-green-500', summary: '🟢 Positive Gamma: Stable Market / Buy Dips' };
-        }
-        if (num < -GEX_NEUTRAL_THRESHOLD) {
-          return { colorClass: 'text-red-500', summary: '🔴 Negative Gamma: High Volatility / Momentum' };
-        }
-        return { colorClass: 'text-yellow-500', summary: '🟡 Rangebound: Choppy / Transition Zone' };
+      function startOptionChainPolling() {
+        if (optionChainInterval !== null) return;
+        refreshOptionChain();
+        optionChainInterval = setInterval(refreshOptionChain, 1000);
+        updateOptionChainPollingUI(true);
       }
 
-      function signalTier(signal) {
-        const text = typeof signal === 'string' ? signal : '';
-        if (text.startsWith('🔴')) return { colorClass: 'text-red-500', summary: text };
-        if (text.startsWith('🟢')) return { colorClass: 'text-green-500', summary: text };
-        if (text.startsWith('🟡')) return { colorClass: 'text-yellow-500', summary: text };
-        return null;
+      function stopOptionChainPolling() {
+        if (optionChainInterval !== null) {
+          clearInterval(optionChainInterval);
+          optionChainInterval = null;
+        }
+        updateOptionChainPollingUI(false);
       }
 
-      function renderGammaProfile(profile) {
-        if (!profile || typeof profile !== 'object') return;
-
-        const spot = profile.spot ?? profile.Spot ?? profile.spot_price ?? '--';
-        const pcr = profile.pcr ?? profile.PCR ?? '--';
-        const gammaFlip = profile.gamma_flip_level ?? profile.gamma_flip ?? profile.gammaFlip ?? profile.gamma_flip_value ?? '--';
-        const netGex = profile.net_gex ?? profile.netGEX ?? profile.net_gex_value ?? '--';
-        const weekly = profile.weekly_gamma || {};
-        const gexTier = signalTier(weekly.signal) || netGexTier(netGex);
-
-        const spotText = formatGammaValue(spot);
-        const pcrText = formatGammaValue(pcr);
-        const flipText = formatGammaValue(gammaFlip);
-        // Prefer the engine's compact string ("121.09 Cr") over a raw 10-14 digit number.
-        const gexDisplay = profile.net_gex_display ?? weekly.net_gex_display;
-        const gexText = (typeof gexDisplay === 'string' && gexDisplay && gexDisplay !== '--')
-          ? gexDisplay
-          : formatGammaValue(netGex);
-
-        // Track the numeric spot so the ATM strike row can be highlighted, but only
-        // when the direct index tick is unavailable — the Gamma profile's spot is
-        // derived/slower, so it must never overwrite a live NSE_INDEX|Nifty 50 tick.
-        const spotNum = Number(spot);
-        if (!haveIndexSpot && Number.isFinite(spotNum) && spotNum !== currentSpot) {
-          currentSpot = spotNum;
-          highlightAtmRow();
-        }
-
-        const spotEl = haveIndexSpot ? null : document.getElementById('live-spot-price');
-        const pcrEl = document.getElementById('live-pcr');
-        const flipEl = document.getElementById('live-gamma-flip');
-        const gexEl = document.getElementById('live-net-gex');
-        const gexSummaryEl = document.getElementById('live-net-gex-summary');
-
-        // Only write to the DOM when a value actually changed (avoids repaints/flicker).
-        if (spotEl && spotEl.textContent !== spotText) spotEl.textContent = spotText;
-        if (pcrEl && pcrEl.textContent !== pcrText) pcrEl.textContent = pcrText;
-        if (flipEl && flipEl.textContent !== flipText) flipEl.textContent = flipText;
-
-        if (gexEl) {
-          if (gexEl.textContent !== gexText) gexEl.textContent = gexText;
-          if (!gexEl.classList.contains(gexTier.colorClass)) {
-            gexEl.classList.remove('text-green-500', 'text-red-500', 'text-yellow-500', 'text-slate-50');
-            gexEl.classList.add(gexTier.colorClass);
-          }
-        }
-
-        if (gexSummaryEl && gexSummaryEl.textContent !== gexTier.summary) {
-          gexSummaryEl.textContent = gexTier.summary;
-        }
-      }
-
-      function renderGammaSignal(lastSignal) {
-        if (!lastSignal) return;
-
-        const isHeartbeat = !!(lastSignal && typeof lastSignal === 'object' && lastSignal.heartbeat);
-
-        let signalText;
-        if (typeof lastSignal === 'string') {
-          signalText = lastSignal;
-        } else if (lastSignal && typeof lastSignal.message === 'string' && lastSignal.message) {
-          signalText = lastSignal.message;
-        } else {
-          signalText = JSON.stringify(lastSignal);
-        }
-
-        if (seenGammaSignals.has(signalText)) return;
-        seenGammaSignals.add(signalText);
-
-        if (gammaAlerts) {
-          if (gammaAlerts.querySelector('p') && gammaAlerts.querySelectorAll('p').length === 1 && gammaAlerts.textContent.trim().includes('Waiting for gamma')) {
-            gammaAlerts.replaceChildren();
-          }
-          const item = document.createElement('div');
-          item.className = isHeartbeat
-            ? 'rounded-xl border border-neon-green/20 bg-ink-900/90 p-3 text-slate-200 shadow-glow-green'
-            : 'rounded-xl border border-neon-blue/20 bg-ink-900/90 p-3 text-slate-200 shadow-glow-blue';
-
-          const header = document.createElement('div');
-          header.className = 'flex items-start justify-between gap-3';
-          const timeSpan = document.createElement('span');
-          timeSpan.className = 'font-semibold text-slate-100';
-          timeSpan.textContent = new Date().toLocaleTimeString('en-IN', { hour12: false, timeZone: 'Asia/Kolkata' });
-          header.appendChild(timeSpan);
-
-          const body = document.createElement('div');
-          body.className = 'mt-2 text-sm leading-relaxed';
-          body.textContent = signalText;
-
-          item.appendChild(header);
-          item.appendChild(body);
-          gammaAlerts.prepend(item);
-          while (gammaAlerts.children.length > 8) {
-            gammaAlerts.removeChild(gammaAlerts.lastChild);
-          }
-        }
-      }
-
-      async function refreshGammaStatus() {
-        try {
-          console.log('Fetching gamma status...', gammaUrl);
-          const response = await fetch(gammaUrl, { cache: 'no-store' });
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-          }
-          const data = await response.json();
-          console.log('Gamma Data:', data);
-
-          // Support both wrapped ({status:{last_profile:...}}) and unwrapped ({last_profile:...}) payloads.
-          const status = (data && typeof data === 'object') ? (data.status || data) : null;
-          if (!status || typeof status !== 'object') {
-            console.warn('Gamma status missing or invalid:', status);
-            return;
-          }
-
-          if (status.last_profile && typeof status.last_profile === 'object') {
-            renderGammaProfile(status.last_profile);
-          } else {
-            console.warn('Gamma last_profile missing or invalid:', status.last_profile);
-          }
-
-          if (status.last_signal != null) {
-            renderGammaSignal(status.last_signal);
-          }
-        } catch (error) {
-          console.error('Gamma Fetch Error:', error);
-        }
-      }
-
-      refreshOptionChain();
-      setInterval(refreshOptionChain, 1000);
-      refreshGammaStatus();
-      setInterval(refreshGammaStatus, 2000);
+      optionChainRunButton.addEventListener('click', startOptionChainPolling);
+      optionChainStopButton.addEventListener('click', stopOptionChainPolling);
+      updateOptionChainPollingUI(false);
     </script>
 
     <!-- live ticker -->
@@ -621,43 +470,6 @@
           <span class="text-slate-400">TCS <span class="text-neon-red">▼ -0.86%</span></span>
           <span class="text-slate-400">HDFCBANK <span class="text-neon-green">▲ +1.18%</span></span>
           <span class="text-slate-400">TATAMOTORS <span class="text-neon-red">▼ -2.11%</span></span>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ===================== STATS ===================== -->
-<section id="stats" class="mt-8 scroll-mt-24">
-  <div class="glass rounded-2xl p-6 hover:border-neon-green/40 transition-all duration-300">
-    <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-      <div>
-        <p class="text-xs uppercase tracking-[0.22em] text-neon-violet">Gamma Market Snapshot</p>
-        <h2 class="mt-1 font-display text-2xl sm:text-3xl font-bold text-slate-50">Real-time Gamma Market View</h2>
-        <p class="mt-2 max-w-2xl text-sm text-slate-500">Live gamma status metrics from the bot feed, updated every 2 seconds.</p>
-      </div>
-      <div class="flex flex-wrap gap-3">
-        <div class="min-w-[160px] rounded-2xl border border-neon-blue/10 bg-ink-900/80 p-4 text-center shadow-glow-blue">
-          <span class="text-xs uppercase tracking-wider text-slate-500">Spot</span>
-          <p id="live-spot-price" class="mt-3 font-display text-3xl font-bold text-slate-50 transition-colors duration-300">--</p>
-          <p id="live-spot" class="hidden">--</p>
-          <p class="mt-1 text-xs text-slate-500">Underlying price</p>
-        </div>
-        <div class="min-w-[160px] rounded-2xl border border-neon-green/10 bg-ink-900/80 p-4 text-center shadow-glow-green">
-          <span class="text-xs uppercase tracking-wider text-slate-500">PCR</span>
-          <p id="live-pcr" class="mt-3 font-display text-3xl font-bold text-neon-green">--</p>
-          <p class="mt-1 text-xs text-slate-500">Put/Call Ratio</p>
-        </div>
-        <div class="min-w-[160px] rounded-2xl border border-neon-red/10 bg-ink-900/80 p-4 text-center shadow-glow-red">
-          <span class="text-xs uppercase tracking-wider text-slate-500">Gamma Flip</span>
-          <p id="live-gamma-flip" class="mt-3 font-display text-3xl font-bold text-neon-red">--</p>
-          <p class="mt-1 text-xs text-slate-500">Gamma flip signal</p>
-        </div>
-        <div class="min-w-[160px] rounded-2xl border border-neon-violet/10 bg-ink-900/80 p-4 text-center shadow-glow-violet">
-          <span class="text-xs uppercase tracking-wider text-slate-500">Net GEX</span>
-          <p id="live-net-gex" class="mt-3 font-display text-3xl font-bold text-slate-50 transition-all duration-500 ease-in-out">--</p>
-          <p id="live-net-gex-summary" class="mt-1 text-xs font-medium text-slate-400 transition-all duration-500 ease-in-out">--</p>
-          <p class="mt-1 text-xs text-slate-500">Net Gamma Exposure</p>
         </div>
       </div>
     </div>
@@ -707,28 +519,6 @@
       </table>
     </div>
   </div>
-</section>
-
-<section id="gamma-alerts" class="mt-10 scroll-mt-24">
-  <div class="glass rounded-2xl p-6">
-    <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <p class="text-xs uppercase tracking-[0.22em] text-neon-violet">Live Gamma Options Signals</p>
-        <h2 class="mt-1 font-display text-2xl sm:text-3xl font-bold text-slate-50">Gamma Alerts</h2>
-        <p class="mt-1 text-sm text-slate-500">Real-time intraday option signals from the Gamma bot feed.</p>
-      </div>
-      <div class="rounded-full border border-neon-green/30 bg-neon-green/5 px-4 py-2 text-xs uppercase tracking-[0.24em] text-neon-green">Separate from AI Signal Queue</div>
-    </div>
-
-    <div id="live-gamma-alerts" class="mt-6 space-y-3 min-h-[120px] rounded-2xl border border-neon-green/10 bg-ink-900/80 p-4 text-sm text-slate-300">
-      <p class="text-slate-500">Waiting for gamma status updates...</p>
-    </div>
-  </div>
-</section>
-
-<!-- ===================== LIVE DATA ===================== -->
-<section id="live" class="mt-10 scroll-mt-24">
-  {% include "components/live_table.html" %}
 </section>
 
 <!-- ===================== PERFORMANCE ===================== -->

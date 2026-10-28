@@ -571,6 +571,132 @@ def get_gamma_walls(reference_price: float | None = None) -> tuple[int | None, i
     return call_wall, put_wall
 
 
+# ---------------------------------------------------------------------------
+# EOD FNO Participant OI -> Pre-Open Trap Decision Matrix
+# ---------------------------------------------------------------------------
+# The 09:00-09:08 auction has no option flow of its own, so the actionable
+# trap read merges (a) the EOD participant positioning stored by
+# fno_swing_engine.py in fno_swing.db with (b) the live projected open versus
+# yesterday's close. The matrix yields CONFIRMED_SQUEEZE / CONFIRMED_PANIC /
+# INVALIDATED / FLAT_OPEN, plus a neutral fallback when data is missing.
+
+def _read_latest_eod_participant_bias() -> dict | None:
+    """Return the latest EOD FNO participant setup from fno_swing.db, or None.
+
+    Imported lazily so the dashboard still boots when the FNO engine (pandas,
+    the ``D:`` drive database, etc.) is unavailable, and every failure degrades
+    to ``None`` so the trap matrix can serve a neutral read instead of a 500.
+    """
+    try:
+        from Nse_Project.FNO.fno_swing_engine import get_eod_participant_bias
+    except Exception as exc:
+        logger.warning(
+            "EOD participant bias unavailable (fno_swing_engine import failed): %s",
+            exc,
+        )
+        return None
+    try:
+        return get_eod_participant_bias()
+    except Exception as exc:
+        logger.warning("Could not read EOD participant bias from fno_swing.db: %s", exc)
+        return None
+
+
+def _derive_eod_bias(action_type, tomorrow_bias) -> str:
+    """Classify the EOD FNO setup as bullish / bearish / neutral."""
+    if action_type in {"SHORT COVERING", "LONG BUILD-UP"}:
+        return "bullish"
+    if action_type in {"LONG UNWINDING", "ADDING SHORTS"}:
+        return "bearish"
+    bias_text = (tomorrow_bias or "").upper()
+    if "BULLISH" in bias_text:
+        return "bullish"
+    if "BEARISH" in bias_text:
+        return "bearish"
+    return "neutral"
+
+
+def _compute_trap_decision(eod: dict | None, projected_open_pct) -> dict:
+    """Merge EOD participant positioning with the projected open.
+
+    Evaluated in the order the trade logic demands: squeeze / panic first (the
+    tradeable traps), then the contradiction guard, then the flat-open guard.
+    """
+    if projected_open_pct is None:
+        return {
+            "trap_status": "WAITING",
+            "trap_tone": "neutral",
+            "actionable_signal": "⏳ AWAITING PRE-OPEN DATA",
+            "trade_advice": "Pre-open auction + projected open resolve by ~09:08 IST.",
+        }
+    if eod is None:
+        return {
+            "trap_status": "NO_EOD_SETUP",
+            "trap_tone": "neutral",
+            "actionable_signal": "🟡 NO EOD POSITIONING",
+            "trade_advice": "EOD FNO participant data unavailable. No trap edge computed.",
+        }
+
+    fii_net_oi = eod.get("fii_net_oi") or 0
+    fii_net_vol = eod.get("fii_net_vol") or 0
+    retail_trap = bool(eod.get("retail_trap"))
+    eod_bias = _derive_eod_bias(eod.get("action_type"), eod.get("tomorrow_bias"))
+    pct = float(projected_open_pct)
+
+    # CASE A — FII SHORT SQUEEZE (bullish confirmation).
+    if fii_net_oi < 0 and fii_net_vol > 0 and pct >= 0.3:
+        return {
+            "trap_status": "CONFIRMED_SQUEEZE",
+            "trap_tone": "bullish",
+            "actionable_signal": "🔥 FII SHORT SQUEEZE CONFIRMED",
+            "trade_advice": "Pre-open gap-up traps FII Shorts! High probability CE momentum at 9:15 AM.",
+        }
+
+    # CASE B — FII LONG TRAP (bearish panic). "Retail Long with FII Heavy
+    # Short" is the engine's ``retail_trap`` flag.
+    if (fii_net_oi > 0 or retail_trap) and pct <= -0.3:
+        return {
+            "trap_status": "CONFIRMED_PANIC",
+            "trap_tone": "bearish",
+            "actionable_signal": "⚠️ BEARISH BREAKDOWN CONFIRMED",
+            "trade_advice": "Pre-open gap-down forces long unwinding! High probability PE momentum at 9:15 AM.",
+        }
+
+    # CASE C — SETUP INVALIDATED (contradiction guard).
+    if (eod_bias == "bullish" and pct <= -0.4) or (eod_bias == "bearish" and pct >= 0.4):
+        return {
+            "trap_status": "INVALIDATED",
+            "trap_tone": "neutral",
+            "actionable_signal": "🚫 TRAP SETUP INVALIDATED",
+            "trade_advice": "Pre-open gap contradicts EOD positioning. Stand down / No trade zone.",
+        }
+
+    # CASE D — FLAT OPEN (no squeeze).
+    if -0.2 < pct < 0.2:
+        return {
+            "trap_status": "FLAT_OPEN",
+            "trap_tone": "flat",
+            "actionable_signal": "⚖️ FLAT PRE-OPEN",
+            "trade_advice": "No pre-open squeeze. Wait for initial 9:15 AM range breakout.",
+        }
+
+    # Fallback — a directional gap without a matching trap setup.
+    return {
+        "trap_status": "NO_SETUP",
+        "trap_tone": "neutral",
+        "actionable_signal": "🟡 NO TRAP EDGE",
+        "trade_advice": "Pre-open move lacks a high-probability trap. Wait for 9:15 AM confirmation.",
+    }
+
+
+def _build_preopen_trap_fields(projected_open_pct) -> dict:
+    """Return the trap matrix fields plus the raw EOD context for the payload."""
+    eod = _read_latest_eod_participant_bias()
+    fields = _compute_trap_decision(eod, projected_open_pct)
+    fields["eod_participant"] = eod
+    return fields
+
+
 def _build_preopen_context() -> dict:
     """Build the PRE-OPEN card context (MAX / MIN / Final IEP + projected open).
 
@@ -608,6 +734,7 @@ def _build_preopen_context() -> dict:
             'projected_open_display': '—',
             'projected_open_tone': 'flat',
             'updated_at': ist_now,
+            **_build_preopen_trap_fields(None),
         }
 
     max_iep = trap_data['Max_IEP']
@@ -631,6 +758,7 @@ def _build_preopen_context() -> dict:
         'projected_open_display': projected_open_display,
         'projected_open_tone': projected_open_tone,
         'updated_at': ist_now,
+        **_build_preopen_trap_fields(projected_open_pct),
     }
 
 
@@ -767,6 +895,11 @@ def preopen_trap_api(request):
             "projected_open_display": "—",
             "projected_open_tone": "flat",
             "updated_at": None,
+            "trap_status": "WAITING",
+            "trap_tone": "neutral",
+            "actionable_signal": "⏳ AWAITING PRE-OPEN DATA",
+            "trade_advice": "Pre-open trap unavailable.",
+            "eod_participant": None,
             "error": f"{type(exc).__name__}: {exc}",
         })
     response["Cache-Control"] = "no-store"

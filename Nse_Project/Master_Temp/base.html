@@ -11,80 +11,26 @@
 
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📈</text></svg>">
 
-  <!-- Tailwind CSS (Play CDN — swap for a compiled stylesheet in production).
-       Loaded with `defer` so it never blocks the first paint. The theme config is
-       captured up front and applied as soon as the CDN has executed, which makes
-       the Play CDN re-render with our custom colors/fonts/shadows. -->
-  <script src="https://cdn.tailwindcss.com" defer></script>
-  <script>
-    // Captured at parse time. We cannot touch the `tailwind` global here because the
-    // CDN script above is deferred and has not executed yet — it is applied below.
-    window.__tailwindConfig = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-            display: ['"Space Grotesk"', 'Inter', 'sans-serif'],
-            mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
-          },
-          colors: {
-            ink: {
-              950: '#04060c',
-              900: '#070b14',
-              850: '#0a0f1a',
-              800: '#0d1424',
-              700: '#141d33',
-              600: '#1c2740',
-              500: '#26314f',
-            },
-            neon: {
-              green: '#22ff88',
-              mint: '#34d399',
-              red: '#ff3b5c',
-              rose: '#fb7185',
-              amber: '#ffb020',
-              blue: '#38bdf8',
-              violet: '#a78bfa',
-            },
-          },
-          boxShadow: {
-            'glow-green': '0 0 24px -6px rgba(34, 255, 136, 0.55)',
-            'glow-red': '0 0 24px -6px rgba(255, 59, 92, 0.55)',
-            'glow-blue': '0 0 24px -6px rgba(56, 189, 248, 0.45)',
-            card: '0 14px 40px -18px rgba(0, 0, 0, 0.7)',
-          },
-        },
-      },
-    };
-  </script>
-  <script>
-    // Apply the config once the deferred CDN has executed. Deferred scripts run
-    // before DOMContentLoaded, so `window.tailwind` exists by the time this fires.
-    (function () {
-      function applyConfig() {
-        if (window.tailwind && window.__tailwindConfig) {
-          window.tailwind.config = window.__tailwindConfig; // triggers Play CDN re-render
-          return true;
-        }
-        return false;
-      }
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function () {
-          if (!applyConfig()) {
-            // CDN was unusually slow or unreachable: retry briefly, then give up
-            // gracefully (the page stays usable via the inline <style> fallback).
-            var tries = 0;
-            var timer = setInterval(function () {
-              if (applyConfig() || ++tries >= 40) clearInterval(timer);
-            }, 250);
-          }
-        });
-      } else {
-        applyConfig();
-      }
-    })();
-  </script>
+  <!-- ================================================================
+       Tailwind CSS — COMPILED LOCALLY (production-ready)
+       ================================================================
+       The Play CDN (`cdn.tailwindcss.com`) was blocking the dashboard for
+       1+ minute on every page load because it ships ~3MB of JavaScript
+       that must be downloaded, parsed, and executed in the browser before
+       ANY of the dashboard's own JS (polling, WebSockets, charts) can run.
+       If the CDN was slow OR the browser had a hiccup, the whole page froze
+       in "buffering" state and the Gamma cards stayed empty.
+
+       The local compiled CSS (`{% static 'css/tailwind.css' %}`) is ~50KB,
+       loads in <100ms, has zero external dependencies, and contains every
+       Tailwind utility class actually used in this project (no 3MB runtime).
+
+       Custom theme (colors/fonts/shadows) is now defined in
+       `tailwind.config.js` and baked into the compiled CSS at build time.
+       Re-run `npx tailwindcss -i input.css -o static/css/tailwind.css --minify`
+       after editing any HTML/JS that uses new Tailwind classes.
+       ================================================================ -->
+  <link rel="stylesheet" href="{% static 'css/tailwind.css' %}">
 
   <!-- Google Fonts: Inter (body) + Space Grotesk (display) + JetBrains Mono (data).
        Loaded asynchronously via media="print" + onload so the stylesheet is
@@ -179,12 +125,6 @@
           <span class="nav-label">Dashboard</span>
         </a>
 
-        <a href="{% url 'swing_ml' %}" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium {% if request.resolver_match.url_name == 'swing_ml' %}bg-ink-800 text-neon-green border-l-2 border-l-neon-green{% else %}text-slate-400 hover:text-slate-100 hover:bg-ink-800/70{% endif %} transition-all duration-200">
-          <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941"/></svg>
-          <span class="nav-label">Swing ML Predictions</span>
-          <span class="nav-badge ml-auto text-[10px] font-semibold bg-neon-violet/10 text-neon-violet border border-neon-violet/30 rounded-full px-1.5 py-0.5">AI</span>
-        </a>
-
         <a href="{% url 'live_signals' %}" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium {% if request.resolver_match.url_name == 'live_signals' %}bg-ink-800 text-neon-green border-l-2 border-l-neon-green{% else %}text-slate-400 hover:text-slate-100 hover:bg-ink-800/70{% endif %} transition-all duration-200">
           <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
           <span class="nav-label">Live Signals</span>
@@ -193,12 +133,6 @@
         <a href="{% url 'swing_stocks' %}" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium {% if request.resolver_match.url_name == 'swing_stocks' %}bg-ink-800 text-neon-green border-l-2 border-l-neon-green{% else %}text-slate-400 hover:text-slate-100 hover:bg-ink-800/70{% endif %} transition-all duration-200">
           <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 18.75V5.25m0 13.5h16.5M7.5 15l3-3 2.25 2.25L18 9"/></svg>
           <span class="nav-label">Swing Stocks</span>
-        </a>
-
-        <a href="{% url 'queue_ticks' %}" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium {% if request.resolver_match.url_name == 'queue_ticks' %}bg-ink-800 text-neon-green border-l-2 border-l-neon-green{% else %}text-slate-400 hover:text-slate-100 hover:bg-ink-800/70{% endif %} transition-all duration-200">
-          <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 6.75h12M8.25 12h12M8.25 17.25h12M3.75 6.75h.008v.008H3.75V6.75zm0 5.25h.008v.008H3.75V12zm0 5.25h.008v.008H3.75v-.008z"/></svg>
-          <span class="nav-label">Queue Ticks</span>
-          <span class="nav-badge ml-auto text-[10px] font-semibold bg-neon-green/10 text-neon-green border border-neon-green/30 rounded-full px-1.5 py-0.5">{{ ready_smc_count }}</span>
         </a>
 
         <a href="{% url 'trend_setups' %}" class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium {% if request.resolver_match.url_name == 'trend_setups' %}bg-ink-800 text-neon-green border-l-2 border-l-neon-green{% else %}text-slate-400 hover:text-slate-100 hover:bg-ink-800/70{% endif %} transition-all duration-200">

@@ -12,15 +12,25 @@ class GammaConfig(AppConfig):
     name = 'Nse_Project.GAMMA'
     verbose_name = 'Gamma Blast Engine'
 
-    def ready(self):
+    def ready(self):        
         # Only start in the actual server process — not in management commands
         # like `manage.py shell`, `migrate`, etc. This guard prevents the bot
-        # from starting during unrelated CLI invocations (which would try to
-        # connect to Redis and slow down every management command).
-        if not any(
-            cmd in sys.argv
-            for cmd in ('runserver', 'daphne', 'uvicorn')
-        ):
+        # from starting during unrelated CLI invocations.
+        #
+        # Detection is multi-layered so it works for ALL server types:
+        #   - `python manage.py runserver` → 'runserver' in sys.argv
+        #   - `daphne Nse_Project.asgi:application` → 'daphne' in sys.argv
+        #   - `uvicorn Nse_Project.asgi:application` → 'uvicorn' in sys.argv[0]
+        #   - `gunicorn Nse_Project.wsgi:application` → 'gunicorn' in sys.argv[0]
+        argv_str = ' '.join(sys.argv).lower()
+        is_server_cmd = any(
+            cmd in argv_str
+            for cmd in ('runserver', 'daphne', 'uvicorn', 'gunicorn')
+        )
+        # Also check the process basename (uvicorn/daphne run as executables)
+        proc_name = os.path.basename(sys.argv[0]).lower() if sys.argv else ''
+        is_asgi_worker = proc_name in ('uvicorn', 'daphne', 'gunicorn')
+        if not is_server_cmd and not is_asgi_worker:
             return
 
         # Startup process detection — handles BOTH modes correctly:
@@ -28,26 +38,18 @@ class GammaConfig(AppConfig):
         #   1. Default `runserver` (autoreload ON):
         #        Django spawns a parent (reloader) and a child (RUN_MAIN=true).
         #        We want to start the bot ONLY in the child to avoid duplicates.
-        #        The `--noreload` flag is NOT in sys.argv, so we keep the
-        #        RUN_MAIN='true' check and skip the parent.
         #
-        #   2. `runserver --noreload` (single process):
-        #        Django runs ONE process and NEVER sets RUN_MAIN. The old code
-        #        would silently return here and the bot would never start —
-        #        which is exactly the bug we're fixing. When `--noreload` is
-        #        present, we drop the RUN_MAIN requirement and start the bot
-        #        in this single process.
-        #
-        #   3. Production (DEBUG=False): the entire `if settings.DEBUG` block
-        #        is skipped, so the bot starts unconditionally in the server
-        #        process (Daphne/Uvicorn/gunicorn). Production servers don't
-        #        use autoreload, so RUN_MAIN is never set there either.
+        #   2. `runserver --noreload` / `uvicorn` / `daphne` / `gunicorn`:
+        #        Single process, RUN_MAIN is NEVER set. The old code would
+        #        silently return here and the bot would never start. When
+        #        `--noreload` is absent AND we're not in an ASGI worker, we
+        #        keep the RUN_MAIN='true' check for runserver autoreload.
         is_noreload = '--noreload' in sys.argv
-        if settings.DEBUG and not is_noreload and os.environ.get('RUN_MAIN') != 'true':
+        is_asgi_proc = proc_name in ('uvicorn', 'daphne', 'gunicorn') or 'uvicorn' in argv_str or 'daphne' in argv_str
+        if settings.DEBUG and not is_noreload and not is_asgi_proc and os.environ.get('RUN_MAIN') != 'true':
             return
 
-        # Idempotency: don't start a second listener if one is already running
-        # (e.g. ready() firing twice in the same process).
+        # Idempotency: don't start a second listener if one is already running.
         if getattr(self, 'gamma_thread', None) is not None:
             return
 

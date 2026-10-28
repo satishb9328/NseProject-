@@ -1,8 +1,10 @@
 """
 Django settings for MyProject2 project.
 """
-
 import os
+import warnings
+warnings.filterwarnings('ignore', message='.*took too long to shut down.*')
+warnings.filterwarnings('ignore', message='.*StreamingHttpResponse must consume synchronous iterators.*')
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -56,6 +58,7 @@ CACHES = {
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',  # ← ADD THIS LINE
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -159,3 +162,17 @@ USE_TZ = True
 STATIC_URL = 'static/'
 # STATIC_ROOT is required by Render to collect and serve static files properly
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# ==========================================
+# STATICFILES_DIRS — local dev static asset lookup
+# ==========================================
+# Tells Django where to look for static assets DURING development (DEBUG=True).
+# The compiled Tailwind CSS lives at `static/css/tailwind.css` — without this
+# entry, Django returns 404 for /static/css/tailwind.css and the dashboard
+# renders unstyled.
+# In production (Render), `python manage.py collectstatic` copies files from
+# here into STATIC_ROOT for the CDN/whitenoise to serve.
+STATICFILES_DIRS = [
+    BASE_DIR / "static",
+]
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
