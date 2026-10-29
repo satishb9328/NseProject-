@@ -64,51 +64,72 @@
 
   .coi-rel-cell {
     --coi-color: #00ff88;
-    position: relative;
-    overflow: hidden;
     min-width: 62px;
-    padding: 2px 3px !important;
+    padding: 0 !important;
     background: transparent !important;
     vertical-align: middle;
     text-align: center;
     line-height: 1.15;
   }
+  /* Inner wrapper is the real positioning context. `position: relative` on a
+     <td> is unreliable across browsers, so the absolute SVG and overlays are
+     anchored to this div instead of the cell. */
+  .coi-rel-cell .coi-rel-wrap {
+    position: relative;
+    width: 100%;
+    min-height: 30px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3px 4px;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
   .coi-rel-cell .coi-sparkline {
     position: absolute;
-    inset: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     width: 100%;
     height: 100%;
     z-index: 0;
+    display: block;
     pointer-events: none;
   }
   .coi-rel-cell .coi-spark-area {
-    fill: var(--coi-color);
-    opacity: .08;
+    fill: var(--coi-color, #00ff88);
+    opacity: .12;
   }
   .coi-rel-cell .coi-spark-line {
     fill: none;
-    stroke: var(--coi-color);
-    stroke-width: 1.4;
+    stroke: var(--coi-color, #00ff88);
+    stroke-width: 1.8;
     stroke-linejoin: round;
     stroke-linecap: round;
-    filter: drop-shadow(0 0 2px var(--coi-color));
+    vector-effect: non-scaling-stroke;
+  }
+  .coi-rel-cell .coi-last-dot {
+    fill: var(--coi-color, #00ff88);
   }
   .coi-rel-cell .coi-peak-line {
-    stroke: var(--coi-color);
-    stroke-width: .5;
-    stroke-dasharray: 2 2;
-    opacity: .7;
+    stroke: var(--coi-color, #00ff88);
+    stroke-width: 1;
+    stroke-dasharray: 3 2;
+    opacity: .85;
+    vector-effect: non-scaling-stroke;
   }
   .coi-rel-cell .coi-pk-tag {
     position: absolute;
-    left: 1px;
+    left: 3px;
     z-index: 1;
     font-size: 6px;
     font-weight: 800;
     line-height: 1;
     letter-spacing: .02em;
-    color: var(--coi-color);
-    text-shadow: 0 0 4px var(--coi-color);
+    color: var(--coi-color, #00ff88);
+    text-shadow: 0 0 4px var(--coi-color, #00ff88);
     transform: translateY(-100%);
     pointer-events: none;
   }
@@ -119,8 +140,8 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 11px;
     font-weight: 700;
-    color: var(--coi-color);
-    text-shadow: 0 0 5px var(--coi-color), 0 0 9px var(--coi-color);
+    color: var(--coi-color, #00ff88);
+    text-shadow: 0 0 5px var(--coi-color, #00ff88), 0 0 9px var(--coi-color, #00ff88);
   }
   .coi-rel-cell .coi-drawdown {
     position: relative;
@@ -2558,7 +2579,39 @@
     // CALL/PUT COI REL% cells. window.coiRelHistory holds every strike's
     // rolling tick history and its day peak; drawdown is measured vs that peak.
     // ====================================================================
-    window.coiRelHistory = window.coiRelHistory || {};
+    const COI_STORAGE_KEY = 'nse_coi_intraday_history';
+    // Consistent daily key so save/load always compare the same string.
+    const coiToday = () => new Date().toLocaleDateString();
+
+    // Serialize the whole in-memory history once per tick batch. Called ONLY
+    // at the end of renderCompactChain() — never from renderCoiRelCell() — so
+    // a fast tick performs a single localStorage write instead of dozens.
+    function saveCoiHistory() {
+      try {
+        localStorage.setItem(COI_STORAGE_KEY, JSON.stringify({ date: coiToday(), data: window.coiRelHistory }));
+      } catch (err) { /* storage unavailable/full — keep in-memory state */ }
+    }
+
+    // Load persisted history for today; anything from a previous day (or a
+    // corrupt blob) is discarded and overwritten with a fresh empty store.
+    function loadCoiHistory() {
+      try {
+        const raw = localStorage.getItem(COI_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.date === coiToday() && parsed.data && typeof parsed.data === 'object') {
+            return parsed.data;
+          }
+        }
+      } catch (err) { /* corrupt/blocked storage — fall through to a reset */ }
+      return null;
+    }
+
+    const coiStored = loadCoiHistory();
+    window.coiRelHistory = coiStored || {};
+    if (!coiStored) {
+      saveCoiHistory(); // new trading day: reset and overwrite any stale blob
+    }
 
     const COI_SPARK_W = 100;    // SVG viewBox width (arbitrary units)
     const COI_SPARK_H = 36;     // SVG viewBox height
@@ -2577,29 +2630,32 @@
     }
 
     function coiSparkY(v) {
-      const clamped = Math.max(0, Math.min(100, v));
+      const n = Number(v);
+      const clamped = Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
       return COI_SPARK_H - COI_SPARK_PAD - (clamped / 100) * (COI_SPARK_H - COI_SPARK_PAD * 2);
     }
 
     function coiSparkLinePath(ticks) {
-      const n = ticks.length;
+      const valid = (Array.isArray(ticks) ? ticks : []).filter((v) => Number.isFinite(Number(v)));
+      const n = valid.length;
       if (!n) return '';
       if (n === 1) {
-        const y = coiSparkY(ticks[0]).toFixed(2);
+        const y = coiSparkY(valid[0]).toFixed(2);
         return `M0 ${y} L${COI_SPARK_W} ${y}`;
       }
       let d = '';
       for (let i = 0; i < n; i += 1) {
         const x = (i / (n - 1)) * COI_SPARK_W;
-        const y = coiSparkY(ticks[i]);
+        const y = coiSparkY(valid[i]);
         d += `${i === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)} `;
       }
       return d.trim();
     }
 
     function coiSparkAreaPath(ticks) {
-      if (!ticks.length) return '';
-      return `${coiSparkLinePath(ticks)} L${COI_SPARK_W} ${COI_SPARK_H} L0 ${COI_SPARK_H} Z`;
+      const line = coiSparkLinePath(ticks);
+      if (!line) return '';
+      return `${line} L${COI_SPARK_W} ${COI_SPARK_H} L0 ${COI_SPARK_H} Z`;
     }
 
     function coiLerpColor(a, b, t) {
@@ -2651,16 +2707,37 @@
       if (element.__coiRefs) return element.__coiRefs;
       element.className = `coi-rel-cell ${type === 'call' ? 'call-side' : 'put-side'} text-[11px]`;
 
+      const wrap = document.createElement('div');
+      wrap.className = 'coi-rel-wrap';
+
       const svg = document.createElementNS(COI_SVG_NS, 'svg');
       svg.setAttribute('class', 'coi-sparkline');
+      svg.setAttribute('xmlns', COI_SVG_NS);
       svg.setAttribute('viewBox', `0 0 ${COI_SPARK_W} ${COI_SPARK_H}`);
       svg.setAttribute('preserveAspectRatio', 'none');
       svg.setAttribute('aria-hidden', 'true');
+      svg.setAttribute('width', '100%');
+      svg.setAttribute('height', '100%');
+      // Inline sizing so the SVG fills the wrapper even if a CSS class fails to apply.
+      svg.style.position = 'absolute';
+      svg.style.top = '0';
+      svg.style.left = '0';
+      svg.style.width = '100%';
+      svg.style.height = '100%';
+      svg.style.display = 'block';
+      svg.style.pointerEvents = 'none';
+      svg.style.zIndex = '0';
 
       const areaPath = document.createElementNS(COI_SVG_NS, 'path');
       areaPath.setAttribute('class', 'coi-spark-area');
       const linePath = document.createElementNS(COI_SVG_NS, 'path');
       linePath.setAttribute('class', 'coi-spark-line');
+      const lastDot = document.createElementNS(COI_SVG_NS, 'circle');
+      lastDot.setAttribute('class', 'coi-last-dot');
+      lastDot.setAttribute('r', '2.2');
+      lastDot.setAttribute('cx', String(COI_SPARK_W));
+      lastDot.setAttribute('cy', '0');
+      lastDot.style.display = 'none';
       const peakLine = document.createElementNS(COI_SVG_NS, 'line');
       peakLine.setAttribute('class', 'coi-peak-line');
       peakLine.setAttribute('x1', '0');
@@ -2668,7 +2745,7 @@
       peakLine.setAttribute('y1', '0');
       peakLine.setAttribute('y2', '0');
 
-      svg.append(areaPath, linePath, peakLine);
+      svg.append(areaPath, linePath, lastDot, peakLine);
 
       const pkTag = document.createElement('span');
       pkTag.className = 'coi-pk-tag';
@@ -2682,9 +2759,10 @@
       drawdown.className = 'coi-drawdown';
       drawdown.hidden = true;
 
-      element.append(svg, pkTag, main, drawdown);
+      wrap.append(svg, pkTag, main, drawdown);
+      element.append(wrap);
 
-      const refs = { areaPath, linePath, peakLine, pkTag, main, drawdown };
+      const refs = { areaPath, linePath, lastDot, peakLine, pkTag, main, drawdown };
       element.__coiRefs = refs;
       return refs;
     }
@@ -2696,6 +2774,7 @@
         refs.drawdown.hidden = true;
         refs.areaPath.setAttribute('d', '');
         refs.linePath.setAttribute('d', '');
+        refs.lastDot.style.display = 'none';
         refs.peakLine.setAttribute('y1', '0');
         refs.peakLine.setAttribute('y2', '0');
         refs.pkTag.style.display = 'none';
@@ -2707,6 +2786,18 @@
 
       refs.linePath.setAttribute('d', snap.lineD);
       refs.areaPath.setAttribute('d', snap.areaD);
+
+      // Hard fallback colours (presentation attributes) so the stroke/fill are
+      // never transparent even if the CSS variable is unavailable.
+      refs.linePath.setAttribute('stroke', snap.color);
+      refs.areaPath.setAttribute('fill', snap.color);
+      refs.peakLine.setAttribute('stroke', snap.color);
+      refs.lastDot.setAttribute('fill', snap.color);
+
+      // Endpoint dot keeps a single-tick (or two-tick) sparkline visible.
+      refs.lastDot.setAttribute('cx', String(COI_SPARK_W));
+      refs.lastDot.setAttribute('cy', snap.lastY.toFixed(2));
+      refs.lastDot.style.display = snap.hasTicks ? 'block' : 'none';
 
       const peakY = coiSparkY(snap.peak);
       refs.peakLine.setAttribute('y1', peakY.toFixed(2));
@@ -2775,6 +2866,8 @@
         peak,
         lineD: coiSparkLinePath(leg.ticks),
         areaD: coiSparkAreaPath(leg.ticks),
+        lastY: leg.ticks.length ? coiSparkY(leg.ticks[leg.ticks.length - 1]) : 0,
+        hasTicks: leg.ticks.length > 0,
         showDrawdown,
         drawdownLabel: `${drawdownPct.toFixed(1)}% from Pk`,
         flash,
@@ -2861,6 +2954,8 @@
         fragment.appendChild(tr);
       });
       compactBody.replaceChildren(fragment);
+      // Persist once per WebSocket/poll tick batch (never per cell).
+      saveCoiHistory();
     }
 
     async function refreshCompactChain() {

@@ -1978,13 +1978,36 @@ class ScalpSignalEngine:
         return " | ".join(msgs) if msgs else None
 
     def _compute_bias(self, profile: GammaProfile, out: ScalpSignals) -> None:
+        """V6 ADVANCED FIX: Macro-aligned scalp bias.
+        
+        The scalp engine now inherits the V2 Day Gamma score as a base. If the 
+        macro engine is strongly bullish (score >= 1.5), the scalp bias starts at +1.0 
+        instead of 0.0. This prevents the scalper from sitting at NEUTRAL during 
+        massive 150-point trends just because spot velocity is slightly below threshold.
+        """
         score = 0.0
-        reasons: List[str] = []
+        reasons = []
         thr = float(CONFIG.get("scalp_momentum_threshold", 0.5))
         bull_score = float(CONFIG.get("scalp_score_bull", 1.5))
         bear_score = float(CONFIG.get("scalp_score_bear", -1.5))
 
-        # Factor 1: raw GEX flip (most weight, freshest signal)
+        # --- NEW: MACRO INHERITANCE ---
+        # Pull the V2 Day Gamma score and use it as a base for the scalp bias.
+        day_score = profile.day_gamma.day_signal_score
+        if day_score >= 1.5:  # Macro is Mild or Strong Bullish
+            score += 1.0
+            reasons.append(f"+1.0 macro day gamma bullish ({day_score:+.2f})")
+        elif day_score <= -1.5:  # Macro is Mild or Strong Bearish
+            score -= 1.0
+            reasons.append(f"-1.0 macro day gamma bearish ({day_score:+.2f})")
+        elif 0.5 < day_score < 1.5:
+            score += 0.5
+            reasons.append(f"+0.5 macro day gamma leaning bullish ({day_score:+.2f})")
+        elif -1.5 < day_score < -0.5:
+            score -= 0.5
+            reasons.append(f"-0.5 macro day gamma leaning bearish ({day_score:+.2f})")
+
+        # --- FACTOR 1: RAW GEX FLIP (Micro trigger) ---
         if out.raw_gex_flip:
             if "POSITIVE" in out.raw_gex_flip:
                 score += 1.0
@@ -1993,18 +2016,18 @@ class ScalpSignalEngine:
                 score -= 1.0
                 reasons.append("-1.0 raw GEX flip negative")
 
-        # Factor 2: spot vs day flip + 10s velocity confirms direction
+        # --- FACTOR 2: SPOT VS DAY FLIP + VELOCITY (Confirmation) ---
         v10 = out.spot_velocity.get(10, 0.0)
         day_flip = profile.day_gamma.gamma_flip_level
         if day_flip is not None and day_flip > 0 and profile.spot > 0:
-            if profile.spot > day_flip and v10 > thr:
+            if profile.spot > day_flip and v10 > 0:  # RELAXED: just needs to be rising (>0), not >0.5
                 score += 0.5
                 reasons.append(f"+0.5 above day flip & rising ({v10:+.2f} pts/s)")
-            elif profile.spot < day_flip and v10 < -thr:
+            elif profile.spot < day_flip and v10 < 0: # RELAXED: just needs to be falling (<0), not <-0.5
                 score -= 0.5
                 reasons.append(f"-0.5 below day flip & falling ({v10:+.2f} pts/s)")
 
-        # Factor 3: wall test (support bounce vs resistance rejection)
+        # --- FACTOR 3: WALL TEST ---
         if out.wall_proximity_alert:
             if "Put Wall" in out.wall_proximity_alert:
                 score += 0.5
@@ -2013,7 +2036,7 @@ class ScalpSignalEngine:
                 score -= 0.5
                 reasons.append("-0.5 testing Call Wall (rejection candidate)")
 
-        # Factor 4: top-3 COI velocity bias
+        # --- FACTOR 4: COI VELOCITY ---
         if out.top_coi_velocity:
             call_deltas = [cv.deltas.get(30, 0.0) for cv in out.top_coi_velocity if cv.side == "call"]
             put_deltas = [cv.deltas.get(30, 0.0) for cv in out.top_coi_velocity if cv.side == "put"]
@@ -2026,10 +2049,8 @@ class ScalpSignalEngine:
                 score -= 0.3
                 reasons.append(f"-0.3 puts being unwound (avg ΔCOI 30s={avg_put:+.0f})")
 
-        # Factor 5: volume surge confirms (small bonus in the surge direction)
+        # --- FACTOR 5: VOLUME SURGE ---
         if out.volume_surge_alerts:
-            # Each surge on a call strike is mildly bearish (panic hedging),
-            # each on a put strike is mildly bullish (writing puts = support).
             call_surges = sum(1 for a in out.volume_surge_alerts if " CE" in a or "CALL" in a.upper())
             put_surges = sum(1 for a in out.volume_surge_alerts if " PE" in a or "PUT" in a.upper())
             if put_surges > call_surges:
@@ -2047,7 +2068,6 @@ class ScalpSignalEngine:
             out.bias = "BEARISH"
         else:
             out.bias = "NEUTRAL"
-
     # ====================================================================
     # V5: Three structured scalp setups (Pullback / Reversal / Breakout)
     # ====================================================================
