@@ -1006,11 +1006,15 @@ class GammaProcessor:
             if profile.day_gamma.gross_gex > 0 else 0.0
         )
 
+        # Weekly Gamma: search the FULL chain (band=None) for the macro structural flip.
         profile.weekly_gamma.gamma_flip_level = GammaProcessor._find_gamma_flip(
-            profile.strikes, "call_gex", "put_gex", profile.spot
+            profile.strikes, "call_gex", "put_gex", profile.spot, band=None
         )
+        # Day Gamma: intraday scalping only cares about ATM-local gamma, so keep the
+        # tight band around spot.
         profile.day_gamma.gamma_flip_level = GammaProcessor._find_gamma_flip(
-            day_strikes, "day_call_gex", "day_put_gex", profile.spot
+            day_strikes, "day_call_gex", "day_put_gex", profile.spot,
+            band=float(CONFIG.get("gamma_flip_band", 500))
         )
 
         profile.weekly_gamma.signal = gamma_regime_signal(
@@ -1125,15 +1129,32 @@ class GammaProcessor:
     def _find_gamma_flip(
         strikes: List[OptionStrike],
         call_gex_attr: str, put_gex_attr: str, spot: float,
+        band: Optional[float] = None,
     ) -> Optional[float]:
-        """Return the dominant zero-crossing of cumulative net GEX near spot."""
-        band = float(CONFIG.get("gamma_flip_band", 500))
+        """Return the dominant zero-crossing of cumulative net GEX near spot.
+
+        ``band`` controls the search window around spot:
+
+        * a positive value (e.g. 500) restricts the search to
+          ``[spot - band, spot + band]`` — correct for Day Gamma, where only
+          ATM-local gamma matters to intraday scalping;
+        * ``None`` (or 0) searches the entire supplied strike chain — correct
+          for Weekly Gamma, where the macro structural flip can sit far OTM.
+
+        The cumulative sum is seeded from the absolute bottom of the supplied
+        chain (not reset at the band edge) so every crossing tested is a
+        chain-wide crossing.
+        """
         ordered = sorted(strikes, key=lambda s: s.strike)
         if not ordered:
             return None
 
-        lower_edge = spot - band
-        upper_edge = spot + band
+        if band is not None and band > 0:
+            lower_edge = spot - band
+            upper_edge = spot + band
+        else:
+            lower_edge = float("-inf")
+            upper_edge = float("inf")
 
         cumulative = 0.0
         prev_cumulative: Optional[float] = None
@@ -1163,11 +1184,18 @@ class GammaProcessor:
 
             prev_sign = (prev_cumulative > 0) - (prev_cumulative < 0)
             curr_sign = (cumulative > 0) - (cumulative < 0)
-            if prev_sign != 0 and prev_sign != curr_sign:
+            if prev_sign != curr_sign:
                 gex_diff = cumulative - prev_cumulative
                 if gex_diff != 0:
-                    ratio = abs(prev_cumulative) / abs(gex_diff)
-                    level = prev_strike + (strike_price - prev_strike) * ratio
+                    if prev_cumulative == 0:
+                        # Crossed through zero exactly at the previous strike.
+                        level = prev_strike
+                    elif cumulative == 0:
+                        # Cumulative lands exactly on zero at the current strike.
+                        level = strike_price
+                    else:
+                        ratio = abs(prev_cumulative) / abs(gex_diff)
+                        level = prev_strike + (strike_price - prev_strike) * ratio
                     swing = abs(gex_diff)
                     if swing > best_swing or (
                         swing == best_swing

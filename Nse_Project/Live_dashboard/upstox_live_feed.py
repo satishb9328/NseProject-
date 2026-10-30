@@ -1531,7 +1531,11 @@ def _real_net_gex(instrument_data=None, spot: float = 0.0) -> dict:
         charm_ratio = (day.net_charm / gross_charm) if gross_charm > 0 else 0.0
 
         gex_ratio = day.net_gex_ratio if math.isfinite(day.net_gex_ratio) else 0.0
-        flip = day.gamma_flip_level if day.gamma_flip_level is not None else profile.gamma_flip_level
+        # Day Gamma flip is strictly the ATM-local (±band) zero-crossing computed by
+        # _build_metrics (band=500). Do NOT fall back to profile.gamma_flip_level, which
+        # is now the full-chain Weekly flip — a different regime that must not leak into
+        # the intraday Day card.
+        flip = day.gamma_flip_level
 
         return {
             "net_gex": float(day.net_gex),

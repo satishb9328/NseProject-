@@ -42,10 +42,14 @@
   .cvd-bull { color: #4ade80; text-shadow: 0 0 14px rgba(74,222,128,.45); }
   .cvd-bear { color: #f87171; text-shadow: 0 0 14px rgba(248,113,113,.45); }
   .cvd-neutral { color: #eab308; }
+  .gamma-snapshot-grid { grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 1024px) {
+    .gamma-snapshot-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1fr); }
+  }
 
   /* ---- Compact Options Chain (center column) ---- */
   .compact-chain-table { width: 100%; height: 100%; border-collapse: collapse; font-size: 10px; line-height: 1.25; text-align: center; }
-  .compact-chain-table th, .compact-chain-table td { white-space: nowrap; padding: 4px 3px; }
+  .compact-chain-table th, .compact-chain-table td { white-space: nowrap; padding: 2px 2px; }
   .compact-chain-table th.call-side, .compact-chain-table td.call-side { color: #7dd3fc; }
   .compact-chain-table th.put-side, .compact-chain-table td.put-side { color: #fdba74; }
   .compact-chain-table th.strike-header, .compact-chain-table td.strike-cell { color: #cbd5e1; }
@@ -64,7 +68,7 @@
 
   .coi-rel-cell {
     --coi-color: #00ff88;
-    min-width: 62px;
+    min-width: 110px;
     padding: 0 !important;
     background: transparent !important;
     vertical-align: middle;
@@ -77,12 +81,13 @@
   .coi-rel-cell .coi-rel-wrap {
     position: relative;
     width: 100%;
-    min-height: 30px;
+    min-height: 48px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 3px 4px;
+    gap: 2px;
+    padding: 4px 2px;
     box-sizing: border-box;
     overflow: hidden;
   }
@@ -95,8 +100,11 @@
     width: 100%;
     height: 100%;
     z-index: 0;
-    display: block;
+    display: none !important;
     pointer-events: none;
+  }
+  .coi-rel-cell .coi-rel-wrap {
+    background-color: rgba(2, 6, 23, .72);
   }
   .coi-rel-cell .coi-spark-area {
     fill: var(--coi-color, #00ff88);
@@ -121,38 +129,39 @@
     vector-effect: non-scaling-stroke;
   }
   .coi-rel-cell .coi-pk-tag {
-    position: absolute;
-    left: 3px;
-    z-index: 1;
-    font-size: 6px;
-    font-weight: 800;
-    line-height: 1;
+    display: block;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.1;
+    opacity: 0.8;
     letter-spacing: .02em;
+    white-space: nowrap;
     color: var(--coi-color, #00ff88);
-    text-shadow: 0 0 4px var(--coi-color, #00ff88);
-    transform: translateY(-100%);
-    pointer-events: none;
+    text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 0 6px rgba(0,0,0,0.9);
   }
   .coi-rel-cell .coi-main {
     position: relative;
     z-index: 2;
     display: block;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 700;
+    line-height: 1.1;
     color: var(--coi-color, #00ff88);
-    text-shadow: 0 0 5px var(--coi-color, #00ff88), 0 0 9px var(--coi-color, #00ff88);
+    text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 0 8px #000, 0 0 12px var(--coi-color);
   }
   .coi-rel-cell .coi-drawdown {
     position: relative;
     z-index: 2;
     display: block;
-    margin-top: 1px;
-    font-size: 8.5px;
-    font-weight: 600;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.1;
+    opacity: 0.9;
     color: #ff6b6b;
     letter-spacing: .02em;
     white-space: nowrap;
+    text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 0 6px rgba(0,0,0,0.9);
   }
 
   /* ---- Neon pulse animations (box-shadow + text-shadow) ---- */
@@ -239,14 +248,16 @@
     border-color: rgba(239, 68, 68, 0.9);
   }
 
-  /* ---- Deadly Combo signal row highlight (subtle pulsing glow) ----
+  /* ---- Deadly Combo signal highlight (subtle pulsing glow) ----
      Applied to a compact-chain <tr> when a backend deadly_combo_signal
-     matches its strike. Green = CE side, red = PE side. Low-alpha
-     background + inset ring keeps every cell's text clearly readable. */
+     matches its strike. CE glows across the row; PE glows on put-side cells. */
   .ce-signal-glow {
     animation: ce-signal-glow 3.0s ease-in-out infinite;
   }
   .pe-signal-glow {
+    animation: none;
+  }
+  .pe-signal-glow td.put-side {
     animation: pe-signal-glow 3.0s ease-in-out infinite;
   }
   @keyframes ce-signal-glow {
@@ -257,10 +268,10 @@
     0%, 100% { background-color: rgba(239, 68, 68, 0.03); box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.06); }
     50%      { background-color: rgba(239, 68, 68, 0.12); box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.14); }
   }
-  /* Keep row text (LTP / COI) at full contrast through the soft pulse. */
-  .ce-signal-glow td, .pe-signal-glow td { text-shadow: 0 1px 2px rgba(2, 6, 23, .85); }
+  /* Keep signal text at full contrast through the soft pulse. */
+  .ce-signal-glow td, .pe-signal-glow td.put-side { text-shadow: 0 1px 2px rgba(2, 6, 23, .85); }
   @media (prefers-reduced-motion: reduce) {
-    .ce-signal-glow, .pe-signal-glow { animation: none; }
+    .ce-signal-glow, .pe-signal-glow, .pe-signal-glow td.put-side { animation: none; }
   }
 
   /* ---- PRE-OPEN MARKET (CASH): nearest-IEP blink (minimalist glow) ----
@@ -631,74 +642,41 @@
 </style>
 {% endblock %}
 
+{% block navbar_content %}
+<div class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-4 gap-y-2">
+  <div class="text-lg font-bold text-slate-50 sm:text-xl">Gamma Intelligence</div>
+  <div class="flex items-center gap-3 text-xs font-semibold text-slate-300 sm:gap-6 sm:text-sm">
+    <span>SPOT: <span id="live-spot-price" class="font-mono text-white transition-colors duration-300">--</span><span id="live-spot" class="hidden">--</span></span>
+    <span>Expiry: <span id="live-expiry" class="font-mono text-white">--</span></span>
+  </div>
+  <div class="flex items-center gap-3">
+    <div class="hidden text-sm font-bold uppercase tracking-[.3em] text-neon-green sm:block">Live Signals</div>
+    <button id="scalper-toggle" type="button" class="scalper-toggle" aria-pressed="false" title="Toggle between intraday mode (V2 composite score) and scalper mode (V3 raw GEX flips + ATR stops + COI velocity)">
+      <span class="pulse-dot"></span><span class="toggle-label">⚡ SCALPER: OFF</span>
+    </button>
+  </div>
+</div>
+{% endblock %}
+
 {% block content %}
 <section class="relative overflow-hidden rounded-3xl glass px-6 py-1 sm:px-10 lg:py-1">
   <div class="pointer-events-none absolute inset-0 bg-grid opacity-60"></div>
   <div class="relative">
-    <div class="flex items-center justify-between w-full mb-3 gap-4">
-      <div class="text-xl font-bold text-slate-50">Gamma Intelligence</div>
-      <div class="flex items-center gap-8 text-sm font-semibold text-slate-300">
-        <span>SPOT: <span id="live-spot-price" class="text-white font-mono transition-colors duration-300">--</span><span id="live-spot" class="hidden">--</span></span>
-        <span>Expiry: <span id="live-expiry" class="text-white font-mono">--</span></span>
-      </div>
-      <div class="flex items-center gap-3">
-        <div class="text-sm font-bold text-neon-green uppercase tracking-[.3em] hidden sm:block">Live Signals</div>
-        <button id="scalper-toggle" type="button" class="scalper-toggle" aria-pressed="false" title="Toggle between intraday mode (V2 composite score) and scalper mode (V3 raw GEX flips + ATR stops + COI velocity)">
-          <span class="pulse-dot"></span><span class="toggle-label">⚡ SCALPER: OFF</span>
-        </button>
-      </div>
-    </div>
-
     <section id="gamma-snapshot" class="mt-0">
-      <div class="grid grid-cols-1 items-stretch gap-x-3 gap-y-2 lg:grid-cols-3">
-        <div class="flex h-full flex-col rounded-xl border border-sky-500/30 bg-sky-950/20 p-3 lg:col-start-1 lg:row-start-1">
-          <div class="mb-1 flex items-center justify-between"><h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-sky-300">NIFTY WEEKLY GAMMA</h2><span class="text-[10px] uppercase tracking-wider text-slate-500">Total OI</span></div>
-          <div class="grid grid-cols-3 gap-2 text-xs">
+      <div class="gamma-snapshot-grid grid grid-cols-1 content-start items-start gap-x-3 gap-y-2">
+      <div class="flex h-fit flex-col gap-3 lg:col-start-1 lg:row-start-1 lg:row-span-2">
+        <div class="flex h-fit flex-col self-start rounded-xl border border-sky-500/30 bg-sky-950/20 p-2">
+          <div class="mb-0 flex items-center justify-between"><h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-sky-300">NIFTY WEEKLY GAMMA</h2><span class="text-[10px] uppercase tracking-wider text-slate-500">Total OI</span></div>
+          <div class="grid grid-cols-3 gap-1 text-xs">
             <div><span class="block uppercase tracking-wider text-slate-500">PCR</span><span id="weekly-pcr" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
-            <div><span class="block uppercase tracking-wider text-slate-500">GAMMA FLIP</span><span id="weekly-gamma-flip" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span><div id="weekly-gamma-flip-warning" class="gamma-flip-warning mt-1"><span class="gamma-flip-warning-track text-xs font-semibold text-orange-400">⚠️ NO FLIP DETECTED: Strong one-sided trend. Safety guard active.</span></div></div>
+            <div><span class="block uppercase tracking-wider text-slate-500">GAMMA FLIP</span><span id="weekly-gamma-flip" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span><div id="weekly-gamma-flip-warning" class="gamma-flip-warning mt-1"><span class="gamma-flip-warning-track text-xs font-semibold text-orange-400">⚠️ FLIP OUT OF RANGE: Gamma crossover is deep OTM or undefined for this session.</span></div></div>
             <div><span class="block uppercase tracking-wider text-slate-500">NET GEX</span><span id="weekly-net-gex" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
-            <div class="col-span-3 mt-1 grid grid-cols-2 gap-2 border-t border-sky-500/20 pt-2 text-[11px]"><span class="font-medium text-orange-300">CALL WALL (Res): <span id="weekly-call-wall" class="font-mono">--</span></span><span class="text-right font-medium text-emerald-300">PUT WALL (Sup): <span id="weekly-put-wall" class="font-mono">--</span></span></div>
-            <div class="col-span-3 grid grid-cols-2 gap-2 text-[11px]"><span class="font-medium text-slate-400">NET CHARM: <span id="weekly-net-charm" class="font-mono text-slate-200">--</span></span><span class="text-right font-medium text-slate-400">NET VANNA: <span id="weekly-net-vanna" class="font-mono text-slate-200">--</span></span></div>
+            <div class="col-span-3 mt-0 grid grid-cols-2 gap-1 border-t border-sky-500/20 pt-1 text-[11px]"><span class="font-medium text-orange-300">CALL WALL (Res): <span id="weekly-call-wall" class="font-mono">--</span></span><span class="text-right font-medium text-emerald-300">PUT WALL (Sup): <span id="weekly-put-wall" class="font-mono">--</span></span></div>
+            <div class="col-span-3 mt-2 grid grid-cols-2 gap-1 text-[11px]"><span class="font-medium text-slate-400">NET CHARM: <span id="weekly-net-charm" class="font-mono text-slate-200">--</span></span><span class="text-right font-medium text-slate-400">NET VANNA: <span id="weekly-net-vanna" class="font-mono text-slate-200">--</span></span></div>
           </div>
-          <p id="weekly-net-gex-summary" class="mt-auto pt-2  text-[11px] font-medium text-slate-400">--</p>
+          <p id="weekly-net-gex-summary" class="mt-4 text-[11px] font-medium text-slate-400">--</p>
         </div>
-        <div class="flex h-full flex-col rounded-xl border border-amber-500/30 bg-amber-950/20 p-3 lg:col-start-3 lg:row-start-1">
-          <div class="mb-1 flex items-center justify-between"><h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-amber-300">NIFTY DAY GAMMA</h2><span class="text-[10px] uppercase tracking-wider text-slate-500">Today COI</span></div>
-          <div class="grid grid-cols-3 gap-2 text-xs">
-            <div><span class="block uppercase tracking-wider text-slate-500">PCR</span><span id="day-pcr" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
-            <div><span class="block uppercase tracking-wider text-slate-500">GAMMA FLIP</span><span id="day-gamma-flip" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span><div id="day-gamma-flip-warning" class="gamma-flip-warning mt-1"><span class="gamma-flip-warning-track text-xs font-semibold text-orange-400">⚠️ NO FLIP DETECTED: Strong one-sided trend. Safety guard active.</span></div></div>
-            <div><span class="block uppercase tracking-wider text-slate-500">NET GEX</span><span id="day-net-gex" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
-            <div class="col-span-3 mt-1 grid grid-cols-2 gap-2 border-t border-amber-500/20 pt-2 text-[11px]"><span class="font-medium text-orange-300">CALL WALL (Res): <span id="day-call-wall" class="font-mono">--</span></span><span class="text-right font-medium text-emerald-300">PUT WALL (Sup): <span id="day-put-wall" class="font-mono">--</span></span></div>
-            <div class="col-span-3 grid grid-cols-3 gap-2 text-[11px]"><span class="font-medium text-slate-400">NET CHARM: <span id="day-net-charm" class="font-mono text-slate-200">--</span></span><span class="text-center font-medium text-slate-400">NET VANNA: <span id="day-net-vanna" class="font-mono text-slate-200">--</span></span><span class="text-right font-medium text-slate-400">ATM DECAY/HR: <span id="day-atm-decay" class="font-mono text-slate-200">--</span></span></div>
-          </div>
-          <p id="day-net-gex-summary" class="mt-auto pt-2 text-[11px] font-medium text-slate-400">--</p>
-        </div>
-        <section id="compact-options-chain" class="flex h-full flex-col rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-3 lg:col-start-2 lg:row-start-1 lg:row-span-2">
-          <div class="mb-1 flex items-center justify-between">
-            <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-cyan-300">⚡ Compact Options Chain</h2>
-          </div>
-          <div class="flex-1 overflow-hidden rounded-lg">
-            <table id="compact-options-table" class="compact-chain-table">
-              <!-- ISSUE #8 FIX: Use <thead> for headers (was <tbody>) — semantic HTML
-                   for accessibility tools and screen readers. -->
-              <thead>
-                <tr>
-                  <th scope="col" class="call-side text-[11px]">CALL COI%</th>
-                  <th scope="col" class="call-side text-[11px]">CALL LTP</th>
-                  <th scope="col" class="call-side text-[11px]">CALL COI REL%</th>
-                  <th scope="col" class="strike-header text-[11px]">STRIKE</th>
-                  <th scope="col" class="put-side text-[11px]">PUT COI REL%</th>
-                  <th scope="col" class="put-side text-[11px]">PUT LTP</th>
-                  <th scope="col" class="put-side text-[11px]">PUT COI%</th>
-                </tr>
-              </thead>
-              <tbody id="compact-options-tbody">
-                <tr><td colspan="7" class="px-1 py-2 text-[11px] text-slate-500">Loading compact chain…</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-      <div class="flex h-full flex-col gap-2 lg:col-start-1 lg:row-start-2">
+      <div class="flex h-fit self-start flex-col gap-2">
         <section id="preopen-market" class="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
           <div class="mb-2 flex items-center justify-between gap-3">
             <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-slate-200">PRE-OPEN MARKET (CASH)</h2>
@@ -796,7 +774,45 @@
         </div>
       </div>
 
-      <section id="ai-trade-setups" class="flex h-full flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-4 lg:col-start-3 lg:row-start-2">
+      </div>
+        <section id="compact-options-chain" class="flex h-full flex-col rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-3 lg:col-start-2 lg:row-start-1 lg:row-span-2">
+          <div class="mb-1 flex items-center justify-between">
+            <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-cyan-300">⚡ Compact Options Chain</h2>
+          </div>
+          <div class="flex-1 overflow-hidden rounded-lg">
+            <table id="compact-options-table" class="compact-chain-table">
+              <!-- ISSUE #8 FIX: Use <thead> for headers (was <tbody>) — semantic HTML
+                   for accessibility tools and screen readers. -->
+              <thead>
+                <tr>
+                  <th scope="col" class="call-side text-[11px]">CALL COI%</th>
+                  <th scope="col" class="call-side text-[11px]">CALL LTP</th>
+                  <th scope="col" class="call-side text-[11px]">CALL COI REL%</th>
+                  <th scope="col" class="strike-header text-[11px]">STRIKE</th>
+                  <th scope="col" class="put-side text-[11px]">PUT COI REL%</th>
+                  <th scope="col" class="put-side text-[11px]">PUT LTP</th>
+                  <th scope="col" class="put-side text-[11px]">PUT COI%</th>
+                </tr>
+              </thead>
+              <tbody id="compact-options-tbody">
+                <tr><td colspan="7" class="px-1 py-1 text-[11px] text-slate-500">Loading compact chain…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      <div class="flex h-fit flex-col gap-3 lg:col-start-3 lg:row-start-1 lg:row-span-2">
+        <div class="flex h-fit flex-col self-start rounded-xl border border-amber-500/30 bg-amber-950/20 p-2">
+          <div class="mb-0 flex items-center justify-between"><h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-amber-300">NIFTY DAY GAMMA</h2><span class="text-[10px] uppercase tracking-wider text-slate-500">Today COI</span></div>
+          <div class="grid grid-cols-3 gap-1 text-xs">
+            <div><span class="block uppercase tracking-wider text-slate-500">PCR</span><span id="day-pcr" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
+            <div><span class="block uppercase tracking-wider text-slate-500">GAMMA FLIP</span><span id="day-gamma-flip" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span><div id="day-gamma-flip-warning" class="gamma-flip-warning mt-1"><span class="gamma-flip-warning-track text-xs font-semibold text-orange-400">⚠️ FLIP OUT OF RANGE: Gamma crossover is deep OTM or undefined for this session.</span></div></div>
+            <div><span class="block uppercase tracking-wider text-slate-500">NET GEX</span><span id="day-net-gex" class="mt-1 block font-mono text-lg font-semibold text-slate-50">--</span></div>
+            <div class="col-span-3 mt-0 grid grid-cols-2 gap-1 border-t border-amber-500/20 pt-1 text-[11px]"><span class="font-medium text-orange-300">CALL WALL (Res): <span id="day-call-wall" class="font-mono">--</span></span><span class="text-right font-medium text-emerald-300">PUT WALL (Sup): <span id="day-put-wall" class="font-mono">--</span></span></div>
+            <div class="col-span-3 mt-2 grid grid-cols-3 gap-1 text-[11px]"><span class="font-medium text-slate-400">NET CHARM: <span id="day-net-charm" class="font-mono text-slate-200">--</span></span><span class="text-center font-medium text-slate-400">NET VANNA: <span id="day-net-vanna" class="font-mono text-slate-200">--</span></span><span class="text-right font-medium text-slate-400">ATM DECAY/HR: <span id="day-atm-decay" class="font-mono text-slate-200">--</span></span></div>
+          </div>
+          <p id="day-net-gex-summary" class="mt-4 text-[11px] font-medium text-slate-400">--</p>
+        </div>
+      <section id="ai-trade-setups" class="flex h-fit self-start flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-4">
         <div class="mb-2 flex items-center justify-between gap-3">
           <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-slate-200">🤖 AI TRADE SETUPS (LIVE TEST)</h2>
           <span class="flex items-center gap-1.5 text-xs"><span class="uppercase tracking-wider text-slate-400">🕒 Time Decay:</span> <span id="ai-mom-decay" class="font-mono font-semibold text-amber-300">--</span></span>
@@ -952,7 +968,7 @@
       <!-- SCALP SIGNALS CARD — visible only when scalper toggle is ON.      -->
       <!-- Replaces #ai-trade-setups (above) — same grid cell, same size.    -->
       <!-- ================================================================ -->
-      <section id="scalp-trade-setups" class="flex h-full flex-col rounded-xl border border-cyan-700/60 bg-slate-900/40 p-4 lg:col-start-3 lg:row-start-2">
+      <section id="scalp-trade-setups" class="flex h-fit flex-col rounded-xl border border-cyan-700/60 bg-slate-900/40 p-4">
         <div class="mb-2 flex items-center justify-between gap-3">
           <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-cyan-300">⚡ Scalp Signals (V4)</h2>
           <div class="flex items-center gap-2">
@@ -1077,6 +1093,7 @@
         </div>
       </section>
     </div>
+      </div>
     </section>
 
     <div class="mt-4">
@@ -2629,7 +2646,12 @@
       return bucket[type === 'call' ? 'call' : 'put'];
     }
 
-    function coiSparkY(v) {
+    function coiSparkY(v, min, max) {
+      if (Number.isFinite(min) && Number.isFinite(max)) {
+        if (min === max) return COI_SPARK_H / 2;
+        const normalized = (Number(v) - min) / (max - min);
+        return (COI_SPARK_H - COI_SPARK_PAD) - normalized * (COI_SPARK_H - COI_SPARK_PAD * 2);
+      }
       const n = Number(v);
       const clamped = Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
       return COI_SPARK_H - COI_SPARK_PAD - (clamped / 100) * (COI_SPARK_H - COI_SPARK_PAD * 2);
@@ -2639,14 +2661,16 @@
       const valid = (Array.isArray(ticks) ? ticks : []).filter((v) => Number.isFinite(Number(v)));
       const n = valid.length;
       if (!n) return '';
+      const min = Math.min(...valid.map(Number));
+      const max = Math.max(...valid.map(Number));
       if (n === 1) {
-        const y = coiSparkY(valid[0]).toFixed(2);
+        const y = coiSparkY(valid[0], min, max).toFixed(2);
         return `M0 ${y} L${COI_SPARK_W} ${y}`;
       }
       let d = '';
       for (let i = 0; i < n; i += 1) {
         const x = (i / (n - 1)) * COI_SPARK_W;
-        const y = coiSparkY(valid[i]);
+        const y = coiSparkY(valid[i], min, max);
         d += `${i === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)} `;
       }
       return d.trim();
@@ -2759,6 +2783,7 @@
       drawdown.className = 'coi-drawdown';
       drawdown.hidden = true;
 
+      // Stack order (top → bottom): PK (peak) → current → drawdown.
       wrap.append(svg, pkTag, main, drawdown);
       element.append(wrap);
 
@@ -2802,8 +2827,9 @@
       const peakY = coiSparkY(snap.peak);
       refs.peakLine.setAttribute('y1', peakY.toFixed(2));
       refs.peakLine.setAttribute('y2', peakY.toFixed(2));
-      refs.pkTag.style.top = `${((peakY / COI_SPARK_H) * 100).toFixed(2)}%`;
       refs.pkTag.style.display = snap.peak > 0 ? '' : 'none';
+      // Surface the actual peak value on the PK tag instead of a static "PK" label.
+      refs.pkTag.textContent = snap.peak > 0 ? `PK: ${snap.peak.toFixed(1)}%` : 'PK';
 
       refs.main.textContent = snap.label;
 
@@ -2866,7 +2892,9 @@
         peak,
         lineD: coiSparkLinePath(leg.ticks),
         areaD: coiSparkAreaPath(leg.ticks),
-        lastY: leg.ticks.length ? coiSparkY(leg.ticks[leg.ticks.length - 1]) : 0,
+        lastY: leg.ticks.length
+          ? coiSparkY(leg.ticks[leg.ticks.length - 1], Math.min(...leg.ticks), Math.max(...leg.ticks))
+          : 0,
         hasTicks: leg.ticks.length > 0,
         showDrawdown,
         drawdownLabel: `${drawdownPct.toFixed(1)}% from Pk`,
@@ -2902,7 +2930,7 @@
 
     function renderCompactChain(rows, spot, signals = []) {
       if (!Array.isArray(rows) || !rows.length) {
-        compactBody.innerHTML = '<tr><td colspan="7" class="px-1 py-2 text-[11px] text-slate-500">No option chain data yet…</td></tr>';
+        compactBody.innerHTML = '<tr><td colspan="7" class="px-1 py-1 text-[11px] text-slate-500">No option chain data yet…</td></tr>';
         return;
       }
 
