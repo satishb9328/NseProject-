@@ -16,6 +16,7 @@
     text-transform: uppercase;
     opacity: .85;
   }
+  #macro-option-chain .metric-label { font-size: 10px; }
   .metric-bull { color: #4ade80; }
   .metric-bear { color: #f87171; }
   .metric-neutral { color: #facc15; }
@@ -221,17 +222,9 @@
   }
 
   /* ---- Deadly Combo signal highlight (subtle pulsing glow) ----
-     Applied to a compact-chain <tr> when a backend deadly_combo_signal
-     matches its strike. CE glows across the row; PE glows on put-side cells. */
-  .ce-signal-glow {
-    animation: ce-signal-glow 3.0s ease-in-out infinite;
-  }
-  .pe-signal-glow {
-    animation: none;
-  }
-  .pe-signal-glow td.put-side {
-    animation: pe-signal-glow 3.0s ease-in-out infinite;
-  }
+     Applied to matching-side cells only; the strike cell remains untouched. */
+  td.coi-rel-cell.ce-signal-glow { animation: ce-signal-glow 3.0s ease-in-out infinite; }
+  td.coi-rel-cell.pe-signal-glow { animation: pe-signal-glow 3.0s ease-in-out infinite; }
   @keyframes ce-signal-glow {
     0%, 100% { background-color: rgba(0, 255, 128, 0.03); box-shadow: inset 0 0 0 1px rgba(0, 255, 128, 0.06); }
     50%      { background-color: rgba(0, 255, 128, 0.14); box-shadow: inset 0 0 0 1px rgba(0, 255, 128, 0.15); }
@@ -241,9 +234,11 @@
     50%      { background-color: rgba(239, 68, 68, 0.12); box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.14); }
   }
   /* Keep signal text at full contrast through the soft pulse. */
-  .ce-signal-glow td, .pe-signal-glow td.put-side { text-shadow: 0 1px 2px rgba(2, 6, 23, .85); }
+  td.coi-rel-cell.ce-signal-glow,
+  td.coi-rel-cell.pe-signal-glow { text-shadow: 0 1px 2px rgba(2, 6, 23, .85); }
   @media (prefers-reduced-motion: reduce) {
-    .ce-signal-glow, .pe-signal-glow, .pe-signal-glow td.put-side { animation: none; }
+    td.coi-rel-cell.ce-signal-glow,
+    td.coi-rel-cell.pe-signal-glow { animation: none; }
   }
 
   /* ---- PRE-OPEN MARKET (CASH): nearest-IEP blink (minimalist glow) ----
@@ -726,7 +721,7 @@
           <p id="weekly-net-gex-summary" class="mt-4 text-[11px] font-medium text-slate-400">--</p>
         </div>
       <div class="flex h-fit self-start flex-col gap-2">
-        <section id="preopen-market" class="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+        <section id="preopen-market" class="rounded-xl border border-slate-800 bg-slate-900/40 px-3 py-4">
           <div class="mb-2 flex items-center justify-between gap-3">
             <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-slate-200">PRE-OPEN MARKET (CASH)</h2>
             <span class="text-[10px] uppercase tracking-wider text-slate-500">09:00 - 09:10 IST</span>
@@ -747,17 +742,17 @@
           </div>
         </section>
 
-        <section id="macro-option-chain" class="flex flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+        <section id="macro-option-chain" class="flex flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-2">
           <div class="mb-2 flex items-center justify-between gap-3">
-            <h2 class="text-sm font-bold uppercase tracking-[.18em] text-slate-200">TOTAL OPTION CHAIN (MACRO)</h2>
-            <span class="text-xs uppercase tracking-wider text-slate-500">Whole Chain · Live</span>
+            <h2 class="text-xs font-bold uppercase tracking-[.18em] text-slate-200">TOTAL OPTION CHAIN (MACRO)</h2>
+            <span class="text-[10px] uppercase tracking-wider text-slate-500">Whole Chain · Live</span>
           </div>
-          <div class="flex flex-col gap-2">
+          <div class="flex flex-col gap-1">
             <!-- Metric A: NET OI BIAS — bipolar, center-origin 0, scale -50% .. +50% -->
             <div id="macro-oi-bias-chip" class="sentiment-metric metric-neutral">
               <div class="flex items-center justify-between gap-3">
                 <span class="metric-label">Net OI Bias</span>
-                <span id="macro-oi-bias" class="font-mono text-sm font-semibold">--</span>
+                <span id="macro-oi-bias" class="font-mono text-xs font-semibold">--</span>
               </div>
               <div class="math-progress">
                 <div id="macro-oi-bias-bar" class="math-progress-track" role="img" aria-label="Net OI Bias meter">
@@ -772,7 +767,7 @@
             <div id="macro-vol-skew-chip" class="sentiment-metric metric-neutral">
               <div class="flex items-center justify-between gap-3">
                 <span class="metric-label">Total Vol Skew</span>
-                <span id="macro-vol-skew" class="font-mono text-sm font-semibold">--</span>
+                <span id="macro-vol-skew" class="font-mono text-xs font-semibold">--</span>
               </div>
               <div class="math-progress">
                 <div id="macro-vol-skew-bar" class="math-progress-track" role="img" aria-label="Total Vol Skew meter">
@@ -787,7 +782,7 @@
             <div id="macro-pcr-chip" class="sentiment-metric metric-neutral">
               <div class="flex items-center justify-between gap-3">
                 <span class="metric-label">Total PCR</span>
-                <span id="macro-pcr" class="font-mono text-sm font-semibold">--</span>
+                <span id="macro-pcr" class="font-mono text-xs font-semibold">--</span>
               </div>
               <div class="math-progress">
                 <div id="macro-pcr-bar" class="math-progress-track" role="img" aria-label="Total PCR meter">
@@ -799,27 +794,27 @@
               </div>
             </div>
           </div>
-          <div id="sentiment-insight" class="sentiment-insight insight-neutral mt-2 px-2.5 py-1.5 text-xs font-medium leading-snug">
+          <div id="sentiment-insight" class="sentiment-insight insight-neutral mt-1 px-2 py-1 text-[11px] font-medium leading-snug">
             <span class="font-bold uppercase tracking-wider opacity-80">💡 Smart Market Insight · </span><span id="sentiment-insight-text">Loading live sentiment…</span>
           </div>
         </section>
 
-        <div id="cvd-widget" class="rounded-xl border border-slate-800 bg-slate-900/50 p-3">
-          <div class="mb-2 flex items-center justify-between">
+        <div id="cvd-widget" class="h-fit rounded-xl border border-slate-800 bg-slate-900/50 p-2">
+          <div class="mb-1 flex items-center justify-between">
             <h3 class="text-xs font-bold uppercase tracking-[.18em] text-slate-300">📊 Cumulative Volume Delta</h3>
             <span id="cvd-status" class="rounded-full border border-slate-700 bg-slate-800/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-slate-400">Connecting…</span>
           </div>
-          <div class="grid grid-cols-2 gap-3">
-            <div class="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
+          <div class="grid grid-cols-2 gap-2">
+            <div class="rounded-lg border border-slate-800 bg-slate-950/40 px-2 py-1">
               <p class="text-[10px] uppercase tracking-wider text-slate-500">CVD</p>
-              <p id="cvd-value" class="cvd-value cvd-neutral font-mono text-xl font-bold">--</p>
+              <p id="cvd-value" class="cvd-value cvd-neutral font-mono text-lg font-bold">--</p>
             </div>
-            <div class="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
+            <div class="rounded-lg border border-slate-800 bg-slate-950/40 px-2 py-1">
               <p class="text-[10px] uppercase tracking-wider text-slate-500">CVD Trend · 4m</p>
-              <p id="cvd-trend" class="cvd-value cvd-neutral font-mono text-xl font-bold">--</p>
+              <p id="cvd-trend" class="cvd-value cvd-neutral font-mono text-lg font-bold">--</p>
             </div>
           </div>
-          <div class="mt-2 flex items-center justify-between text-[11px] text-slate-400">
+          <div class="mt-1 flex items-center justify-between text-[11px] text-slate-400">
             <span>Symbol <span id="cvd-symbol" class="font-mono text-slate-200">--</span></span>
             <span>Delta <span id="cvd-delta" class="font-mono text-slate-200">--</span></span>
             <span>Close <span id="cvd-close" class="font-mono text-slate-200">--</span></span>
@@ -847,7 +842,7 @@
                   <th scope="col" class="put-side text-[11px]">PUT COI%</th>
                 </tr>
               </thead>
-              <tbody id="compact-options-tbody" class="divide-y divide-slate-700/80">
+              <tbody id="compact-options-tbody" class="divide-y divide-slate-900/40">
                 <tr><td colspan="7" class="px-1 py-1 text-[11px] text-slate-500">Loading compact chain…</td></tr>
               </tbody>
             </table>
@@ -2781,7 +2776,7 @@
     }
 
     function coiFlash(element, cls) {
-      if (!cls) return;
+      if (!cls || element.tagName !== 'TD' || !element.classList.contains('coi-rel-cell')) return;
       element.classList.remove('flash-up', 'flash-down', 'flash-peak-breakout');
       // Two frames guarantee the class removal is committed before the re-add,
       // restarting the CSS animation without a synchronous reflow.
@@ -2889,9 +2884,9 @@
 
       let flash = null;
       if (!firstTick) {
-        if (isNewPeak) flash = 'flash-peak-breakout';
-        else if (val > prev) flash = 'flash-up';
-        else if (val < prev) flash = 'flash-down';
+        if (type === 'put' && isNewPeak) flash = 'flash-peak-breakout';
+        else if (type === 'put' && val > prev) flash = 'flash-up';
+        else if (type === 'call' && val < prev) flash = 'flash-down';
       }
 
       const showDrawdown = val < peak && drawdownPct < -0.05;
@@ -2970,11 +2965,10 @@
         const tr = entry.tr;
         const cells = entry.cells;
 
-        // Reset per-tick row state: ATM highlight + any Deadly Combo glow.
+        // Reset row state; signal glows are applied only to COI REL% cells below.
         tr.className = '';
         if (strike === atmStrike) tr.classList.add('atm-row');
         const signalGlow = signalClassByStrike.get(String(row.strike));
-        if (signalGlow) tr.classList.add(signalGlow);
 
         // CALL/PUT COI% + LTP stay lightweight plain text; the two COI REL%
         // columns render through the intraday peak engine (text only).
@@ -2985,6 +2979,15 @@
         renderCoiRelCell(cells.relPut, row.put_coi_rel_pct, strike, 'put');
         cells.ltpPut.textContent = fmtLtp(row.put_ltp);
         cells.coiPut.textContent = fmtCoi(row.put_coi_pct);
+
+        [cells.relCall, cells.relPut].forEach((cell) => {
+          cell.classList.remove('ce-signal-glow', 'pe-signal-glow');
+        });
+        if (signalGlow === 'ce-signal-glow') {
+          cells.relCall.classList.add(signalGlow);
+        } else if (signalGlow === 'pe-signal-glow') {
+          cells.relPut.classList.add(signalGlow);
+        }
 
         fragment.appendChild(tr);
       });
