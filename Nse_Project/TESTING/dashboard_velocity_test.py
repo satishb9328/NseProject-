@@ -145,11 +145,21 @@ def test_live_signals_html() -> None:
     check("compact table present", 'id="compact-options-table"' in html, True)
     check("compact table class present", 'class="compact-chain-table"' in html, True)
 
-    # The compact chain renders 7 columns: the original five plus two relative COI columns.
+    # The compact chain keeps all 7 columns; only the COI REL% SVG sparkline was removed.
     for header in (">CALL COI%</th>", ">CALL LTP</th>", ">CALL COI REL%</th>",
                    ">STRIKE</th>", ">PUT COI REL%</th>", ">PUT LTP</th>",
                    ">PUT COI%</th>"):
         check(f"compact header {header!r}", header in html, True)
+
+    # The SVG sparkline graph is gone, but the COI REL% text renderer remains.
+    check("sparkline CSS removed", ".coi-sparkline" in html, False)
+    check("sparkline path math removed", "coiSparkLinePath" in html, False)
+    check("SVG namespace removed", "COI_SVG_NS" in html, False)
+    check("text renderer present", "function renderCoiRelCell" in html, True)
+    check("value formatter present", "fmtCoiRel" in html, True)
+    check("main value text kept", ".coi-main" in html, True)
+    check("peak tag text kept", ".coi-pk-tag" in html, True)
+    check("drawdown text kept", ".coi-drawdown" in html, True)
 
     # renderCompactChain reads the 7 compact fields (5 original + 2 relative COI).
     check("compact renderer present", "function renderCompactChain" in html, True)

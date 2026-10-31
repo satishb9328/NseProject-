@@ -55,10 +55,10 @@
   .compact-chain-table th.strike-header, .compact-chain-table td.strike-cell { color: #cbd5e1; }
   .compact-chain-table tr.atm-row td { background-color: rgba(6, 182, 212, 0.1); box-shadow: inset 0 0 0 1px rgba(56, 189, 248, .6); color: #e0f2fe; font-weight: 700; }
 
-  /* ---- COI REL% intraday peak engine + mini SVG sparkline cells ---- */
+  /* ---- COI REL% intraday peak engine (text-only cells) ---- */
   /* Style reset: the old red/green/amber dominance badges are removed and these
-     two columns render on a dark/transparent background so the SVG sparkline
-     sits cleanly behind the text. */
+     two columns render on a dark/transparent background with the value, peak
+     tag, and drawdown overlaid as plain text. */
   .compact-chain-table td.coi-rel-cell {
     background: transparent !important;
     background-color: transparent !important;
@@ -76,8 +76,8 @@
     line-height: 1.15;
   }
   /* Inner wrapper is the real positioning context. `position: relative` on a
-     <td> is unreliable across browsers, so the absolute SVG and overlays are
-     anchored to this div instead of the cell. */
+     <td> is unreliable across browsers, so the text overlays are anchored to
+     this div instead of the cell. */
   .coi-rel-cell .coi-rel-wrap {
     position: relative;
     width: 100%;
@@ -91,42 +91,8 @@
     box-sizing: border-box;
     overflow: hidden;
   }
-  .coi-rel-cell .coi-sparkline {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    z-index: 0;
-    display: none !important;
-    pointer-events: none;
-  }
   .coi-rel-cell .coi-rel-wrap {
     background-color: rgba(2, 6, 23, .72);
-  }
-  .coi-rel-cell .coi-spark-area {
-    fill: var(--coi-color, #00ff88);
-    opacity: .12;
-  }
-  .coi-rel-cell .coi-spark-line {
-    fill: none;
-    stroke: var(--coi-color, #00ff88);
-    stroke-width: 1.8;
-    stroke-linejoin: round;
-    stroke-linecap: round;
-    vector-effect: non-scaling-stroke;
-  }
-  .coi-rel-cell .coi-last-dot {
-    fill: var(--coi-color, #00ff88);
-  }
-  .coi-rel-cell .coi-peak-line {
-    stroke: var(--coi-color, #00ff88);
-    stroke-width: 1;
-    stroke-dasharray: 3 2;
-    opacity: .85;
-    vector-effect: non-scaling-stroke;
   }
   .coi-rel-cell .coi-pk-tag {
     display: block;
@@ -136,8 +102,14 @@
     opacity: 0.8;
     letter-spacing: .02em;
     white-space: nowrap;
-    color: var(--coi-color, #00ff88);
+    color: #ffffff;
     text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 0 6px rgba(0,0,0,0.9);
+    transition: color .2s ease;
+  }
+  /* Peak breakout: the live value is at / forming a new session high. */
+  .coi-rel-cell .coi-pk-tag.is-peak {
+    color: #00ff88;
+    text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 0 8px rgba(0, 255, 136, .85);
   }
   .coi-rel-cell .coi-main {
     position: relative;
@@ -295,6 +267,83 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .blink-bullish, .blink-bearish { animation: none; }
+  }
+
+  /* ---- PRE-OPEN TRAP ALERT (Actionable Trap Signal) ----
+     High-visibility alert at the bottom of the PRE-OPEN MARKET (CASH) card.
+     updatePreopen() swaps the .trap-tone-* class on every poll / WS tick.
+     Bullish & bearish pulse via `pulse-glow` (currentColor adapts green vs red);
+     neutral = amber, flat = slate. */
+  .trap-alert {
+    margin-top: .55rem;
+    border-radius: .55rem;
+    border: 1px solid rgba(148, 163, 184, .35);
+    padding: .6rem .7rem;
+    transition: background-color .4s ease, border-color .4s ease,
+                box-shadow .4s ease, color .4s ease, opacity .3s ease;
+  }
+  .trap-alert.is-hidden { display: none; }
+
+  #trap-signal-text {
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    line-height: 1.35;
+  }
+  #trap-advice-text {
+    font-size: 11px;
+    line-height: 1.4;
+    margin-top: .25rem;
+    opacity: .95;
+  }
+  .trap-status-chip {
+    display: inline-block;
+    margin-left: .45rem;
+    padding: .1rem .4rem;
+    border-radius: 999px;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    vertical-align: middle;
+    border: 1px solid currentColor;
+    opacity: .85;
+  }
+
+  /* Bullish — neon-green text/border with pulsing glow */
+  .trap-tone-bullish {
+    color: #4ade80;
+    border-color: rgba(74, 222, 128, .9);
+    background-color: rgba(34, 197, 94, .10);
+    animation: pulse-glow 1.8s ease-in-out infinite;
+  }
+  /* Bearish — crimson/red text/border with pulsing glow */
+  .trap-tone-bearish {
+    color: #f87171;
+    border-color: rgba(248, 113, 113, .9);
+    background-color: rgba(239, 68, 68, .12);
+    animation: pulse-glow 1.8s ease-in-out infinite;
+  }
+  /* Neutral — amber/yellow styling */
+  .trap-tone-neutral {
+    color: #facc15;
+    border-color: rgba(250, 204, 21, .55);
+    background-color: rgba(250, 204, 21, .08);
+  }
+  /* Flat — slate/gray styling */
+  .trap-tone-flat {
+    color: #cbd5e1;
+    border-color: rgba(148, 163, 184, .5);
+    background-color: rgba(148, 163, 184, .08);
+  }
+
+  @keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 0 5px currentColor; }
+    50%      { box-shadow: 0 0 20px currentColor; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .trap-tone-bullish, .trap-tone-bearish { animation: none; }
   }
 
   /* =====================================================================
@@ -692,6 +741,10 @@
             <span class="flex-1 text-center text-xs font-semibold uppercase tracking-wider text-slate-500">Projected Open vs Prev Close</span>
             <span id="preopen-projected-pct" class="font-mono text-sm font-bold {% if projected_open_tone == 'up' %}text-green-400{% elif projected_open_tone == 'down' %}text-red-400{% else %}text-slate-500{% endif %}">{{ projected_open_display }}</span>
           </div>
+          <div id="preopen-trap-alert-box" class="trap-alert {% if trap_tone == 'bullish' %}trap-tone-bullish{% elif trap_tone == 'bearish' %}trap-tone-bearish{% elif trap_tone == 'flat' %}trap-tone-flat{% else %}trap-tone-neutral{% endif %}">
+            <div id="trap-signal-text">{{ actionable_signal|default:"—" }}{% if trap_status %}<span class="trap-status-chip">{{ trap_status }}</span>{% endif %}</div>
+            <div id="trap-advice-text">{{ trade_advice|default:"" }}</div>
+          </div>
         </section>
 
         <section id="macro-option-chain" class="flex flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-3">
@@ -776,7 +829,7 @@
 
       </div>
         <section id="compact-options-chain" class="flex h-full flex-col rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-3 lg:col-start-2 lg:row-start-1 lg:row-span-2">
-          <div class="mb-1 flex items-center justify-between">
+          <div class="mb-1 flex w-full items-center justify-center text-center">
             <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-cyan-300">⚡ Compact Options Chain</h2>
           </div>
           <div class="flex-1 overflow-hidden rounded-lg">
@@ -794,7 +847,7 @@
                   <th scope="col" class="put-side text-[11px]">PUT COI%</th>
                 </tr>
               </thead>
-              <tbody id="compact-options-tbody">
+              <tbody id="compact-options-tbody" class="divide-y divide-slate-700/80">
                 <tr><td colspan="7" class="px-1 py-1 text-[11px] text-slate-500">Loading compact chain…</td></tr>
               </tbody>
             </table>
@@ -2332,6 +2385,48 @@
         pctEl.classList.add('text-slate-500');
       }
     }
+
+    // --- Pre-Open Trap Alert Box (EOD FNO participant OI x projected open) ---
+    // Backend sends trap_status / trap_tone / actionable_signal / trade_advice.
+    // Bind them into the card, swap the tone class, and hide when absent.
+    const trapBox = document.getElementById('preopen-trap-alert-box');
+    if (trapBox) {
+      const signal = data.actionable_signal;
+      const status = data.trap_status;
+      const advice = data.trade_advice;
+      const tone = data.trap_tone;
+
+      if (!signal && !advice) {
+        trapBox.classList.add('is-hidden');
+      } else {
+        trapBox.classList.remove('is-hidden');
+
+        const toneClasses = ['trap-tone-bullish', 'trap-tone-bearish', 'trap-tone-neutral', 'trap-tone-flat'];
+        trapBox.classList.remove(...toneClasses);
+        trapBox.classList.add(
+          tone === 'bullish' ? 'trap-tone-bullish' :
+          tone === 'bearish' ? 'trap-tone-bearish' :
+          tone === 'flat' ? 'trap-tone-flat' :
+          'trap-tone-neutral'
+        );
+
+        const signalEl = document.getElementById('trap-signal-text');
+        if (signalEl) {
+          signalEl.textContent = '';
+          if (signal) signalEl.appendChild(document.createTextNode(signal));
+          if (status) {
+            const chip = document.createElement('span');
+            chip.className = 'trap-status-chip';
+            chip.textContent = status;
+            signalEl.appendChild(chip);
+          }
+          if (!signal && !status) signalEl.textContent = '—';
+        }
+
+        const adviceEl = document.getElementById('trap-advice-text');
+        if (adviceEl) adviceEl.textContent = advice || '';
+      }
+    }
   }
   // V5 FIX: AbortController for preopen polling — same pattern as the other two
   let preopenAbortController = null;
@@ -2592,9 +2687,9 @@
     };
 
     // ====================================================================
-    // Intraday Peak Tracking Engine + Mini SVG Sparkline renderer for the
-    // CALL/PUT COI REL% cells. window.coiRelHistory holds every strike's
-    // rolling tick history and its day peak; drawdown is measured vs that peak.
+    // Intraday Peak Tracking Engine (text-only) for the CALL/PUT COI REL%
+    // cells. window.coiRelHistory holds every strike's { peak, last } pair
+    // (no rolling tick array — the graph is gone); drawdown is last vs peak.
     // ====================================================================
     const COI_STORAGE_KEY = 'nse_coi_intraday_history';
     // Consistent daily key so save/load always compare the same string.
@@ -2630,56 +2725,29 @@
       saveCoiHistory(); // new trading day: reset and overwrite any stale blob
     }
 
-    const COI_SPARK_W = 100;    // SVG viewBox width (arbitrary units)
-    const COI_SPARK_H = 36;     // SVG viewBox height
-    const COI_SPARK_PAD = 3;    // top/bottom padding inside the viewBox
-    const COI_MAX_TICKS = 240;  // rolling sparkline window; the session peak is NOT trimmed
-    const COI_SVG_NS = 'http://www.w3.org/2000/svg';
-
     function coiLeg(strike, type) {
       const key = String(strike);
       let bucket = window.coiRelHistory[key];
       if (!bucket) {
-        bucket = { call: { ticks: [], peak: 0 }, put: { ticks: [], peak: 0 } };
+        bucket = { call: { peak: 0, last: null }, put: { peak: 0, last: null } };
         window.coiRelHistory[key] = bucket;
       }
-      return bucket[type === 'call' ? 'call' : 'put'];
-    }
-
-    function coiSparkY(v, min, max) {
-      if (Number.isFinite(min) && Number.isFinite(max)) {
-        if (min === max) return COI_SPARK_H / 2;
-        const normalized = (Number(v) - min) / (max - min);
-        return (COI_SPARK_H - COI_SPARK_PAD) - normalized * (COI_SPARK_H - COI_SPARK_PAD * 2);
+      const legKey = type === 'call' ? 'call' : 'put';
+      let leg = bucket[legKey];
+      // One-time migration of any legacy array-based leg ({ ticks: [...] }) into
+      // the lightweight { peak, last } shape. `peak` is authoritative; `last` is
+      // derived from the final tick.
+      if (!leg) {
+        leg = { peak: 0, last: null };
+        bucket[legKey] = leg;
+      } else if (Array.isArray(leg.ticks)) {
+        leg = {
+          peak: typeof leg.peak === 'number' ? leg.peak : 0,
+          last: leg.ticks.length ? leg.ticks[leg.ticks.length - 1] : null,
+        };
+        bucket[legKey] = leg;
       }
-      const n = Number(v);
-      const clamped = Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
-      return COI_SPARK_H - COI_SPARK_PAD - (clamped / 100) * (COI_SPARK_H - COI_SPARK_PAD * 2);
-    }
-
-    function coiSparkLinePath(ticks) {
-      const valid = (Array.isArray(ticks) ? ticks : []).filter((v) => Number.isFinite(Number(v)));
-      const n = valid.length;
-      if (!n) return '';
-      const min = Math.min(...valid.map(Number));
-      const max = Math.max(...valid.map(Number));
-      if (n === 1) {
-        const y = coiSparkY(valid[0], min, max).toFixed(2);
-        return `M0 ${y} L${COI_SPARK_W} ${y}`;
-      }
-      let d = '';
-      for (let i = 0; i < n; i += 1) {
-        const x = (i / (n - 1)) * COI_SPARK_W;
-        const y = coiSparkY(valid[i], min, max);
-        d += `${i === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)} `;
-      }
-      return d.trim();
-    }
-
-    function coiSparkAreaPath(ticks) {
-      const line = coiSparkLinePath(ticks);
-      if (!line) return '';
-      return `${line} L${COI_SPARK_W} ${COI_SPARK_H} L0 ${COI_SPARK_H} Z`;
+      return leg;
     }
 
     function coiLerpColor(a, b, t) {
@@ -2697,7 +2765,7 @@
 
     // Batched DOM writes: every cell update is deferred to a single
     // requestAnimationFrame, so a fast tick never causes multiple synchronous
-    // layout reflows. SVG paths are updated as strings only (no re-creation).
+    // layout reflows. Text nodes are updated in place (no re-creation).
     const coiRenderQueue = new Map();
     let coiRafScheduled = false;
 
@@ -2734,43 +2802,6 @@
       const wrap = document.createElement('div');
       wrap.className = 'coi-rel-wrap';
 
-      const svg = document.createElementNS(COI_SVG_NS, 'svg');
-      svg.setAttribute('class', 'coi-sparkline');
-      svg.setAttribute('xmlns', COI_SVG_NS);
-      svg.setAttribute('viewBox', `0 0 ${COI_SPARK_W} ${COI_SPARK_H}`);
-      svg.setAttribute('preserveAspectRatio', 'none');
-      svg.setAttribute('aria-hidden', 'true');
-      svg.setAttribute('width', '100%');
-      svg.setAttribute('height', '100%');
-      // Inline sizing so the SVG fills the wrapper even if a CSS class fails to apply.
-      svg.style.position = 'absolute';
-      svg.style.top = '0';
-      svg.style.left = '0';
-      svg.style.width = '100%';
-      svg.style.height = '100%';
-      svg.style.display = 'block';
-      svg.style.pointerEvents = 'none';
-      svg.style.zIndex = '0';
-
-      const areaPath = document.createElementNS(COI_SVG_NS, 'path');
-      areaPath.setAttribute('class', 'coi-spark-area');
-      const linePath = document.createElementNS(COI_SVG_NS, 'path');
-      linePath.setAttribute('class', 'coi-spark-line');
-      const lastDot = document.createElementNS(COI_SVG_NS, 'circle');
-      lastDot.setAttribute('class', 'coi-last-dot');
-      lastDot.setAttribute('r', '2.2');
-      lastDot.setAttribute('cx', String(COI_SPARK_W));
-      lastDot.setAttribute('cy', '0');
-      lastDot.style.display = 'none';
-      const peakLine = document.createElementNS(COI_SVG_NS, 'line');
-      peakLine.setAttribute('class', 'coi-peak-line');
-      peakLine.setAttribute('x1', '0');
-      peakLine.setAttribute('x2', String(COI_SPARK_W));
-      peakLine.setAttribute('y1', '0');
-      peakLine.setAttribute('y2', '0');
-
-      svg.append(areaPath, linePath, lastDot, peakLine);
-
       const pkTag = document.createElement('span');
       pkTag.className = 'coi-pk-tag';
       pkTag.textContent = 'PK';
@@ -2784,10 +2815,10 @@
       drawdown.hidden = true;
 
       // Stack order (top → bottom): PK (peak) → current → drawdown.
-      wrap.append(svg, pkTag, main, drawdown);
+      wrap.append(pkTag, main, drawdown);
       element.append(wrap);
 
-      const refs = { areaPath, linePath, lastDot, peakLine, pkTag, main, drawdown };
+      const refs = { pkTag, main, drawdown };
       element.__coiRefs = refs;
       return refs;
     }
@@ -2797,39 +2828,19 @@
         const refs = coiEnsureCell(element, snap.type);
         refs.main.textContent = '-';
         refs.drawdown.hidden = true;
-        refs.areaPath.setAttribute('d', '');
-        refs.linePath.setAttribute('d', '');
-        refs.lastDot.style.display = 'none';
-        refs.peakLine.setAttribute('y1', '0');
-        refs.peakLine.setAttribute('y2', '0');
         refs.pkTag.style.display = 'none';
+        refs.pkTag.classList.remove('is-peak');
         return;
       }
 
       const refs = coiEnsureCell(element, snap.type);
       element.style.setProperty('--coi-color', snap.color);
 
-      refs.linePath.setAttribute('d', snap.lineD);
-      refs.areaPath.setAttribute('d', snap.areaD);
-
-      // Hard fallback colours (presentation attributes) so the stroke/fill are
-      // never transparent even if the CSS variable is unavailable.
-      refs.linePath.setAttribute('stroke', snap.color);
-      refs.areaPath.setAttribute('fill', snap.color);
-      refs.peakLine.setAttribute('stroke', snap.color);
-      refs.lastDot.setAttribute('fill', snap.color);
-
-      // Endpoint dot keeps a single-tick (or two-tick) sparkline visible.
-      refs.lastDot.setAttribute('cx', String(COI_SPARK_W));
-      refs.lastDot.setAttribute('cy', snap.lastY.toFixed(2));
-      refs.lastDot.style.display = snap.hasTicks ? 'block' : 'none';
-
-      const peakY = coiSparkY(snap.peak);
-      refs.peakLine.setAttribute('y1', peakY.toFixed(2));
-      refs.peakLine.setAttribute('y2', peakY.toFixed(2));
       refs.pkTag.style.display = snap.peak > 0 ? '' : 'none';
       // Surface the actual peak value on the PK tag instead of a static "PK" label.
       refs.pkTag.textContent = snap.peak > 0 ? `PK: ${snap.peak.toFixed(1)}%` : 'PK';
+      // Green PK text while the live value is at / forming a new peak.
+      refs.pkTag.classList.toggle('is-peak', snap.atPeak === true);
 
       refs.main.textContent = snap.label;
 
@@ -2843,7 +2854,7 @@
       if (snap.flash) coiFlash(element, snap.flash);
     }
 
-    // Public entry point — builds or updates one CALL/PUT COI REL% cell.
+    // Public entry point — builds or updates one CALL/PUT COI REL% text cell.
     function renderCoiRelCell(element, currentVal, strike, type) {
       if (!element) return;
       coiEnsureCell(element, type); // build the shell synchronously (cheap)
@@ -2857,22 +2868,23 @@
       }
 
       const leg = coiLeg(strike, type);
-      const firstTick = leg.ticks.length === 0;
-      const prev = firstTick ? val : leg.ticks[leg.ticks.length - 1];
-
-      leg.ticks.push(val);
-      if (leg.ticks.length > COI_MAX_TICKS) leg.ticks.shift();
+      const firstTick = leg.last === null;
+      const prev = firstTick ? val : leg.last;
 
       let isNewPeak = false;
+      let atPeak = false;
       if (firstTick) {
-        leg.peak = val; // seed the peak without a fake breakout flash
-      } else if (val > leg.peak) {
-        leg.peak = val;
-        isNewPeak = true;
+        leg.peak = val;              // seed the peak without a fake breakout flash
+      } else {
+        isNewPeak = val > leg.peak;   // genuine new high -> breakout flash
+        if (val >= leg.peak) leg.peak = val;  // raise (or re-touch) the peak
+        atPeak = val >= leg.peak;     // live value is at / forming the peak
       }
+      leg.last = val;                 // store only the latest tick
 
       const peak = leg.peak;
-      const drawdownPct = peak > 0 ? ((val - peak) / peak) * 100 : 0;
+      // Drawdown is simply last vs peak.
+      const drawdownPct = peak > 0 ? ((leg.last - peak) / peak) * 100 : 0;
       const color = coiRelColor(drawdownPct);
 
       let flash = null;
@@ -2890,21 +2902,16 @@
         color,
         label: fmtCoiRel(val),
         peak,
-        lineD: coiSparkLinePath(leg.ticks),
-        areaD: coiSparkAreaPath(leg.ticks),
-        lastY: leg.ticks.length
-          ? coiSparkY(leg.ticks[leg.ticks.length - 1], Math.min(...leg.ticks), Math.max(...leg.ticks))
-          : 0,
-        hasTicks: leg.ticks.length > 0,
+        atPeak,
         showDrawdown,
         drawdownLabel: `${drawdownPct.toFixed(1)}% from Pk`,
         flash,
       });
     }
 
-    // Cached row/column nodes keyed by strike. A 1Hz refresh updates text and
-    // SVG paths in place instead of rebuilding the whole <tbody> every tick,
-    // avoiding layout reflows during fast order-book updates.
+    // Cached row/column nodes keyed by strike. A 1Hz refresh updates text
+    // in place instead of rebuilding the whole <tbody> every tick, avoiding
+    // layout reflows during fast order-book updates.
     const rowCache = new Map();
 
     function ensureRow(strike) {
@@ -2970,7 +2977,7 @@
         if (signalGlow) tr.classList.add(signalGlow);
 
         // CALL/PUT COI% + LTP stay lightweight plain text; the two COI REL%
-        // columns render through the intraday peak engine + mini sparkline.
+        // columns render through the intraday peak engine (text only).
         cells.coiCall.textContent = fmtCoi(row.call_coi_pct);
         cells.ltpCall.textContent = fmtLtp(row.call_ltp);
         renderCoiRelCell(cells.relCall, row.call_coi_rel_pct, strike, 'call');
