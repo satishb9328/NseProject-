@@ -51,6 +51,7 @@
   /* ---- Compact Options Chain (center column) ---- */
   .compact-chain-table { width: 100%; height: 100%; border-collapse: collapse; font-size: 10px; line-height: 1.25; text-align: center; }
   .compact-chain-table th, .compact-chain-table td { white-space: nowrap; padding: 2px 2px; }
+  .compact-chain-table tbody td { border-bottom: 1px solid rgba(118, 138, 167, 0.6); }
   .compact-chain-table th.call-side, .compact-chain-table td.call-side { color: #7dd3fc; }
   .compact-chain-table th.put-side, .compact-chain-table td.put-side { color: #fdba74; }
   .compact-chain-table th.strike-header, .compact-chain-table td.strike-cell { color: #cbd5e1; }
@@ -842,7 +843,7 @@
                   <th scope="col" class="put-side text-[11px]">PUT COI%</th>
                 </tr>
               </thead>
-              <tbody id="compact-options-tbody" class="divide-y divide-slate-900/40">
+              <tbody id="compact-options-tbody">
                 <tr><td colspan="7" class="px-1 py-1 text-[11px] text-slate-500">Loading compact chain…</td></tr>
               </tbody>
             </table>
