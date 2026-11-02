@@ -17,8 +17,13 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from django.views.generic import RedirectView  # 🔴 ఇది కొత్తగా ఇంపోర్ట్ చేయండి
-from Nse_Project.Live_dashboard.views import live_signals_view
+from Nse_Project.Live_dashboard.views import (
+    live_signals_view,
+    upstox_login,
+    upstox_callback,
+)
 from Nse_Project.Swing_stocks.views import swing_stocks_view
+from Nse_Project.Live_dashboard import views
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -27,6 +32,11 @@ urlpatterns = [
     path('', RedirectView.as_view(url='/live-signals/', permanent=False)),
     path('live-signals/', live_signals_view, name='live_signals'),
     path('swing-stocks/', swing_stocks_view, name='swing_stocks'),
+
+    # Upstox OAuth login flow — top-level paths so the Render redirect URI can be
+    # https://<host>/upstox-callback/ (independent of the existing manual scripts).
+    path('upstox-login/', upstox_login, name='upstox_login'),
+    path('upstox-callback/', upstox_callback, name='upstox_callback'),
     
     path('swing/', include('Nse_Project.Swing_stocks.urls')),
     path('live-dashboard/', include('Nse_Project.Live_dashboard.urls')),
@@ -36,4 +46,8 @@ urlpatterns = [
 
     # 52-Week-Low watchlist routes.
     path('', include('Nse_Project.52_Week_Low.urls')),
+
+    # Upstox OAuth login flow — cloud top-level routes.
+    path('upstox-login/', views.upstox_login, name='upstox_login_cloud'),
+    path('upstox-callback/', views.upstox_callback, name='upstox_callback_cloud'),
 ]

@@ -944,7 +944,7 @@
             <div class="math-metric-row">
               <div class="math-metric-copy">
                 <span class="math-metric-label">Delta Wt</span>
-                <span id="math-delta-wt" class="math-metric-value green"><span class="math-text">{{ math_delta_wt|default:'+6.6' }}</span></span>
+                <span id="math-delta-wt" class="math-metric-value green"><span class="math-text">{{ math_delta_wt|default:'+6.6' }} (Peak: {{ math_delta_wt_peak|default:'+6.6' }})</span></span>
               </div>
               <div class="math-progress">
                 <div class="math-progress-track">
@@ -962,7 +962,7 @@
             <div class="math-metric-row">
               <div class="math-metric-copy">
                 <span class="math-metric-label">Score</span>
-                <span id="math-score" class="math-metric-value">71</span>
+                <span id="math-score" class="math-metric-value">71 (Peak: 71)</span>
               </div>
               <div class="math-progress">
                 <div class="math-progress-track">
@@ -976,7 +976,7 @@
             <div class="math-metric-row">
               <div class="math-metric-copy">
                 <span class="math-metric-label">IV Skew</span>
-                <span id="math-iv-skew" class="math-metric-value red"><span class="math-text">-1.2%</span></span>
+                <span id="math-iv-skew" class="math-metric-value red"><span class="math-text">-1.2% (Peak: -1.2%)</span></span>
               </div>
               <div class="math-progress">
                 <div class="math-progress-track">
@@ -991,7 +991,7 @@
             <div class="math-metric-row">
               <div class="math-metric-copy">
                 <span class="math-metric-label">Gamma Boost</span>
-                <span id="math-gamma-boost" class="math-metric-value red"><span class="math-text">-9.5</span></span>
+                <span id="math-gamma-boost" class="math-metric-value red"><span class="math-text">-9.5 (Peak: -9.5)</span></span>
               </div>
               <div class="math-progress">
                 <div class="math-progress-track">
@@ -1647,18 +1647,19 @@
     'math-gamma-boost': { bipolar: true,  min: -20, max: 20, peakKey: 'gamma-boost' }
   };
 
-  function renderMathHwm(id, rawValue, displayText) {
+  function renderMathHwm(id, rawValue, format) {
     const el = document.getElementById(id);
     if (!el) return;
     const cfg = MATH_METRICS[id] || { bipolar: false, min: 0, max: 100, peakKey: id };
     const value = Number.isFinite(Number(rawValue)) ? Number(rawValue) : 0;
+    const formatFn = typeof format === 'function' ? format : (v => v);
 
     // Sticky HWM: the peak only advances on a new absolute record.
     const peak = bumpPeak(cfg.peakKey, value, 0);
 
     const text = el.querySelector('.math-text');
     if (text) {
-      text.textContent = displayText;
+      text.textContent = `${formatFn(value)} (Peak: ${formatFn(peak)})`;
       if (id === 'math-bias' || id === 'math-momentum') {
         text.style.color = value > 0 ? '#00ff00' : value < 0 ? '#ff0000' : '#ffffff';
       }
@@ -1688,20 +1689,20 @@
   function updateMathConsole(tradeState) {
     const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
     const signed = value => (Number.isFinite(value) ? `${value >= 0 ? '+' : ''}${value.toFixed(1)}%` : '--');
-    setText('math-score', Number.isFinite(currentLiveScore) ? `${Math.round(currentLiveScore)}` : '--');
+    // Score is unipolar 0–100; its HWM peak is the furthest point from neutral (50).
+    const scorePeak = bumpPeak('score', Number.isFinite(currentLiveScore) ? currentLiveScore : 50, 50);
+    setText('math-score', Number.isFinite(currentLiveScore) ? `${Math.round(currentLiveScore)} (Peak: ${Math.round(scorePeak)})` : '--');
     const scoreEl = document.getElementById('math-score');
     if (scoreEl) {
       scoreEl.style.color = currentLiveScore >= 75 ? '#00ff00' : currentLiveScore <= 25 ? '#ff0000' : '#ffffff';
     }
-    // Score is unipolar 0–100; its HWM peak is the furthest point from neutral (50).
-    const scorePeak = bumpPeak('score', Number.isFinite(currentLiveScore) ? currentLiveScore : 50, 50);
     const scoreRow = scoreEl ? scoreEl.closest('.math-metric-row') : null;
     const scoreTrack = scoreRow ? scoreRow.querySelector('.math-progress-track') : null;
     if (scoreTrack) {
       renderBar(scoreTrack, { bipolar: false, value: currentLiveScore, min: 0, max: 100, peak: scorePeak });
     }
-    renderMathHwm('math-bias', currentBias, signed(currentBias));
-    renderMathHwm('math-momentum', currentMomentum, signed(currentMomentum));
+    renderMathHwm('math-bias', currentBias, signed);
+    renderMathHwm('math-momentum', currentMomentum, signed);
     updateMomentumBadge(currentMomentum);
     // Surface the effective decision so the console mirrors the CE/PE/NO_TRADE card.
     const stateEl = document.getElementById('math-trade-state');
@@ -1741,9 +1742,9 @@
       return `${n >= 0 ? '+' : ''}${n.toFixed(1)}${suffix}`;
     };
     // Raw advanced-quant diagnostics pushed by the backend at the 1 Hz cadence.
-    renderMathHwm('math-delta-wt', data.delta_wt_impact, signed(data.delta_wt_impact));
-    renderMathHwm('math-iv-skew', data.iv_skew_est, signed(data.iv_skew_est, '%'));
-    renderMathHwm('math-gamma-boost', data.gamma_boost_val, signed(data.gamma_boost_val));
+    renderMathHwm('math-delta-wt', data.delta_wt_impact, signed);
+    renderMathHwm('math-iv-skew', data.iv_skew_est, v => signed(v, '%'));
+    renderMathHwm('math-gamma-boost', data.gamma_boost_val, signed);
 
     const score = Number.isFinite(Number(data.score)) ? Number(data.score) : currentLiveScore;
     const bias = Number.isFinite(Number(data.bias)) ? Number(data.bias) : currentBias;
@@ -2266,12 +2267,14 @@
     if (scoreEl) {
       const s = scalp ? Number(scalp.bias_score || 0) : 0;
       const visual = Math.max(0, Math.min(100, 50 + (s * 20)));
-      scoreEl.textContent = `${s.toFixed(2)}`;
+      const scorePeak = bumpPeak('score', Number.isFinite(visual) ? visual : 50, 50);
+      // Peak is tracked on the 0–100 visual scale; convert back to the raw bias-score scale for display.
+      const rawPeak = (scorePeak - 50) / 20;
+      scoreEl.textContent = `${s.toFixed(2)} (Peak: ${rawPeak.toFixed(2)})`;
       scoreEl.style.color = s >= 1.5 ? '#00ff00' : s <= -1.5 ? '#ff0000' : '#ffffff';
       const scoreRow = scoreEl.closest('.math-metric-row');
       const scoreTrack = scoreRow ? scoreRow.querySelector('.math-progress-track') : null;
       if (scoreTrack) {
-        const scorePeak = bumpPeak('score', Number.isFinite(visual) ? visual : 50, 50);
         renderBar(scoreTrack, { bipolar: false, value: visual, min: 0, max: 100, peak: scorePeak });
       }
     }

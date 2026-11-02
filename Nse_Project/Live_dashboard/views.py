@@ -1,6 +1,6 @@
 from django.conf import settings
-from django.http import JsonResponse
-from django.shortcuts import render
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import redirect, render
 from pathlib import Path
 import json
 import logging
@@ -1593,3 +1593,71 @@ def _build_live_option_chain_payload() -> dict:
         "deadly_combo_signals": combo_signals,
         "error": None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Upstox OAuth login flow (browser-based, Render-friendly)
+# ---------------------------------------------------------------------------
+# Fully independent of the existing local/manual Upstox token scripts. It reads
+# credentials from environment variables so nothing is hard-coded in the repo.
+def upstox_login(request):
+    """Redirect the browser to Upstox's OAuth authorization dialog."""
+    api_key = os.getenv("UPSTOX_API_KEY", "")
+    redirect_uri = os.getenv("UPSTOX_REDIRECT_URI", "")
+    auth_url = (
+        "https://api.upstox.com/v2/login/authorization/dialog"
+        f"?response_type=code&client_id={api_key}&redirect_uri={redirect_uri}"
+    )
+    return redirect(auth_url)
+
+
+def upstox_callback(request):
+    """Exchange the OAuth authorization ``code`` for an Upstox access token.
+
+    For now this only surfaces the first 15 characters of the token as a simple
+    success message; token persistence/reuse can be layered on later without
+    touching the existing manual token scripts.
+    """
+    code = request.GET.get("code")
+    if not code:
+        return HttpResponse(
+            "Upstox OAuth error: no authorization code was returned.", status=400
+        )
+
+    api_key = os.getenv("UPSTOX_API_KEY", "")
+    api_secret = os.getenv("UPSTOX_API_SECRET", "")
+    redirect_uri = os.getenv("UPSTOX_REDIRECT_URI", "")
+
+    token_url = "https://api.upstox.com/v2/login/authorization/token"
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json",
+    }
+    data = {
+        "code": code,
+        "client_id": api_key,
+        "client_secret": api_secret,
+        "redirect_uri": redirect_uri,
+        "grant_type": "authorization_code",
+    }
+
+    try:
+        response = requests.post(token_url, headers=headers, data=data, timeout=30)
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        return HttpResponse(f"Upstox token exchange failed: {exc}", status=502)
+
+    access_token = payload.get("access_token")
+    if not access_token:
+        detail = (
+            payload.get("error_description")
+            or payload.get("error")
+            or response.text
+        )
+        return HttpResponse(f"Upstox token exchange failed: {detail}", status=502)
+
+    token_preview = access_token[:15]
+    return HttpResponse(
+        f"✅ Upstox OAuth succeeded. Access token preview (first 15 chars): {token_preview}"
+    )
