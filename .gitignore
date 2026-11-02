@@ -44,3 +44,4 @@ Nse Project/AUTHEN_TOKEN/config/fyers_config.json
 *.json
 *.txt
 !requirements.txt
+!Nse_Project/52_Week_Low/nifty500_pure_smc_trade_setups.csv

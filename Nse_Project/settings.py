@@ -7,6 +7,8 @@ warnings.filterwarnings('ignore', message='.*took too long to shut down.*')
 warnings.filterwarnings('ignore', message='.*StreamingHttpResponse must consume synchronous iterators.*')
 from pathlib import Path
 
+import dj_database_url
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 LIVE_OPTIONS_DATA_PATH = BASE_DIR / 'live_options_data.json'
@@ -119,13 +121,23 @@ CHANNEL_LAYERS = {
 # ==========================================
 # DATABASE SETTINGS
 # ==========================================
-# Note: SQLite data resets on every Render deployment.
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+# Production (Render): Django talks to Supabase PostgreSQL via the DATABASE_URL env
+# var (parsed by dj-database-url). The old SQLite db.sqlite3 lived on the container's
+# ephemeral filesystem, so every deploy/restart silently wiped the PreopenSummary rows
+# and all other data. Set DATABASE_URL on Render to your Supabase connection string,
+# e.g. postgresql://USER:PASSWORD@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres
+# Local dev keeps SQLite when DATABASE_URL is absent.
+if os.getenv('DATABASE_URL'):
+    DATABASES = {
+        'default': dj_database_url.config(conn_max_age=600, conn_health_checks=True)
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 
 # ==========================================

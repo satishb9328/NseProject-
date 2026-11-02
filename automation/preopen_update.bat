@@ -11,8 +11,8 @@ echo [%date% %time%] Starting NSE pre-open update.>>"%LOG_FILE%"
 cd /d "%PREOPEN_DIR%" >>"%LOG_FILE%" 2>&1
 if errorlevel 1 goto :failed
 
-:: ఇక్కడ మీ వర్చువల్ ఎన్విరాన్‌మెంట్ యాక్టివేట్ అవుతుంది (venv పేరు కరెక్ట్ గా ఉందో లేదో చూసుకోండి)
-call "%PROJECT_ROOT%\venv\Scripts\activate"
+:: ఇక్కడ మీ డాట్ venv (.venv) యాక్టివేట్ అవుతుంది
+call "%PROJECT_ROOT%\.venv\Scripts\activate"
 
 :: ఆ తర్వాతే పైథాన్ రన్ అవుతుంది
 python .\fetch_and_import_preopen.py --verbose >>"%LOG_FILE%" 2>&1

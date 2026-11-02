@@ -41,6 +41,15 @@ CSV_NAME = "nifty50_graph_data.csv"
 # (only the active file) while every day's data is retained.
 ARCHIVE_SUBDIR = "archive"
 
+# Deployment mode switch. On Render the container filesystem is ephemeral, so the
+# ticks are persisted to Supabase PostgreSQL instead of CSV files that would vanish
+# on the next deploy/restart. Locally the original CSV behaviour is kept so the
+# importer and dashboard keep working offline.
+DEPLOY_ENV = os.getenv("DEPLOY_ENV", "LOCAL").strip().upper()
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+PREOPEN_SYMBOL = os.getenv("PREOPEN_SYMBOL", "NIFTY 50")
+PREOPEN_TICK_SOURCE = os.getenv("PREOPEN_TICK_SOURCE", "nse_preopen_api")
+
 IST = timezone(timedelta(hours=5, minutes=30))
 
 # Endpoints tried in order. The first is NSE's dedicated pre-open chart URL; the
@@ -192,22 +201,82 @@ def _write_csv(path, rows):
         writer.writerows(rows)
 
 
+def _ticks_to_db_rows(graph):
+    """Yield ``(symbol, trading_date, tick_time, price, source)`` tuples for Supabase."""
+    for dt_str, price in _iter_csv_rows(graph):
+        # dt_str format from _iter_csv_rows is "YYYY-MM-DD HH:MM:SS".
+        yield (PREOPEN_SYMBOL, dt_str[:10], dt_str[11:], price, PREOPEN_TICK_SOURCE)
+
+
+def _insert_ticks_to_supabase(rows) -> int:
+    """Bulk-insert pre-open ticks into Supabase ``preopen_ticks`` (RENDER mode).
+
+    ``rows`` is an iterable of ``(symbol, trading_date, tick_time, price, source)``
+    tuples. ``execute_values`` sends every tick in one round-trip, and the
+    ``ON CONFLICT ... DO UPDATE`` upsert makes re-running the 09:00-09:10 collector
+    idempotent (no duplicate rows). Raises on failure so the caller halts instead of
+    reporting a false SUCCESS.
+    """
+    rows = list(rows)
+    if not rows:
+        raise RuntimeError("No ticks to insert into preopen_ticks")
+
+    if not DATABASE_URL:
+        raise RuntimeError(
+            "DATABASE_URL is not set; RENDER mode requires a Supabase PostgreSQL "
+            "connection string to persist pre-open ticks."
+        )
+
+    try:
+        import psycopg2
+        from psycopg2.extras import execute_values
+    except ImportError as exc:  # pragma: no cover
+        raise ImportError("psycopg2 is required to write to Supabase.") from exc
+
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL, connect_timeout=10)
+        with conn.cursor() as cur:
+            execute_values(
+                cur,
+                """
+                INSERT INTO preopen_ticks (symbol, trading_date, tick_time, price, source)
+                VALUES %s
+                ON CONFLICT (symbol, trading_date, tick_time)
+                DO UPDATE SET price = EXCLUDED.price
+                """,
+                rows,
+                page_size=1000,
+            )
+        conn.commit()
+    except Exception:
+        if conn is not None:
+            conn.rollback()
+        raise
+    finally:
+        if conn is not None:
+            conn.close()
+    return len(rows)
+
+
 def download_graph_csv():
     """Download the pre-open tick series and persist it without data loss.
 
-    Two files are written so a later run never destroys an earlier day's data:
+    Persistence is selected by ``DEPLOY_ENV``:
 
-      * ``nifty50_graph_data.csv``                    — ACTIVE file the importer and
-        dashboard read (overwritten daily with today's ticks).
-      * ``archive/nifty50_graph_data_YYYY-MM-DD.csv`` — immutable, dated history copy.
+      * ``RENDER`` — skip CSV entirely and bulk-insert the ticks into the Supabase
+        ``preopen_ticks`` table. Render's container filesystem is ephemeral, so any
+        CSV written here would be lost on the next deploy/restart; Supabase is the
+        durable, shared system of record.
+      * ``LOCAL``  (default) — keep the original two-file CSV behaviour:
 
-    Returns the active CSV path on success. Raises on failure so the caller halts
-    immediately instead of reporting a false SUCCESS.
+          * ``nifty50_graph_data.csv``                    — ACTIVE file (overwritten daily)
+          * ``archive/nifty50_graph_data_YYYY-MM-DD.csv`` — immutable, dated history copy
+
+    Returns the active CSV path (LOCAL) or a summary string (RENDER) on success.
+    Raises on failure so the caller halts immediately instead of reporting a false
+    SUCCESS.
     """
-    os.makedirs(SAVE_DIR, exist_ok=True)
-    archive_dir = os.path.join(SAVE_DIR, ARCHIVE_SUBDIR)
-    os.makedirs(archive_dir, exist_ok=True)
-
     print("Fetching NSE pre-open chart data via API...")
     graph = _fetch_graph()
 
@@ -225,6 +294,16 @@ def download_graph_csv():
 
     # The first tick's IST date is the authoritative trading date for this snapshot.
     date_str = first_dt_str[:10]  # YYYY-MM-DD
+
+    if DEPLOY_ENV == "RENDER":
+        inserted = _insert_ticks_to_supabase(_ticks_to_db_rows(graph))
+        print(f"Success! Inserted {inserted} ticks into Supabase preopen_ticks for {date_str}")
+        print(f"  date range: {first_dt_str}  ->  {last_dt_str}")
+        return f"Supabase preopen_ticks: {inserted} ticks for {date_str}"
+
+    os.makedirs(SAVE_DIR, exist_ok=True)
+    archive_dir = os.path.join(SAVE_DIR, ARCHIVE_SUBDIR)
+    os.makedirs(archive_dir, exist_ok=True)
 
     active_path = os.path.join(SAVE_DIR, CSV_NAME)
     archive_path = os.path.join(archive_dir, f"nifty50_graph_data_{date_str}.csv")

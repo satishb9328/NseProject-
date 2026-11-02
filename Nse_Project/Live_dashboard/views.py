@@ -341,6 +341,14 @@ PREOPEN_TBT_ENCODINGS = ("utf-8-sig", "utf-8", "latin1")
 PREOPEN_TBT_START = time(9, 0, 0)   # pre-open window start
 PREOPEN_TBT_END = time(9, 10, 0)    # pre-open window end (IEP settlement)
 
+# Deployment mode switch. On Render the pre-open ticks live in Supabase PostgreSQL
+# (the collector bulk-inserts them into preopen_ticks), not in local CSV files — the
+# container filesystem is ephemeral and shared-nothing, so the old os.listdir scan
+# returned "file not found" after any restart/deploy. Locally the CSV scan is kept.
+DEPLOY_ENV = os.getenv("DEPLOY_ENV", "LOCAL").strip().upper()
+PREOPEN_DB_URL = os.getenv("DATABASE_URL", "").strip()
+PREOPEN_DB_TIMEOUT = float(os.getenv("PREOPEN_DB_TIMEOUT", "3.0"))
+
 _DATETIME_COLUMN_HINTS = ("datetime", "date and time", "timestamp", "date", "time")
 _PRICE_COLUMN_HINTS = (
     "preopen_nifty 50", "preopen_nifty50", "nifty 50", "nifty50",
@@ -386,16 +394,93 @@ def _read_preopen_file(file_path: str) -> pd.DataFrame | None:
     return None
 
 
+def _fetch_preopen_from_supabase(target_date: date) -> dict | None:
+    """Return Open/Max/Min/Final IEP from Supabase ``preopen_ticks`` (RENDER mode).
+
+    One SQL aggregate over today's 09:00:00-09:10:00 ticks replaces the old filesystem
+    scan. Any failure (DATABASE_URL unset, connection error, empty table) returns None
+    so the dashboard degrades gracefully exactly like the old missing-CSV path did.
+    """
+    if not PREOPEN_DB_URL:
+        logger.warning("DATABASE_URL is not set; cannot read pre-open ticks from Supabase.")
+        return None
+
+    query = """
+        SELECT
+            min(price) FILTER (WHERE rn = 1)     AS open_iep,
+            max(price)                           AS max_iep,
+            min(price)                           AS min_iep,
+            min(price) FILTER (WHERE rn = total) AS final_iep
+        FROM (
+            SELECT price,
+                   row_number() OVER (ORDER BY tick_time) AS rn,
+                   count(*) OVER ()                       AS total
+            FROM preopen_ticks
+            WHERE trading_date = %s
+              AND tick_time BETWEEN TIME '09:00:00' AND TIME '09:10:00'
+        ) sub
+    """
+
+    try:
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+    except ImportError:
+        logger.warning("psycopg2 is not installed; cannot read pre-open ticks from Supabase.")
+        return None
+
+    conn = None
+    try:
+        conn = psycopg2.connect(
+            PREOPEN_DB_URL,
+            connect_timeout=int(PREOPEN_DB_TIMEOUT),
+            cursor_factory=RealDictCursor,
+        )
+        with conn.cursor() as cur:
+            cur.execute(query, (target_date,))
+            row = cur.fetchone()
+    except Exception as exc:
+        logger.warning("Supabase pre-open query failed for %s: %s", target_date, exc)
+        return None
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    if not row or row["open_iep"] is None or row["final_iep"] is None:
+        logger.info("No pre-open ticks in Supabase for %s", target_date)
+        return None
+
+    result = {
+        "Open_IEP": round(float(row["open_iep"]), 2),
+        "Max_IEP": round(float(row["max_iep"]), 2),
+        "Min_IEP": round(float(row["min_iep"]), 2),
+        "Final_IEP": round(float(row["final_iep"]), 2),
+    }
+    logger.info("Computed pre-open trap data from Supabase for %s: %s", target_date, result)
+    return result
+
+
 def fetch_real_preopen_trap_data(target_date: date | None = None) -> dict | None:
     """Compute Max/Min/Final IEP from today's real pre-open TBT ticks.
 
-    Scans ``PREOPEN_TBT_DIR`` for today's tick file(s), keeps only ticks within the
-    09:00:00 - 09:10:00 pre-open window, and returns
-    ``{'Open_IEP', 'Max_IEP', 'Min_IEP', 'Final_IEP'}``. Returns ``None`` when today's file is
-    missing, empty, or unreadable so the dashboard can show a graceful fallback.
+    Two backends, selected by ``DEPLOY_ENV``:
+
+      * ``RENDER`` — query Supabase ``preopen_ticks`` directly (durable, shared across
+        services, no local filesystem involved).
+      * ``LOCAL``  — the original scan of ``PREOPEN_TBT_DIR`` for today's tick file(s),
+        keeping only ticks within the 09:00:00 - 09:10:00 pre-open window.
+
+    Returns ``{'Open_IEP', 'Max_IEP', 'Min_IEP', 'Final_IEP'}``. Returns ``None`` when
+    today's data is missing or unreadable so the dashboard can show a graceful fallback.
     """
     target_date = target_date or _ist_today()
 
+    if DEPLOY_ENV == "RENDER":
+        return _fetch_preopen_from_supabase(target_date)
+
+    # ---- LOCAL: original filesystem scan (unchanged) ----
     if not os.path.isdir(PREOPEN_TBT_DIR):
         logger.warning("PREOPEN_TBT_DIR does not exist: %s", PREOPEN_TBT_DIR)
         return None

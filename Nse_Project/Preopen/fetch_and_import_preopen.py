@@ -20,6 +20,9 @@ if str(PROJECT_ROOT) not in sys.path:
 os.chdir(PROJECT_ROOT)
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Nse_Project.settings')
 
+# RENDER mode persists ticks straight to Supabase, so there is no local CSV to import.
+DEPLOY_ENV = os.getenv("DEPLOY_ENV", "LOCAL").strip().upper()
+
 
 def _print_summary(fetch_ok, import_ok, publish_ok):
     print('\n=== fetch_and_import_preopen summary ===')
@@ -50,12 +53,12 @@ def main():
     fetch_ok = args.skip_fetch
     if not args.skip_fetch:
         if args.verbose:
-            print('Fetching preopen CSV from NSE...')
+            print('Fetching preopen data from NSE...')
         try:
             from Nse_Project.Preopen.fetch_preopen import download_graph_csv
-            csv_path = download_graph_csv()
+            result = download_graph_csv()
             fetch_ok = True
-            print(f'Fetch: SUCCESS — {csv_path}')
+            print(f'Fetch: SUCCESS — {result}')
         except Exception as exc:
             print(f'Fetch: FAILED — {exc}')
 
@@ -65,8 +68,13 @@ def main():
         return 1
 
     # ---- 2. IMPORT ----
-    import_ok = args.skip_import
-    if not args.skip_import:
+    # On Render the fetch step already bulk-inserted ticks into Supabase, so there is
+    # no CSV to import (and no durable local DB anyway). Only the local CSV ->
+    # PreopenSummary import runs when files exist on disk.
+    import_ok = args.skip_import or DEPLOY_ENV == "RENDER"
+    if DEPLOY_ENV == "RENDER" and not args.skip_import:
+        print('Import: SKIPPED (RENDER — ticks already in Supabase preopen_ticks)')
+    elif not args.skip_import:
         if args.verbose:
             print('Importing preopen data into the database...')
         try:
