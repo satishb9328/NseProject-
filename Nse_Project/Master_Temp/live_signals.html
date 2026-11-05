@@ -2691,8 +2691,15 @@
     // (no rolling tick array — the graph is gone); drawdown is last vs peak.
     // ====================================================================
     const COI_STORAGE_KEY = 'nse_coi_intraday_history';
-    // Consistent daily key so save/load always compare the same string.
-    const coiToday = () => new Date().toLocaleDateString();
+    // Deterministic IST calendar day (YYYY-MM-DD). The NSE session rolls over on
+    // IST (UTC+5:30), so the daily key must follow IST — not the viewer's local
+    // timezone/locale — otherwise `toLocaleDateString()` can drift across refreshes
+    // (a different locale per machine/browser) and make loadCoiHistory() discard
+    // today's peaks, i.e. the exact "peak resets after refresh" symptom.
+    const coiToday = () => {
+      const ist = new Date(Date.now() + (5 * 60 + 30) * 60 * 1000);
+      return ist.toISOString().slice(0, 10);
+    };
 
     // Serialize the whole in-memory history once per tick batch. Called ONLY
     // at the end of renderCompactChain() — never from renderCoiRelCell() — so
@@ -2746,6 +2753,12 @@
         };
         bucket[legKey] = leg;
       }
+      // Defensive numeric coercion: a stale/legacy localStorage blob can carry
+      // string peaks ("100.0"), which would make `val >= leg.peak` run as a
+      // lexicographic string compare ("80.0" > "100.0" === true) and LOWER the
+      // peak. Normalise both fields to Numbers on every read (null stays null).
+      leg.peak = toNumber(leg.peak);
+      leg.last = (leg.last === null || leg.last === undefined) ? null : toNumber(leg.last);
       return leg;
     }
 
@@ -2870,16 +2883,22 @@
       const firstTick = leg.last === null;
       const prev = firstTick ? val : leg.last;
 
+      // Force numeric comparison: the API or a stale localStorage blob can hand
+      // us strings ("100.0"), and a bare `val >= leg.peak` then becomes a
+      // lexicographic compare where "80.0" > "100.0" is TRUE — lowering the peak.
+      const liveVal = parseFloat(val);
+      const peakVal = parseFloat(leg.peak);
+
       let isNewPeak = false;
       let atPeak = false;
       if (firstTick) {
-        leg.peak = val;              // seed the peak without a fake breakout flash
+        leg.peak = liveVal;              // seed the peak (Number)
       } else {
-        isNewPeak = val > leg.peak;   // genuine new high -> breakout flash
-        if (val >= leg.peak) leg.peak = val;  // raise (or re-touch) the peak
-        atPeak = val >= leg.peak;     // live value is at / forming the peak
+        isNewPeak = liveVal > peakVal;   // genuine new high -> breakout flash
+        if (liveVal >= peakVal) leg.peak = liveVal;  // raise (or re-touch) the peak
+        atPeak = liveVal >= peakVal;     // live value is at / forming the peak
       }
-      leg.last = val;                 // store only the latest tick
+      leg.last = liveVal;                // store only the latest tick (Number)
 
       const peak = leg.peak;
       // Drawdown is simply last vs peak. When the live value is at or above the
