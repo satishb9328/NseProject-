@@ -119,6 +119,9 @@ from Nse_Project.expiry_utils import (
     resolve_row_expiry,
 )
 
+# Event-driven signal logger (standalone module; remove this import to disable).
+from Nse_Project.Live_dashboard.gamma_signal_logger import track_and_log_signal
+
 
 # === Config ================================================================
 
@@ -2577,6 +2580,11 @@ class RedisGammaBot:
             profile = self.processor.process_payload(payload)
             if not profile:
                 raise ValueError("Redis payload is missing valid spot, expiry, or strike data")
+
+            # Event-driven signal logger: capture "NIFTY DAY GAMMA" transitions.
+            # `raw_payload` still carries instrument_data (strike/option_type/ltp)
+            # for ATM CE/PE pricing at the exact moment the signal changes.
+            track_and_log_signal(raw_payload, signal=profile.day_gamma.signal)
 
             # Evaluate alerts and scalp signals outside the lock
             alerts = self.alert_engine.evaluate_gamma_alerts(profile)

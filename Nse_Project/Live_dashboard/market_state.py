@@ -66,6 +66,13 @@ DEFAULT_MARKET_STATE = {
     "current_atr": 0.0,
     "current_atr_ce": 0.0,
     "current_atr_pe": 0.0,
+    # Real volume-weighted VWAP (₹), fed by the NIFTY index future's average-traded-
+    # price (Upstox `atp` = Σ(price·qty) / Σ(qty)) in the feed worker.
+    "vwap": 0.0,
+    # Live LTP of the NIFTY index future (FUTIDX). Pairs with `vwap` so the frontend
+    # VWAP card compares future price vs future VWAP (apples-to-apples) instead of the
+    # cash index against the futures VWAP.
+    "future_ltp": 0.0,
 }
 
 

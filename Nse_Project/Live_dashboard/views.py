@@ -1493,6 +1493,8 @@ def live_option_chain_api(request):
             "net_oi_bias": 0,
             "total_vol_skew": 0,
             "total_pcr": 1.0,
+            "vwap": 0,
+            "future_ltp": 0,
             "strike_bounds": None,
             "option_chain": [],
             "deadly_combo_signals": [],
@@ -1588,6 +1590,12 @@ def _build_live_option_chain_payload() -> dict:
         "net_oi_bias": _json_safe_value(market_state.get("net_oi_bias")),
         "total_vol_skew": _json_safe_value(market_state.get("total_vol_skew")),
         "total_pcr": _json_safe_value(market_state.get("total_pcr")),
+        # Real volume-weighted VWAP (₹) from the NIFTY index future (see market_state).
+        # cards/vwap_signal.html reads `data.vwap` and switches to FEED mode automatically.
+        "vwap": _json_safe_value(market_state.get("vwap")),
+        # Live future LTP pairs with `vwap` so the VWAP card compares future price
+        # against future VWAP (not the cash index against the futures VWAP).
+        "future_ltp": _json_safe_value(market_state.get("future_ltp")),
         "strike_bounds": list(strike_bounds) if strike_bounds else None,
         "option_chain": chain,
         # "Deadly Combo" anomaly signals for the live dashboard (root-level, additive).

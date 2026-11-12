@@ -256,6 +256,11 @@ market_state = {
     "peak_net_oi_bias": 0.0,
     "peak_total_vol_skew": 0.0,
     "peak_total_pcr": 1.0,
+    # Real volume-weighted VWAP from the NIFTY future's average-traded-price (atp).
+    "vwap": 0.0,
+    # Live LTP of the NIFTY index future (FUTIDX) for the VWAP card's apples-to-apples
+    # comparison (future price vs future VWAP).
+    "future_ltp": 0.0,
 }
 # Peak-hold extremes needed to derive the single "current-side" peak the dashboard
 # shows (mirrors the frontend's peakMax/peakMin logic). Score is centred on 50.
@@ -274,6 +279,9 @@ _score_peak_updated_at = None
 # Latest cumulative CVD, fed by CVDEngine's on_candle callback (a separate worker
 # thread) and folded into the Redis market state on the next publish beat.
 _latest_cumulative_cvd = 0.0
+# Live NIFTY index-future instrument key (FUTIDX). Its `atp` (average traded price)
+# is the real volume-weighted VWAP proxy that feeds market_state["vwap"].
+_nifty_future_key = None
 # Advanced-quant sentiment state. ``_previous_directional_coi`` drives the momentum
 # ACCELERATION (rate of change of the DIRECTIONAL COI signal, call_coi - put_coi, vs
 # the last tick). The advanced diagnostics are persisted to the Redis
@@ -895,6 +903,8 @@ async def _rollover_nifty_future(streamer, active, new_future_key, new_future_ex
 
     active["nifty_future_key"] = new_future_key
     active["nifty_future_expiry"] = new_future_expiry
+    global _nifty_future_key
+    _nifty_future_key = new_future_key
     if cvd_engine is not None:
         cvd_engine.set_symbol_allowlist({new_future_key})
     logger.info(
@@ -1318,6 +1328,10 @@ def extract_live_values(decoded: dict, instrument_key: str | None = None) -> dic
     volume = _first_numeric(_find_value_by_key(decoded, "vtt"))
     if volume is None:
         volume = _first_numeric(_find_value_by_key(decoded, "volume"))
+    # Average Traded Price (Upstox `atp`) = total traded value / total traded
+    # quantity for the day — the exchange's own volume-weighted VWAP. For the NIFTY
+    # index future it is the canonical index-VWAP proxy (the index tick has no volume).
+    atp = _first_numeric(_find_value_by_key(decoded, "atp"))
 
     return {
         "instrument_key": instrument_key,
@@ -1327,6 +1341,7 @@ def extract_live_values(decoded: dict, instrument_key: str | None = None) -> dic
         "poi": poi,
         "iv": iv,
         "volume": volume,
+        "atp": atp,
         "raw": decoded,
     }
 
@@ -2487,6 +2502,22 @@ async def update_instrument_state(instrument: str, values: dict) -> None:
     if isinstance(volume, (int, float)):
         velocity = compute_volume_velocity(instrument, volume)
 
+    # Real volume-weighted VWAP proxy: the NIFTY index future's `atp` (average traded
+    # price = Σ(price·qty) / Σ(qty)). The index feed itself carries no volume, so the
+    # future's ATP is the authoritative volume-weighted proxy for the NIFTY index VWAP.
+    # Folded into the in-memory market_state here; it is persisted to Redis on the next
+    # publish beat (_refresh_market_state -> _persist_market_state).
+    if instrument == _nifty_future_key:
+        atp = values.get("atp")
+        if isinstance(atp, (int, float)) and atp > 0 and not isinstance(atp, bool):
+            market_state["vwap"] = float(atp)
+        # Live future LTP for an apples-to-apples VWAP comparison: the card must
+        # compare the FUTURE's price against the FUTURE's VWAP, never the index spot.
+        # Fall back to the close price only if the future has not traded yet.
+        future_ltp = ltp if isinstance(ltp, (int, float)) and ltp > 0 and not isinstance(ltp, bool) else cp
+        if isinstance(future_ltp, (int, float)) and future_ltp > 0 and not isinstance(future_ltp, bool):
+            market_state["future_ltp"] = float(future_ltp)
+
     # Illiquid options may not have traded yet this session; fall back to the close
     # price for display only so the chain stays populated. The underlying index is
     # handled separately in update_index_spot and never falls back to the close price.
@@ -2993,6 +3024,8 @@ async def run_streamer(instrument_keys: list[str], expiry_date: date) -> None:
     )
     active["nifty_future_key"] = nifty_future_key
     active["nifty_future_expiry"] = nifty_future_expiry
+    global _nifty_future_key
+    _nifty_future_key = nifty_future_key
 
     if nifty_future_key:
         cvd_allowlist = {nifty_future_key}

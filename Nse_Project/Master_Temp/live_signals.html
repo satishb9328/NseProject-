@@ -861,6 +861,11 @@
           </div>
           <p id="day-net-gex-summary" class="mt-4 text-[11px] font-medium text-slate-400">--</p>
         </div>
+      <!-- ════════════════════════════════════════════════════════════════════════ -->
+      <!-- VWAP + Candle Close + Math Console confirmation card (MODULAR / TEST).    -->
+      <!-- To UNINSTALL: delete ONLY the single include line directly below.          -->
+      <!-- ════════════════════════════════════════════════════════════════════════ -->
+      {% include 'cards/vwap_signal.html' %}
       <section id="ai-trade-setups" class="flex h-fit self-start flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-4">
         <div class="mb-2 flex items-center justify-between gap-3">
           <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-slate-200">🤖 AI TRADE SETUPS (LIVE TEST)</h2>
@@ -2161,7 +2166,9 @@
       el.textContent = fmtVel(val);
       const n = Number(val);
       el.classList.remove('up', 'down');
-      if (Number.isFinite(n)) el.classList.add(n > 0 ? 'up' : n < 0 ? 'down' : '');
+      if (!Number.isFinite(n)) return;
+      const cls = n > 0 ? 'up' : n < 0 ? 'down' : '';
+      if (cls) el.classList.add(cls);
     };
     setVel('scalp-vel-5', v[5]);
     setVel('scalp-vel-10', v[10]);

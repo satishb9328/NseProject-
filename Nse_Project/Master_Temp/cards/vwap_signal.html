@@ -1,0 +1,171 @@
+{# ════════════════════════════════════════════════════════════════════════════ #}
+{#  cards/vwap_signal.html                                                     #}
+{#  "VWAP + Candle Close" confirmation card (MODULAR / TEST).   #}
+{#                                                                             #}
+{#  PLUG-AND-PLAY RULES                                                        #}
+{#  • Fully self-contained: own <style>, own <script>, own poll loop & state.  #}
+{#  • Uninstall = delete the single include line in live_signals.html:         #}
+{#        {% include 'cards/vwap_signal.html' %}                               #}
+{#    Nothing else in the app references this file.                            #}
+{#  • Hooks the EXISTING 1 Hz live option-chain stream (spot / bias / score).       #}
+{#    VWAP is read from `data.vwap` when the backend   #}
+{#    publishes it; until then a clearly-labelled client-side session VWAP*    #}
+{#    proxy (running average of live spot) keeps the gate demo-able end-to-end #}
+{#    and auto-upgrades the moment a real feed value appears.                  #}
+{# ════════════════════════════════════════════════════════════════════════════ #}
+
+<section id="vwap-signal-card" class="flex h-fit self-start flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+  <!-- ── Header ─────────────────────────────────────────────────────────── -->
+  <div class="mb-2">
+    <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-slate-200">📐 VWAP + CANDLE CLOSE CONFIRMATION</h2>
+  </div>
+
+  <!-- ── Row 1: VWAP gate + Candle-close gate ────────────────────────────── -->
+  <div class="grid grid-cols-1 gap-2 lg:grid-cols-2">
+    <div class="rounded-lg border border-slate-700/60 bg-black/30 p-2">
+      <p class="mb-1.5 text-xs font-bold uppercase tracking-wider text-cyan-300">VWAP Gate</p>
+      <div class="space-y-1 text-xs">
+        <div class="flex items-center justify-between"><span class="text-slate-500" id="vwap-price-label">NIFTY Index Spot</span><span id="vwap-spot" class="vwap-mono font-mono font-semibold text-white">--</span></div>
+        <div class="flex items-center justify-between"><span class="text-slate-500">VWAP</span><span id="vwap-value" class="vwap-mono font-mono font-semibold text-white">--</span></div>
+        <div class="flex items-center justify-between"><span class="text-slate-500">VWAP Source</span><span id="vwap-source" class="font-mono text-slate-400">--</span></div>
+        <div id="vwap-side" class="mt-1 rounded-md px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wider" style="color:#94a3b8; background:rgba(148,163,184,.08);">WAITING FOR DATA</div>
+      </div>
+    </div>
+
+    <div class="rounded-lg border border-slate-700/60 bg-black/30 p-2">
+      <p class="mb-1.5 text-xs font-bold uppercase tracking-wider text-emerald-300">Candle Close Gate</p>
+      <div class="space-y-1 text-xs">
+        <div class="flex items-center justify-between"><span class="text-slate-500">Last 2m Close</span><span id="vwap-candle-close" class="vwap-mono font-mono font-semibold text-white">--</span></div>
+        <div class="flex items-center justify-between"><span class="text-slate-500">Last 2m H / L</span><span id="vwap-candle-hl" class="vwap-mono font-mono text-slate-400">--</span></div>
+        <div class="flex items-center justify-between"><span class="text-slate-500">Live Candle O / C</span><span id="vwap-candle-live" class="vwap-mono font-mono text-slate-400">--</span></div>
+        <div id="vwap-candle-side" class="mt-1 rounded-md px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wider" style="color:#94a3b8; background:rgba(148,163,184,.08);">WAITING FOR CLOSE</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Final output: Confluence score + Verdict ───────────────────────── -->
+  <div class="mt-2 flex items-center justify-between gap-2 rounded-lg border border-slate-700/60 bg-black/30 px-2 py-1.5">
+    <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Confluence / Verdict</span>
+    <span class="flex items-center gap-2">
+      <span id="vwap-confluence" class="font-mono text-xs font-semibold text-slate-200">--</span>
+      <span id="vwap-verdict-badge" class="vwap-badge-neutral rounded-md border px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wider">🟡 NO CONFIRMATION</span>
+    </span>
+  </div>
+</section>
+
+<style>
+  /* Scoped to this module only — never touches the parent page's .math-* rules. */
+  #vwap-signal-card .vwap-mono { font-variant-numeric: tabular-nums; }
+  #vwap-signal-card .vwap-badge-bull { background: rgba(16,185,129,.15); border-color: rgba(16,185,129,.5); color: #34d399; }
+  #vwap-signal-card .vwap-badge-bear { background: rgba(239,68,68,.15); border-color: rgba(239,68,68,.5); color: #f87171; }
+  #vwap-signal-card .vwap-badge-neutral { background: rgba(245,158,11,.15); border-color: rgba(245,158,11,.45); color: #fbbf24; }
+</style>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const setText = (id, txt) => { const el = $(id); if (el) el.textContent = txt; };
+  const number = (v) => { if (v === null || v === undefined || v === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
+  const fmt = (v) => (v === null || v === undefined || v === '-' || !Number.isFinite(Number(v))) ? '--' : Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  // ── Module state (fully isolated — no shared globals) ─────────────────
+  let spot = null, serverVwap = null, vwap = null, vwapSource = 'none';
+  let priceIsFuture = false;   // true => `spot` holds the future LTP, not the index spot
+  let bias = 0, score = 50;
+  // Client-side session VWAP* proxy. Upstox's NSE_INDEX tick carries only LTP
+  // (no index volume), so a true volume-weighted VWAP must come from the backend.
+  // Until `data.vwap` exists, this equal-weight running average keeps the gate live.
+  let proxySum = 0, proxyCount = 0;
+  // 2-minute candle tracking (wall-clock IST 2-minute buckets).
+  let candle = null, lastClosed = null;
+
+  const minuteKey = (d) => {
+    const m = Math.floor(d.getMinutes() / 2) * 2;   // 2-minute IST bucket
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+  };
+
+  function ingestSpot(price, isFuture) {
+    const p = number(price);
+    if (p === null || p <= 0) return;            // ignore zero/garbage payloads
+    spot = p;
+    priceIsFuture = !!isFuture;
+    proxySum += p; proxyCount += 1;
+    const now = new Date(), key = minuteKey(now);
+    if (!candle || candle.key !== key) { if (candle) lastClosed = candle; candle = { key: key, open: p, high: p, low: p, close: p }; }
+    else { candle.high = Math.max(candle.high, p); candle.low = Math.min(candle.low, p); candle.close = p; }
+  }
+
+  function resolveVwap() {
+    if (serverVwap !== null && serverVwap > 0) { vwap = serverVwap; vwapSource = 'feed'; }
+    else if (proxyCount > 0) { vwap = proxySum / proxyCount; vwapSource = 'proxy'; }
+    else { vwap = null; vwapSource = 'none'; }
+  }
+
+  const side = (value, ref) => (value === null || ref === null || !(ref > 0)) ? 0 : (value > ref ? 1 : value < ref ? -1 : 0);
+
+  const BULL = '#34d399', BEAR = '#f87171', MUTED = '#94a3b8';
+  function paint(id, color, text, bg) { const el = $(id); if (!el) return; el.textContent = text; el.style.color = color; el.style.background = bg || 'rgba(148,163,184,.08)'; }
+
+  function renderVerdict() {
+    const vwapSide = side(spot, vwap);
+    const lastClose = lastClosed ? number(lastClosed.close) : null;
+    const candleSide = side(lastClose, vwap);
+    let mathSide = 0;
+    if (bias > 0.5) mathSide = 1; else if (bias < -0.5) mathSide = -1; else if (score > 55) mathSide = 1; else if (score < 45) mathSide = -1;
+    const c = vwapSide + candleSide + mathSide;
+    setText('vwap-confluence', (c >= 0 ? '+' : '') + c + '  (vwap ' + (vwapSide >= 0 ? '+' : '') + vwapSide + ' · candle ' + (candleSide >= 0 ? '+' : '') + candleSide + ' · math ' + (mathSide >= 0 ? '+' : '') + mathSide + ')');
+    const badge = $('vwap-verdict-badge'); if (!badge) return;
+    badge.classList.remove('vwap-badge-bull', 'vwap-badge-bear', 'vwap-badge-neutral');
+    if (c >= 2) { badge.textContent = '🟢 LONG CONFIRMATION'; badge.classList.add('vwap-badge-bull'); }
+    else if (c <= -2) { badge.textContent = '🔴 SHORT CONFIRMATION'; badge.classList.add('vwap-badge-bear'); }
+    else { badge.textContent = '🟡 NO CONFIRMATION'; badge.classList.add('vwap-badge-neutral'); }
+  }
+  function render() {
+    setText('vwap-price-label', priceIsFuture ? 'NIFTY Future LTP' : 'NIFTY Index Spot');
+    setText('vwap-spot', fmt(spot));
+    setText('vwap-value', fmt(vwap));
+    setText('vwap-source', vwapSource === 'feed' ? 'FEED (authoritative)' : vwapSource === 'proxy' ? 'PROXY* (client avg)' : 'NONE');
+
+    const s = side(spot, vwap);
+    if (s > 0) paint('vwap-side', BULL, '▲ PRICE ABOVE VWAP — BULLISH', 'rgba(16,185,129,.12)');
+    else if (s < 0) paint('vwap-side', BEAR, '▼ PRICE BELOW VWAP — BEARISH', 'rgba(239,68,68,.12)');
+    else paint('vwap-side', MUTED, 'WAITING FOR DATA', 'rgba(148,163,184,.08)');
+
+    const lastClose = lastClosed ? number(lastClosed.close) : null;
+    setText('vwap-candle-close', fmt(lastClose));
+    setText('vwap-candle-hl', lastClosed ? ('H ' + fmt(lastClosed.high) + ' · L ' + fmt(lastClosed.low)) : '--');
+    setText('vwap-candle-live', candle ? (fmt(candle.open) + ' · ' + fmt(candle.close)) : '--');
+    const cs = side(lastClose, vwap);
+    if (cs > 0) paint('vwap-candle-side', BULL, '▲ CLOSE ABOVE VWAP — BULLISH', 'rgba(16,185,129,.12)');
+    else if (cs < 0) paint('vwap-candle-side', BEAR, '▼ CLOSE BELOW VWAP — BEARISH', 'rgba(239,68,68,.12)');
+    else paint('vwap-candle-side', MUTED, 'WAITING FOR CLOSE', 'rgba(148,163,184,.08)');
+
+    renderVerdict();
+  }
+
+  // ── Independent poll of the EXISTING live option-chain stream ─────────
+  let controller = null;
+  async function poll() {
+    if (controller) { try { controller.abort(); } catch (e) {} }
+    controller = new AbortController();
+    try {
+      const res = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store', signal: controller.signal });
+      if (!res.ok) throw new Error(res.statusText);
+      const data = await res.json();
+      const futureLtp = number(data.future_ltp);
+      const usingFuture = (futureLtp !== null && futureLtp > 0);
+      ingestSpot(usingFuture ? futureLtp : number(data.spot_price), usingFuture);
+      const sv = number(data.vwap);
+      serverVwap = (sv !== null && sv > 0) ? sv : null;
+      bias = number(data.bias) ?? 0;
+      score = number(data.score) ?? 50;
+      resolveVwap();
+      render();
+    } catch (e) { if (e.name !== 'AbortError') { /* fail silently — module stays removable */ } }
+  }
+
+  poll();
+  setInterval(poll, 1000);
+})();
+</script>
