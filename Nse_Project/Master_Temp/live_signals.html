@@ -2691,6 +2691,16 @@
       if (n === 0) return '0.0%';
       return `${n.toFixed(1)}%`;
     };
+    // Bull vs Bear directional-flow control % — compact dual label for the line under
+    // the daily COI%. bull = put-side (put_control_pct), bear = call-side (call_control_pct).
+    // `lead` ('bull' | 'bear') puts that metric first so each column emphasises its own side.
+    const fmtControl = (bull, bear, lead) => {
+      const missing = (v) => v === null || v === undefined || v === '-' || v === '';
+      if (missing(bull) && missing(bear)) return '-';
+      const b = toNumber(bull).toFixed(1);
+      const s = toNumber(bear).toFixed(1);
+      return lead === 'bull' ? `Bull: ${b}% (Bear: ${s}%)` : `Bear: ${s}% (Bull: ${b}%)`;
+    };
 
     // ====================================================================
     // Intraday Peak Tracking Engine (text-only) for the CALL/PUT COI REL%
@@ -3009,13 +3019,15 @@
 
         // CALL/PUT COI% + LTP stay lightweight plain text; the two COI REL%
         // columns render through the intraday peak engine (text only).
-        cells.coiCall.textContent = fmtCoi(row.call_coi_pct);
+        // The COI% cells are dual-metric: daily growth % on top, Bull vs Bear
+        // directional-flow control % on the line below.
+        cells.coiCall.innerHTML = `${fmtCoi(row.call_coi_pct)}<br><span class="text-[10px] text-red-400/90 font-medium">${fmtCoiRel(row.call_control_pct)}</span>`;
         cells.ltpCall.textContent = fmtLtp(row.call_ltp);
         renderCoiRelCell(cells.relCall, row.call_coi_rel_pct, strike, 'call');
         cells.strikeCell.textContent = fmtStrike(row.strike);
         renderCoiRelCell(cells.relPut, row.put_coi_rel_pct, strike, 'put');
         cells.ltpPut.textContent = fmtLtp(row.put_ltp);
-        cells.coiPut.textContent = fmtCoi(row.put_coi_pct);
+        cells.coiPut.innerHTML = `${fmtCoi(row.put_coi_pct)}<br><span class="text-[10px] text-emerald-400/90 font-medium">${fmtCoiRel(row.put_control_pct)}</span>`;
 
         [cells.relCall, cells.relPut].forEach((cell) => {
           cell.classList.remove('ce-signal-glow', 'pe-signal-glow');

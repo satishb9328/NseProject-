@@ -1266,8 +1266,10 @@ def build_option_chain_rows(
             'call_ltp': '-',
             'call_coi': '-',
             'call_coi_pct': '-',
+            'call_control_pct': '-',
             'call_coi_rel_pct': '-',
             'put_coi_pct': '-',
+            'put_control_pct': '-',
             'put_coi_rel_pct': '-',
             'put_coi': '-',
             'put_ltp': '-',
@@ -1339,6 +1341,22 @@ def build_option_chain_rows(
 
             row['call_coi_rel_pct'] = round((ce_oich_abs / coi_total) * 100, 1) if coi_total != 0 else 0.0
             row['put_coi_rel_pct'] = round((pe_oich_abs / coi_total) * 100, 1) if coi_total != 0 else 0.0
+
+            # Bull vs Bear directional-flow control % (dual-metric display beneath the
+            # daily COI% in the compact chain). call_coi > 0 = call OI building (bearish
+            # flow); put_coi > 0 = put OI building (bullish flow); a negative COI on
+            # either leg is unwinding and counts toward the OPPOSITE flow.
+            ce_coi = call_coi_val or 0
+            pe_coi = put_coi_val or 0
+            bull_flow = max(0, pe_coi) + abs(min(0, ce_coi))
+            bear_flow = max(0, ce_coi) + abs(min(0, pe_coi))
+            total_flow = bull_flow + bear_flow
+            if total_flow > 0:
+                row['put_control_pct'] = round((bull_flow / total_flow) * 100, 1)
+                row['call_control_pct'] = round((bear_flow / total_flow) * 100, 1)
+            else:
+                row['put_control_pct'] = 0
+                row['call_control_pct'] = 0
 
     # ISSUE #8 FIX: Moved to module level (was re-created on every 1Hz call).
     # has_activity is now _has_activity, defined at the top of the file.
