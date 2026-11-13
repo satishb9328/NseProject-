@@ -124,6 +124,9 @@
     color: var(--coi-color, #00ff88);
     text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 0 8px #000, 0 0 12px var(--coi-color);
   }
+  .coi-rel-cell .coi-main.text-green-400 {
+    color: #4ade80;
+  }
   .coi-rel-cell .coi-drawdown {
     position: relative;
     z-index: 2;
@@ -913,7 +916,10 @@
         <div id="math-console" class="mt-1.0 min-h-[120px] rounded-lg border border-cyan-800/50 bg-black/50 p-1.5 font-mono text-[11px] leading-5">
           <div class="mb-0.5 flex items-center justify-between border-b border-slate-800 pb-0.5">
             <span class="uppercase tracking-wider text-cyan-400">⚙ MATH CONSOLE</span>
-            <span class="text-slate-600">live debug</span>
+            <span class="flex items-center gap-2 text-[11px]">
+              <span class="text-slate-500">Trade State</span>
+              <span id="math-trade-state" class="text-slate-200">--</span>
+            </span>
           </div>
           <div class="math-console-metrics" role="group" aria-label="Math Console metrics">
             <div class="math-metric-row">
@@ -1008,12 +1014,7 @@
                 <div class="math-scale"><span>-20</span><span>-10</span><span>0</span><span>10</span><span>20</span></div>
               </div>
             </div>
-            <div class="flex items-center justify-between"><span class="text-slate-500">Trade State</span><span id="math-trade-state" class="text-slate-200">--</span></div>
           </div>
-        </div>
-        <div class="mt-auto flex w-full justify-end gap-1.5 pt-2">
-          
-          <button id="audio-toggle" type="button" class="rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1 text-xs font-bold uppercase tracking-[.12em] text-slate-300 transition hover:bg-slate-700/60" aria-pressed="false">🔇 ALERTS OFF</button>
         </div>
 
       </section>
@@ -2856,6 +2857,7 @@
       if (snap.empty) {
         const refs = coiEnsureCell(element, snap.type);
         refs.main.textContent = '-';
+        refs.main.classList.remove('text-green-400');
         refs.drawdown.hidden = true;
         refs.pkTag.style.display = 'none';
         refs.pkTag.classList.remove('is-peak');
@@ -2864,6 +2866,7 @@
 
       const refs = coiEnsureCell(element, snap.type);
       element.style.setProperty('--coi-color', snap.color);
+      refs.main.classList.toggle('text-green-400', snap.winner === true);
 
       refs.pkTag.style.display = snap.peak > 0 ? '' : 'none';
       // Surface the actual peak value on the PK tag instead of a static "PK" label.
@@ -2884,7 +2887,7 @@
     }
 
     // Public entry point — builds or updates one CALL/PUT COI REL% text cell.
-    function renderCoiRelCell(element, currentVal, strike, type) {
+    function renderCoiRelCell(element, currentVal, strike, type, isWinner = false) {
       if (!element) return;
       coiEnsureCell(element, type); // build the shell synchronously (cheap)
 
@@ -2892,7 +2895,7 @@
       const val = toNumber(currentVal);
 
       if (!hasValue) {
-        coiQueueRender(element, { empty: true, type });
+        coiQueueRender(element, { empty: true, type, winner: false });
         return;
       }
 
@@ -2941,6 +2944,7 @@
       coiQueueRender(element, {
         empty: false,
         type,
+        winner: isWinner,
         color,
         label: fmtCoiRel(val),
         peak,
@@ -3018,16 +3022,16 @@
         const signalGlow = signalClassByStrike.get(String(row.strike));
 
         // CALL/PUT COI% + LTP stay lightweight plain text; the two COI REL%
-        // columns render through the intraday peak engine (text only).
-        // The COI% cells are dual-metric: daily growth % on top, Bull vs Bear
-        // directional-flow control % on the line below.
-        cells.coiCall.innerHTML = `${fmtCoi(row.call_coi_pct)}<br><span class="text-[10px] text-red-400/90 font-medium">${fmtCoiRel(row.call_control_pct)}</span>`;
+        // columns render through the intraday peak engine.
+        const callRel = Number(row.call_coi_rel_pct) || 0;
+        const putRel = Number(row.put_coi_rel_pct) || 0;
+        cells.coiCall.innerHTML = fmtCoi(row.call_coi_pct);
         cells.ltpCall.textContent = fmtLtp(row.call_ltp);
-        renderCoiRelCell(cells.relCall, row.call_coi_rel_pct, strike, 'call');
+        renderCoiRelCell(cells.relCall, row.call_coi_rel_pct, strike, 'call', callRel > putRel);
         cells.strikeCell.textContent = fmtStrike(row.strike);
-        renderCoiRelCell(cells.relPut, row.put_coi_rel_pct, strike, 'put');
+        renderCoiRelCell(cells.relPut, row.put_coi_rel_pct, strike, 'put', putRel > callRel);
         cells.ltpPut.textContent = fmtLtp(row.put_ltp);
-        cells.coiPut.innerHTML = `${fmtCoi(row.put_coi_pct)}<br><span class="text-[10px] text-emerald-400/90 font-medium">${fmtCoiRel(row.put_control_pct)}</span>`;
+        cells.coiPut.innerHTML = fmtCoi(row.put_coi_pct);
 
         [cells.relCall, cells.relPut].forEach((cell) => {
           cell.classList.remove('ce-signal-glow', 'pe-signal-glow');
