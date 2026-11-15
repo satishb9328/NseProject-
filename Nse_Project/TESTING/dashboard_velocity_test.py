@@ -98,7 +98,11 @@ def test_build_option_chain_rows() -> None:
     check("put_coi_rel_pct is put's share of |COI|", row["put_coi_rel_pct"], 39.0)
     check("every expected key present",
           sorted(row.keys()),
-          sorted(EXPECTED_JS_KEYS + ["call_coi_rel_pct", "put_coi_rel_pct"]))
+          sorted(EXPECTED_JS_KEYS + [
+              "call_coi_rel_pct", "put_coi_rel_pct",
+              "call_control_pct", "put_control_pct",
+              "call_delta", "put_delta",
+          ]))
 
 
 def _headers(html: str) -> list:

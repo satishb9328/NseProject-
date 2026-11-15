@@ -31,6 +31,7 @@ urlpatterns = [
     # 🔴 హోమ్ పేజీ (Root URL) ఓపెన్ చేయగానే ఆటోమేటిక్ గా live-dashboard/ కి వెళ్తుంది
     path('', RedirectView.as_view(url='/live-signals/', permanent=False)),
     path('live-signals/', live_signals_view, name='live_signals'),
+    path('live-signals/log-sniper/', views.log_sniper_api, name='log_sniper'),
     path('swing-stocks/', swing_stocks_view, name='swing_stocks'),
 
     # Upstox OAuth login flow — top-level paths so the Render redirect URI can be

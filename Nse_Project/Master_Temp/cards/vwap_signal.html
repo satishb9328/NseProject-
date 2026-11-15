@@ -59,6 +59,7 @@
   #vwap-signal-card .vwap-badge-bull { background: rgba(16,185,129,.15); border-color: rgba(16,185,129,.5); color: #34d399; }
   #vwap-signal-card .vwap-badge-bear { background: rgba(239,68,68,.15); border-color: rgba(239,68,68,.5); color: #f87171; }
   #vwap-signal-card .vwap-badge-neutral { background: rgba(245,158,11,.15); border-color: rgba(245,158,11,.45); color: #fbbf24; }
+  #vwap-signal-card .vwap-badge-trap { background: rgba(239,68,68,.2); border-color: rgba(245,158,11,.65); color: #fbbf24; }
 </style>
 
 <script>
@@ -79,10 +80,48 @@
   let proxySum = 0, proxyCount = 0;
   // 2-minute candle tracking (wall-clock IST 2-minute buckets).
   let candle = null, lastClosed = null;
+  // Live cumulative CVD (bridged from the 1 Hz option-chain payload's `data.cvd`).
+  let cvd = null;
+  // Rolling completed-2m-candle history ({ key, open, high, low, close, cvd_value, ts }).
+  // Capped at 20 entries so the backend-seeded 20-bar history (ATR_14 + CVD-divergence
+  // lookback) is retained without immediate eviction.
+  const closedCandles = [];
+
+  // ── Backend seed hydration (skip the ~30-minute warm-up after F5) ─────────
+  // views.py renders the last 20 completed 2m candles (OHLC + CVD) into a
+  // <script type="application/json" id="seed-2m-candles"> via json_script. Parse,
+  // normalize field names and populate closedCandles so computeAtr2m() and
+  // detectCvdTrap() activate on the very first poll tick instead of waiting ~30 min.
+  function hydrateSeedCandles() {
+    const el = document.getElementById('seed-2m-candles');
+    if (!el) return;
+    let raw = null;
+    try { raw = JSON.parse(el.textContent || '[]'); } catch (e) { raw = null; }
+    if (!Array.isArray(raw) || raw.length === 0) return;
+    const bars = [];
+    for (const b of raw) {
+      if (!b || typeof b !== 'object') continue;
+      const o = number(b.open), h = number(b.high), l = number(b.low), c = number(b.close);
+      if (o === null || h === null || l === null || c === null) continue;
+      bars.push({ ts: number(b.ts), open: o, high: h, low: l, close: c, cvd_value: number(b.cvd) });
+    }
+    if (!bars.length) return;
+    bars.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    while (bars.length > 20) bars.shift();
+    closedCandles.length = 0;
+    for (const bar of bars) closedCandles.push(bar);
+    lastClosed = closedCandles[closedCandles.length - 1] || null;
+  }
 
   const minuteKey = (d) => {
     const m = Math.floor(d.getMinutes() / 2) * 2;   // 2-minute IST bucket
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+  };
+
+  // Epoch-ms of the current 2m bucket start (browser-local wall clock == IST).
+  const bucketTs = (d) => {
+    const m = Math.floor(d.getMinutes() / 2) * 2;
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), m).getTime();
   };
 
   function ingestSpot(price, isFuture) {
@@ -92,7 +131,23 @@
     priceIsFuture = !!isFuture;
     proxySum += p; proxyCount += 1;
     const now = new Date(), key = minuteKey(now);
-    if (!candle || candle.key !== key) { if (candle) lastClosed = candle; candle = { key: key, open: p, high: p, low: p, close: p }; }
+    if (!candle || candle.key !== key) {
+      if (candle) {
+        lastClosed = candle;
+        // Freeze the completed 2m candle with the CVD observed at its close so the
+        // divergence gate correlates price vs cumulative delta on the same boundary.
+        candle.cvd_value = number(cvd);
+        // Dedup guard: if the last bar is the same 2m bucket as this closed candle
+        // (a backend-seeded bar), update it in place instead of pushing a duplicate.
+        if (closedCandles.length && closedCandles[closedCandles.length - 1].ts === candle.ts) {
+          closedCandles[closedCandles.length - 1] = candle;
+        } else {
+          closedCandles.push(candle);
+          if (closedCandles.length > 20) closedCandles.shift();
+        }
+      }
+      candle = { key: key, ts: bucketTs(now), open: p, high: p, low: p, close: p };
+    }
     else { candle.high = Math.max(candle.high, p); candle.low = Math.min(candle.low, p); candle.close = p; }
   }
 
@@ -107,6 +162,24 @@
   const BULL = '#34d399', BEAR = '#f87171', MUTED = '#94a3b8';
   function paint(id, color, text, bg) { const el = $(id); if (!el) return; el.textContent = text; el.style.color = color; el.style.background = bg || 'rgba(148,163,184,.08)'; }
 
+  // ── 2m CVD divergence trap (lookback = last 3-4 completed candles) ─────
+  function detectCvdTrap() {
+    const cv = number(cvd);
+    if (cv === null || spot === null || vwap === null || !(vwap > 0) || lastClosed === null) return null;
+    const win = closedCandles.slice(-4);
+    if (win.length < 3) return null;                 // warm-up: need ≥3 completed 2m candles
+    const lookback = win[0];
+    const lbClose = number(lookback.close);
+    const lbCvd = number(lookback.cvd_value);
+    const curClose = number(lastClosed.close);
+    if (lbClose === null || lbCvd === null || curClose === null) return null;
+    const priceChange = curClose - lbClose;          // current_2m_close - lookback_2m_close
+    const cvdChange = cv - lbCvd;                    // current_cvd - lookback_cvd
+    if (spot > vwap && priceChange > 0 && cvdChange < 0) return 'bull-trap';
+    if (spot < vwap && priceChange < 0 && cvdChange > 0) return 'bear-trap';
+    return null;
+  }
+
   function renderVerdict() {
     const vwapSide = side(spot, vwap);
     const lastClose = lastClosed ? number(lastClosed.close) : null;
@@ -116,7 +189,13 @@
     const c = vwapSide + candleSide + mathSide;
     setText('vwap-confluence', (c >= 0 ? '+' : '') + c + '  (vwap ' + (vwapSide >= 0 ? '+' : '') + vwapSide + ' · candle ' + (candleSide >= 0 ? '+' : '') + candleSide + ' · math ' + (mathSide >= 0 ? '+' : '') + mathSide + ')');
     const badge = $('vwap-verdict-badge'); if (!badge) return;
-    badge.classList.remove('vwap-badge-bull', 'vwap-badge-bear', 'vwap-badge-neutral');
+    badge.classList.remove('vwap-badge-bull', 'vwap-badge-bear', 'vwap-badge-neutral', 'vwap-badge-trap');
+
+    // CVD divergence trap: block a bullish/bearish verdict when price and CVD diverge.
+    const trap = detectCvdTrap();
+    if (trap === 'bull-trap' && c >= 2) { badge.textContent = '🚨 BULL TRAP (CVD DIV)'; badge.classList.add('vwap-badge-trap'); return; }
+    if (trap === 'bear-trap' && c <= -2) { badge.textContent = '🚨 BEAR TRAP (CVD DIV)'; badge.classList.add('vwap-badge-trap'); return; }
+
     if (c >= 2) { badge.textContent = '🟢 LONG CONFIRMATION'; badge.classList.add('vwap-badge-bull'); }
     else if (c <= -2) { badge.textContent = '🔴 SHORT CONFIRMATION'; badge.classList.add('vwap-badge-bear'); }
     else { badge.textContent = '🟡 NO CONFIRMATION'; badge.classList.add('vwap-badge-neutral'); }
@@ -153,6 +232,7 @@
       const res = await fetch('{% url "live_dashboard:live_option_chain_api" %}', { cache: 'no-store', signal: controller.signal });
       if (!res.ok) throw new Error(res.statusText);
       const data = await res.json();
+      cvd = number(data.cvd);                     // live cumulative CVD (divergence gate)
       const futureLtp = number(data.future_ltp);
       const usingFuture = (futureLtp !== null && futureLtp > 0);
       ingestSpot(usingFuture ? futureLtp : number(data.spot_price), usingFuture);
@@ -165,6 +245,15 @@
     } catch (e) { if (e.name !== 'AbortError') { /* fail silently — module stays removable */ } }
   }
 
+  // Share the completed-2m-candle OHLC series with the AI TRADE SETUPS card's
+  // 2.2x ATR stop-loss (Task 2). Read-only accessor keeps the two modules decoupled.
+  window.__vwapSignal = {
+    getClosedCandles: () => closedCandles.slice(),
+  };
+
+  // Rehydrate the completed-2m-candle history from the backend seed BEFORE the first
+  // poll so computeAtr2m() / detectCvdTrap() are warm immediately after an F5 refresh.
+  hydrateSeedCandles();
   poll();
   setInterval(poll, 1000);
 })();

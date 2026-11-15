@@ -12,7 +12,7 @@ For every live tick it:
          otherwise         ->   0
   3. groups ticks into 2-minute OHLCV candles using Pandas;
   4. keeps a running Cumulative Volume Delta (CVD);
-  5. computes ``cvd_trend_4m`` = CVD(now) - CVD(2 periods ago)  [2 x 2m = 4m];
+  5. computes ``cvd_trend_2m`` = CVD(now) - CVD(1 period ago)   [1 x 2m = 2m];
   6. publishes each finished candle to Redis Pub/Sub.
 
 Threading model (never blocks the broker ``on_message`` loop)
@@ -314,7 +314,7 @@ class CVDEngine:
     def __init__(
         self,
         candle_seconds: int = 120,
-        trend_periods: int = 2,
+        trend_periods: int = 1,
         redis_url: Optional[str] = DEFAULT_REDIS_URL,
         redis_data_key: str = DEFAULT_REDIS_DATA_KEY,
         redis_channel: str = DEFAULT_REDIS_CHANNEL,
@@ -550,9 +550,39 @@ class CVDEngine:
         volume = int(grp["volume"].sum())
         delta = float(grp["delta"].sum())
 
+        # Order-flow split within this 2m candle: aggressive buy vs sell volume.
+        # Each tick delta is already signed (+vol buy / -vol sell / 0 inside spread).
+        buy_vol = float(grp.loc[grp["delta"] > 0, "delta"].sum())
+        sell_vol = abs(float(grp.loc[grp["delta"] < 0, "delta"].sum()))
+
         st["cvd"] += delta
         st["cvd_history"].append((bucket_ts, st["cvd"]))
         cvd_trend = self._cvd_trend(st)
+
+        # 3-bar CVD divergence (within the current session): CVD(now) - CVD(3 bars ago).
+        # Opening-safe: during the first 1-3 candles fall back to CVD change since the
+        # session's first closed candle (cvd_change_history[0]) instead of None, so
+        # 09:15-09:25 opening bars are not silently dropped.
+        st["cvd_change_history"].append(st["cvd"])
+        if len(st["cvd_change_history"]) >= 4:
+            cvd_change_3 = float(st["cvd_change_history"][-1] - st["cvd_change_history"][-4])
+        else:
+            cvd_change_3 = float(st["cvd_change_history"][-1] - st["cvd_change_history"][0])
+
+        # Scale-free order-flow imbalance, clamped to [-1, 1].
+        total_flow = buy_vol + sell_vol
+        if total_flow > 0:
+            ofi_imbalance = max(-1.0, min(1.0, (buy_vol - sell_vol) / total_flow))
+        else:
+            ofi_imbalance = 0.0
+
+        # Relative volume vs the session's rolling 20-bar median (min_periods=1
+        # equivalent: compute from the very first completed candle of the session).
+        st["volume_history"].append(float(volume))
+        vols = sorted(st["volume_history"])
+        n = len(vols)
+        median_vol = vols[n // 2] if n % 2 else (vols[n // 2 - 1] + vols[n // 2]) / 2.0
+        rel_vol_ratio = (float(volume) / median_vol) if median_vol > 0 else 1.0
 
         candle = {
             "symbol": symbol,
@@ -564,13 +594,18 @@ class CVDEngine:
             "low": low,
             "close": close,
             "volume": volume,
+            "buy_vol": buy_vol,
+            "sell_vol": sell_vol,
             "delta": delta,
             "cvd": st["cvd"],
-            "cvd_trend_4m": cvd_trend,
+            "cvd_trend_2m": cvd_trend,
+            "ofi_imbalance": ofi_imbalance,
+            "rel_vol_ratio": rel_vol_ratio,
+            "cvd_change_3": cvd_change_3,
         }
         st["last_candle"] = candle
         self.logger.info(
-            "CVD candle formed: %s %s O=%.2f H=%.2f L=%.2f C=%.2f vol=%d delta=%+.0f cvd=%.0f trend_4m=%s",
+            "CVD candle formed: %s %s O=%.2f H=%.2f L=%.2f C=%.2f vol=%d delta=%+.0f cvd=%.0f trend_2m=%s",
             symbol, bucket_ts.isoformat(), open_, high, low, close,
             volume, delta, st["cvd"], cvd_trend,
         )
@@ -620,6 +655,11 @@ class CVDEngine:
                 "buffer": [],
                 "cvd": 0.0,
                 "cvd_history": deque(maxlen=self.trend_periods + 1),
+                # 3-bar CVD divergence (VWAP BREAKDOWN SNIPER): keep the last 4
+                # closed-candle CVD values so cvd_change_3 = cvd - cvd[3 bars ago].
+                "cvd_change_history": deque(maxlen=4),
+                # Rolling 20-bar volume history for the rel_vol_ratio median.
+                "volume_history": deque(maxlen=20),
                 "last_candle": None,
             }
             self._states[symbol] = st
@@ -644,7 +684,7 @@ class CVDEngine:
         with self._state_lock:
             st = self._state_for(symbol)
             st["cvd"] = seed
-            # Seed the trend history with a single baseline point so cvd_trend_4m
+            # Seed the trend history with a single baseline point so cvd_trend_2m
             # still computes relative to the restored base rather than to zero.
             st["cvd_history"].clear()
             st["cvd_history"].append((self._floor_bucket(self._now()), seed))
@@ -713,7 +753,7 @@ def _self_test() -> None:
 
     engine = CVDEngine(
         candle_seconds=120,
-        trend_periods=2,
+        trend_periods=1,
         redis_url=None,  # no Redis in the self-test
         publish=False,
         on_candle=collected.append,
@@ -739,8 +779,8 @@ def _self_test() -> None:
     assert c1["volume"] == 70, f"10:00 volume {c1['volume']}"
     assert c1["cvd"] == 40.0, f"10:00 cvd {c1['cvd']}"
     assert (c1["open"], c1["high"], c1["low"], c1["close"]) == (100.0, 100.10, 99.90, 100.00)
-    assert c1["cvd_trend_4m"] is None
-    print(f"[OK] 10:00 candle -> delta={c1['delta']}, cvd={c1['cvd']}, trend={c1['cvd_trend_4m']}")
+    assert c1["cvd_trend_2m"] is None
+    print(f"[OK] 10:00 candle -> delta={c1['delta']}, cvd={c1['cvd']}, trend={c1['cvd_trend_2m']}")
 
     # Advance past 10:02 and feed the 10:04 bucket's first tick.
     now_holder["now"] = datetime(2026, 9, 4, 10, 4, 30, tzinfo=IST)
@@ -748,22 +788,22 @@ def _self_test() -> None:
     published = engine._flush_due_candles()
     c2 = published[-1]
     assert c2["delta"] == 30.0 and c2["cvd"] == 70.0, f"10:02 {c2}"
-    assert c2["cvd_trend_4m"] is None
-    print(f"[OK] 10:02 candle -> delta={c2['delta']}, cvd={c2['cvd']}, trend={c2['cvd_trend_4m']}")
+    assert c2["cvd_trend_2m"] == 30.0, f"10:02 trend {c2['cvd_trend_2m']}"
+    print(f"[OK] 10:02 candle -> delta={c2['delta']}, cvd={c2['cvd']}, trend={c2['cvd_trend_2m']}")
 
-    # Advance again to close 10:04 -> three candles now, trend = cvd(10:04) - cvd(10:00).
+    # Advance again to close 10:04 -> trend = cvd(10:04) - cvd(10:02) (1 completed 2m candle).
     now_holder["now"] = datetime(2026, 9, 4, 10, 6, 30, tzinfo=IST)
     feed(datetime(2026, 9, 4, 10, 6, 5, tzinfo=IST), 103.10, 102.9, 103.05, 240)  # buy +20
     published = engine._flush_due_candles()
     c3 = published[-1]
     assert c3["delta"] == 20.0 and c3["cvd"] == 90.0, f"10:04 {c3}"
-    assert c3["cvd_trend_4m"] == 50.0, f"trend {c3['cvd_trend_4m']}"
-    print(f"[OK] 10:04 candle -> delta={c3['delta']}, cvd={c3['cvd']}, trend_4m={c3['cvd_trend_4m']}")
+    assert c3["cvd_trend_2m"] == 20.0, f"trend {c3['cvd_trend_2m']}"
+    print(f"[OK] 10:04 candle -> delta={c3['delta']}, cvd={c3['cvd']}, trend_2m={c3['cvd_trend_2m']}")
 
     # ── Thread + queue smoke test ─────────────────────────────────────────────
     engine2 = CVDEngine(
         candle_seconds=120,
-        trend_periods=2,
+        trend_periods=1,
         redis_url=None,
         publish=False,
         on_candle=collected.append,

@@ -51,6 +51,8 @@ from Nse_Project.Live_dashboard.fib_bounce_engine import (
 from Nse_Project.Live_dashboard.market_state import (
     load_market_state,
     market_state_key,    save_market_state,
+    NIFTY_2M_SEED_CANDLES_KEY,
+    NIFTY_2M_SEED_CANDLES_MAX,
 )
 # Real Black-Scholes Gamma engine, reused read-only so the live score's gamma boost is
 # driven by the SAME Net GEX that powers the Day Gamma card (not the old OI-skew proxy).
@@ -279,6 +281,17 @@ _score_peak_updated_at = None
 # Latest cumulative CVD, fed by CVDEngine's on_candle callback (a separate worker
 # thread) and folded into the Redis market state on the next publish beat.
 _latest_cumulative_cvd = 0.0
+# VWAP BREAKDOWN SNIPER (PE · C2-A): scale-free order-flow / volume / 3-bar CVD
+# divergence features, also fed by CVDEngine's on_candle callback and folded into
+# market_state on the next publish beat.
+_latest_ofi_imbalance = 0.0
+_latest_rel_vol_ratio = 1.0
+_latest_cvd_change_3 = 0.0
+# Rolling history of the last N completed 2m candles (OHLC + CVD), mirrored to Redis
+# under ``nifty_2m_seed_candles`` so a browser refresh can rehydrate the dashboard's
+# closedCandles and skip the 30-minute ATR/divergence warm-up.
+_seed_candles_2m = deque(maxlen=NIFTY_2M_SEED_CANDLES_MAX)
+_seed_candles_date = None
 # Live NIFTY index-future instrument key (FUTIDX). Its `atp` (average traded price)
 # is the real volume-weighted VWAP proxy that feeds market_state["vwap"].
 _nifty_future_key = None
@@ -1896,14 +1909,220 @@ def _compute_live_sentiment(instrument_data=None) -> tuple[float, float, float]:
     return result["bias"], result["momentum"], result["score"]
 
 
+# ── 2m candle seed history (OHLC + CVD) for frontend warm-up hydration ────────
+def _seed_candle_bar(payload: dict):
+    """Compact a CVD-engine candle payload into {ts, open, high, low, close, cvd}."""
+    ts_raw = payload.get("ts_open")
+    try:
+        ts_ms = int(datetime.fromisoformat(str(ts_raw)).timestamp() * 1000)
+    except (TypeError, ValueError):
+        ts_ms = int(time.time() * 1000)
+    try:
+        return {
+            "ts": ts_ms,
+            "open": float(payload["open"]),
+            "high": float(payload["high"]),
+            "low": float(payload["low"]),
+            "close": float(payload["close"]),
+            "cvd": float(payload["cvd"]) if payload.get("cvd") is not None else None,
+        }
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _persist_seed_candles_2m() -> None:
+    """Persist the rolling 2m seed history to Redis with a same-day TTL."""
+    try:
+        now = datetime.now(IST)
+        midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        ttl = max(60, int((midnight - now).total_seconds()))
+        redis_client.set(
+            NIFTY_2M_SEED_CANDLES_KEY,
+            json.dumps(list(_seed_candles_2m), separators=(",", ":")),
+            ex=ttl,
+        )
+    except Exception as exc:
+        logger.warning("Failed to persist 2m seed candles to Redis: %s", exc)
+
+
+def _load_seed_candles_2m() -> None:
+    """Restore the rolling 2m seed history from Redis on worker startup."""
+    global _seed_candles_date
+    try:
+        raw = redis_client.get(NIFTY_2M_SEED_CANDLES_KEY)
+        if not raw:
+            return
+        data = json.loads(raw)
+        if not isinstance(data, list):
+            return
+        _seed_candles_2m.clear()
+        for bar in data:
+            if isinstance(bar, dict) and isinstance(bar.get("ts"), (int, float)):
+                _seed_candles_2m.append(bar)
+        if _seed_candles_2m:
+            ts = _seed_candles_2m[-1].get("ts")
+            try:
+                _seed_candles_date = datetime.fromtimestamp(ts / 1000.0, tz=IST).date()
+            except (TypeError, ValueError, OverflowError):
+                _seed_candles_date = None
+    except Exception as exc:
+        logger.warning("Failed to load 2m seed candles from Redis: %s", exc)
+
+
+def _evaluate_sniper_c2a_and_log(payload: dict) -> None:
+    """Evaluate VWAP Breakdown Sniper (PE · C2-A) on a closed 2m candle and log."""
+    try:
+        from Nse_Project.Live_dashboard.sniper_logger import log_sniper_c2a_trigger
+
+        now_ist = datetime.now(IST)
+        mins = now_ist.hour * 60 + now_ist.minute
+        if not (555 <= mins <= 895):  # 09:15-14:55 IST
+            return
+
+        ofi = payload.get("ofi_imbalance")
+        relvol = payload.get("rel_vol_ratio")
+        cvd3 = payload.get("cvd_change_3")
+        if not (isinstance(ofi, (int, float)) and isinstance(relvol, (int, float)) and isinstance(cvd3, (int, float))):
+            return
+        ofi = float(ofi)
+        relvol = float(relvol)
+        cvd3 = float(cvd3)
+
+        vwap = float(market_state.get("vwap", 0.0) or 0.0)
+        future_ltp = float(market_state.get("future_ltp", 0.0) or 0.0)
+        spot_price = float(live_state.get("spot_price") or 0.0)
+        ref_price = future_ltp if future_ltp > 0 else spot_price
+        if not (vwap > 0 and ref_price > 0):
+            return
+        vwap_dist = (vwap - ref_price) / vwap
+        if vwap_dist < 0.0015:
+            return
+        if abs(ofi) < 0.35 or relvol < 1.20 or cvd3 <= 0:
+            return
+
+        atr_val = float(market_state.get("current_atr", 0.0) or 0.0)
+        atr = atr_val if atr_val > 0 else 20.0
+        spot_sl = round(min(max(2.2 * atr, 15.0), 35.0), 2)
+
+        tier = "A+ SNIPER (1.5x+)" if relvol >= 1.50 else "VALID (1.2x+)"
+        if 690 <= mins <= 840:
+            window_tag = "PRIME_1130_1400"
+        elif mins < 585:
+            window_tag = "OPENING_0915_0945"
+        else:
+            window_tag = "REGULAR_0945_1455"
+
+        ts_open = payload.get("ts_open")
+        try:
+            bucket_dt = datetime.fromisoformat(str(ts_open)) if isinstance(ts_open, str) else now_ist
+        except ValueError:
+            bucket_dt = now_ist
+        candle_2m_bucket = bucket_dt.astimezone(IST).strftime("%Y-%m-%d %H:%M")
+
+        log_sniper_c2a_trigger({
+            "timestamp_ist": now_ist.strftime("%Y-%m-%d %H:%M:%S"),
+            "candle_2m_bucket": candle_2m_bucket,
+            "tier": tier,
+            "window_tag": window_tag,
+            "spot_price": spot_price,
+            "future_ltp": future_ltp,
+            "vwap": vwap,
+            "vwap_dist_pct": round(vwap_dist * 100.0, 6),
+            "ofi_imbalance": ofi,
+            "rel_vol_ratio": relvol,
+            "cvd_change_3": cvd3,
+            "atr_2m_14": atr,
+            "spot_sl_pts": spot_sl,
+            "spot_target_pts": 45.0,
+            "atm_pe_strike": (round(spot_price / 50) * 50) if spot_price > 0 else 0.0,
+            "atm_pe_ltp": 0.0,
+            "source": "BACKEND_2M_CANDLE",
+        })
+    except Exception:
+        logger.exception("VWAP Sniper C2-A backend logging failed")
+
+
+# Post-market EOD outcome evaluation guard: fired once per IST trading day after
+# 15:20 IST so the VWAP Sniper (PE · C2-A) forward log gets its TP/SL/EOD outcome
+# stamped without ever interrupting the live websocket feed.
+_eod_sniper_evaluated_date: str | None = None
+
+
+def _maybe_trigger_eod_sniper_evaluation() -> None:
+    """Once per IST trading day, spawn a daemon EOD evaluator after 15:20 IST.
+
+    Cheap + synchronous: only a clock read and (at most once a day) a thread spawn.
+    The heavy evaluation runs on a separate daemon thread wrapped in try/except so
+    the live feed can never be interrupted by the EOD pass.
+    """
+    global _eod_sniper_evaluated_date
+    try:
+        now_ist = datetime.now(IST)
+        mins = now_ist.hour * 60 + now_ist.minute
+        if mins < 920:  # before 15:20 IST
+            return
+        today_ist = now_ist.strftime("%Y-%m-%d")
+        if _eod_sniper_evaluated_date == today_ist:
+            return
+        _eod_sniper_evaluated_date = today_ist
+        logger.info(
+            "⏰ 15:20 IST reached — scheduling VWAP Sniper (PE · C2-A) EOD evaluation for %s.",
+            today_ist,
+        )
+        threading.Thread(
+            target=_run_eod_sniper_evaluation,
+            args=(today_ist,),
+            name="eod-sniper-evaluator",
+            daemon=True,
+        ).start()
+    except Exception as exc:
+        logger.warning("EOD sniper evaluation trigger check failed: %s", exc)
+
+
+def _run_eod_sniper_evaluation(today_ist: str) -> None:
+    """Run the post-market outcome evaluator in this worker thread (never raises)."""
+    try:
+        from Nse_Project.Live_dashboard.evaluate_sniper_eod import evaluate_sniper_outcomes
+        evaluate_sniper_outcomes(target_date=today_ist)
+    except Exception:
+        logger.exception("VWAP Sniper (PE · C2-A) EOD evaluation failed for %s", today_ist)
+
+
 def _on_cvd_candle(payload: dict) -> None:
-    """Record the latest cumulative CVD from the CVD engine (its worker thread)."""
-    global _latest_cumulative_cvd
+    """Record the latest cumulative CVD + append the candle to the 2m seed history."""
+    global _latest_cumulative_cvd, _seed_candles_date
+    global _latest_ofi_imbalance, _latest_rel_vol_ratio, _latest_cvd_change_3
     if not isinstance(payload, dict):
         return
     cvd = payload.get("cvd")
     if isinstance(cvd, (int, float)):
         _latest_cumulative_cvd = float(cvd)
+    # VWAP BREAKDOWN SNIPER (PE · C2-A): carry the scale-free flow/volume/divergence
+    # features off the same completed 2m candle into market_state.
+    ofi = payload.get("ofi_imbalance")
+    if isinstance(ofi, (int, float)):
+        _latest_ofi_imbalance = float(ofi)
+    relvol = payload.get("rel_vol_ratio")
+    if isinstance(relvol, (int, float)):
+        _latest_rel_vol_ratio = float(relvol)
+    cvd3 = payload.get("cvd_change_3")
+    _latest_cvd_change_3 = float(cvd3) if isinstance(cvd3, (int, float)) else 0.0
+    # VWAP Breakdown Sniper (PE · C2-A): evaluate + forward-log on candle close.
+    _evaluate_sniper_c2a_and_log(payload)
+    bar = _seed_candle_bar(payload)
+    if bar is None:
+        return
+    # New trading day → clear yesterday's seed history before appending today's bar.
+    try:
+        bar_date = datetime.fromtimestamp(bar["ts"] / 1000.0, tz=IST).date()
+    except (TypeError, ValueError, OverflowError):
+        bar_date = None
+    if bar_date is not None and _seed_candles_date is not None and bar_date != _seed_candles_date:
+        _seed_candles_2m.clear()
+    if bar_date is not None:
+        _seed_candles_date = bar_date
+    _seed_candles_2m.append(bar)
+    _persist_seed_candles_2m()
 
 
 # ── AI Trade Setup confirmation (option-premium candlesticks) ─────────────────
@@ -2133,10 +2352,10 @@ def _ai_market_no_trade_probe() -> bool:
     )
 
 
-# ── Directional Fibonacci Bounce (index/spot 3-minute synthesis) ─────────────────
+# ── Directional Fibonacci Bounce (index/spot 2-minute synthesis) ─────────────────
 # Independent from the option-premium CandleConfirmationEngine. Fed ONLY the live
 # Index/Spot tick (not option premiums). The engine owns the 09:15 anchor capture,
-# directional Fib math and 3-minute candle synthesis, and reuses the shared
+# directional Fib math and 2-minute candle synthesis, and reuses the shared
 # trade-trigger dispatcher (same ai:trade_trigger channel).
 FIB_BOUNCE_SETUP = "fib_bounce"
 _fib_bounce_engine: FibBounceEngine | None = None
@@ -2264,6 +2483,11 @@ def _refresh_market_state(instrument_data=None) -> None:
     _score_peak_updated_at = now
 
     market_state["cumulative_cvd"] = _latest_cumulative_cvd
+    # VWAP BREAKDOWN SNIPER (PE · C2-A): scale-free order-flow / volume / 3-bar CVD
+    # divergence telemetry, computed by the CVD engine on each completed 2m candle.
+    market_state["ofi_imbalance"] = _latest_ofi_imbalance
+    market_state["rel_vol_ratio"] = _latest_rel_vol_ratio
+    market_state["cvd_change_3"] = _latest_cvd_change_3
     market_state["peak_bias"] = ex["bias_max"] if bias >= 0 else ex["bias_min"]
     market_state["peak_momentum"] = ex["mom_max"] if momentum >= 0 else ex["mom_min"]
     market_state["peak_score"] = ex["score_max"] if score >= 50 else ex["score_min"]
@@ -2337,10 +2561,14 @@ def _persist_market_state() -> None:
 def _load_market_state() -> None:
     """Restore CVD + peak sentiment from today's Redis key on startup."""
     global _latest_cumulative_cvd
+    global _latest_ofi_imbalance, _latest_rel_vol_ratio, _latest_cvd_change_3
 
     restored = load_market_state(redis_client)
     market_state.update(restored)
     _latest_cumulative_cvd = float(restored.get("cumulative_cvd", 0.0))
+    _latest_ofi_imbalance = float(restored.get("ofi_imbalance", 0.0))
+    _latest_rel_vol_ratio = float(restored.get("rel_vol_ratio", 1.0))
+    _latest_cvd_change_3 = float(restored.get("cvd_change_3", 0.0))
 
     # Seed the running extremes from the persisted current-side peaks. Only one
     # number per metric was persisted, so the opposite-side extreme restarts from
@@ -2354,6 +2582,10 @@ def _load_market_state() -> None:
     ex["score_min"] = restored["peak_score"] if restored["peak_score"] < 50 else 50.0
 
     logger.info("♻️ Market state restored from %s: %s", market_state_key(), restored)
+
+    # Restore the last 20 completed 2m candles (OHLC + CVD) so a worker restart keeps
+    # serving the seed history the dashboard uses to skip the ATR/divergence warm-up.
+    _load_seed_candles_2m()
 
 
 async def publish_live_state(force: bool = False) -> None:
@@ -2648,7 +2880,7 @@ async def update_index_spot(values: dict) -> None:
         live_state["index_raw_sample"] = raw
 
     # Directional Fibonacci Bounce: consume the live index LTP (owns the 09:15 anchor,
-    # directional Fib grid + 3-minute synthesis). Routed OUTSIDE the lock because a
+    # directional Fib grid + 2-minute synthesis). Routed OUTSIDE the lock because a
     # rare BUY_NOW dispatch performs a blocking Redis publish.
     _route_fib_index_tick(ltp, raw)
     live_state["fib_bounce"] = _fib_bounce_engine.snapshot() if _fib_bounce_engine is not None else {}
@@ -3075,7 +3307,7 @@ async def run_streamer(instrument_keys: list[str], expiry_date: date) -> None:
     _refresh_ai_engines(ai_option_cvd)
     logger.info("🤖 AI Trade Setup confirmation engine started (1m option candles).")
 
-    # ── Directional Fibonacci Bounce (index/spot 3-minute synthesis) ───────────
+    # ── Directional Fibonacci Bounce (index/spot 2-minute synthesis) ───────────
     global _fib_bounce_engine
     _fib_bounce_engine = FibBounceEngine(
         FIB_BOUNCE_SETUP,
@@ -3085,7 +3317,7 @@ async def run_streamer(instrument_keys: list[str], expiry_date: date) -> None:
         no_trade_probe=_ai_market_no_trade_probe,
         dispatch=True,
     )
-    logger.info("🎯 Directional Fibonacci Bounce engine started (index 3m synthesis).")
+    logger.info("🎯 Directional Fibonacci Bounce engine started (index 2m synthesis).")
 
     streamer = build_streamer(token, instrument_keys, expiry_date, loop, cvd_engine=cvd_engine, ai_option_cvd=ai_option_cvd, future_key=nifty_future_key)
     logger.info(f"🔌 Connecting to Upstox live feed for {len(instrument_keys) + 1} instruments (options + index spot)...")
@@ -3096,6 +3328,10 @@ async def run_streamer(instrument_keys: list[str], expiry_date: date) -> None:
     try:
         while not is_shutdown_requested():
             await asyncio.sleep(1)
+
+            # Post-market: once per IST trading day after 15:20, evaluate + fill in
+            # every VWAP Sniper (PE · C2-A) signal outcome on a background thread.
+            _maybe_trigger_eod_sniper_evaluation()
 
             # Keep the ATM CE/PE engines + option-candle allowlist in sync as the
             # spot drifts (cheap + idempotent; engines retain their candle history).

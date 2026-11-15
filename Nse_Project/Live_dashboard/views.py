@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.http import HttpResponse, JsonResponse
+from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import redirect, render
 from pathlib import Path
 import json
@@ -22,7 +23,7 @@ from Nse_Project.expiry_utils import (
     normalize_expiry,
     resolve_row_expiry,
 )
-from Nse_Project.Live_dashboard.market_state import load_market_state
+from Nse_Project.Live_dashboard.market_state import load_market_state, NIFTY_2M_SEED_CANDLES_KEY
 
 try:
     import redis
@@ -858,12 +859,34 @@ def _read_market_state_for_today() -> dict:
     return load_market_state(get_live_options_redis())
 
 
+def _read_seed_candles_2m() -> list:
+    """Return the last 20 completed 2m candles (OHLC + CVD) for frontend hydration.
+
+    Falls back cleanly to ``[]`` when Redis is unavailable, the key is absent
+    (e.g. before the 09:15 open / market closed), or the payload is malformed.
+    """
+    client = get_live_options_redis()
+    if client is None:
+        return []
+    try:
+        raw = client.get(NIFTY_2M_SEED_CANDLES_KEY)
+        if not raw:
+            return []
+        data = json.loads(raw)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
 def live_signals_view(request):
     context = _build_preopen_context()
     # Persisted live market metrics (CVD + peak Bias/Momentum/Score). These are
     # read from the date-scoped Redis key written by the feed worker so a hard
     # refresh shows the accumulated values instead of starting at 0.
     context.update(_read_market_state_for_today())
+    # Last 20 completed 2m candles (OHLC + CVD) so the frontend can rehydrate
+    # closedCandles on page load and skip the 30-minute ATR/divergence warm-up.
+    context["seed_candles_2m"] = _read_seed_candles_2m()
     return render(request, "live_signals.html", context)
 
 
@@ -1264,6 +1287,7 @@ def build_option_chain_rows(
             'call_volume': '-',
             'call_velocity': '-',
             'call_ltp': '-',
+            'call_delta': '-',
             'call_coi': '-',
             'call_coi_pct': '-',
             'call_control_pct': '-',
@@ -1273,6 +1297,7 @@ def build_option_chain_rows(
             'put_coi_rel_pct': '-',
             'put_coi': '-',
             'put_ltp': '-',
+            'put_delta': '-',
             'put_velocity': '-',
             'put_volume': '-',
             'put_oi': '-',
@@ -1315,6 +1340,10 @@ def build_option_chain_rows(
             velocity = _to_number(item.get(f'{target}_velocity'))
 
         row[f'{target}_ltp'] = ltp if ltp is not None else '-'
+        # Live option Delta (Upstox optionGreeks) so the AI card can translate a
+        # spot-level ATR stop into an option-premium SL (ATM fallback handled client-side).
+        delta = _to_number(get_nested(raw, ['fullFeed', 'marketFF', 'optionGreeks', 'delta']))
+        row[f'{target}_delta'] = delta if delta is not None else '-'
         row[f'{target}_oi'] = oi if oi is not None else '-'
         row[f'{target}_volume'] = volume if volume is not None else '-'
         row[f'{target}_velocity'] = velocity if velocity is not None else 0
@@ -1454,6 +1483,27 @@ def _json_safe_row(row: dict) -> dict:
     return {key: _json_safe_value(value) for key, value in row.items()}
 
 
+@csrf_exempt
+def log_sniper_api(request):
+    """Log a VWAP Sniper C2-A trigger forwarded from the browser (POST JSON)."""
+    if request.method != "POST":
+        return JsonResponse({"ok": False, "error": "POST required"}, status=405)
+    try:
+        payload = json.loads(request.body or b"{}")
+    except (ValueError, TypeError):
+        return JsonResponse({"ok": False, "error": "invalid JSON"}, status=400)
+    if not isinstance(payload, dict):
+        return JsonResponse({"ok": False, "error": "payload must be an object"}, status=400)
+    payload["source"] = "LIVE_UI_TRIGGER"
+    try:
+        from Nse_Project.Live_dashboard.sniper_logger import log_sniper_c2a_trigger
+        logged = bool(log_sniper_c2a_trigger(payload))
+    except Exception as exc:
+        logger.error("log_sniper_api failed: %s", exc, exc_info=True)
+        return JsonResponse({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status=500)
+    return JsonResponse({"ok": True, "logged": logged})
+
+
 def live_option_chain_api(request):
     """Serve the live option chain, and NEVER answer a 1 Hz poll with an HTML 500.
 
@@ -1495,6 +1545,9 @@ def live_option_chain_api(request):
             "momentum": 0,
             "score": 50,
             "cvd": 0,
+            "ofi_imbalance": 0,
+            "rel_vol_ratio": 1.0,
+            "cvd_change_3": 0,
             "current_atr": 0,
             "current_atr_ce": 0,
             "current_atr_pe": 0,
@@ -1591,6 +1644,11 @@ def _build_live_option_chain_payload() -> dict:
         # Live cumulative CVD (index-level), bridged from the CVD engine so the AI
         # card's macro bearish confirmation reads it straight from this 1 Hz payload.
         "cvd": _json_safe_value(market_state.get("cumulative_cvd")),
+        # VWAP BREAKDOWN SNIPER (PE · C2-A): scale-free order-flow / volume / 3-bar
+        # CVD divergence telemetry, computed by the CVD engine on each 2m candle.
+        "ofi_imbalance": _json_safe_value(market_state.get("ofi_imbalance")),
+        "rel_vol_ratio": _json_safe_value(market_state.get("rel_vol_ratio")),
+        "cvd_change_3": _json_safe_value(market_state.get("cvd_change_3")),
         # AI Trade Setups: live 1-minute ATR entry-zone buffer (₹). The PRICE field
         # renders [entry - ATR] - [entry + ATR] from these.
         "current_atr": _json_safe_value(market_state.get("current_atr")),

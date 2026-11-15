@@ -814,7 +814,7 @@
               <p id="cvd-value" class="cvd-value cvd-neutral font-mono text-lg font-bold">--</p>
             </div>
             <div class="rounded-lg border border-slate-800 bg-slate-950/40 px-2 py-1">
-              <p class="text-[10px] uppercase tracking-wider text-slate-500">CVD Trend · 4m</p>
+              <p class="text-[10px] uppercase tracking-wider text-slate-500">CVD Trend · 2m</p>
               <p id="cvd-trend" class="cvd-value cvd-neutral font-mono text-lg font-bold">--</p>
             </div>
           </div>
@@ -868,6 +868,7 @@
       <!-- VWAP + Candle Close + Math Console confirmation card (MODULAR / TEST).    -->
       <!-- To UNINSTALL: delete ONLY the single include line directly below.          -->
       <!-- ════════════════════════════════════════════════════════════════════════ -->
+      {{ seed_candles_2m|json_script:"seed-2m-candles" }}
       {% include 'cards/vwap_signal.html' %}
       <section id="ai-trade-setups" class="flex h-fit self-start flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-4">
         <div class="mb-2 flex items-center justify-between gap-3">
@@ -894,7 +895,7 @@
             </div>
           </div>
           <div class="rounded-lg border border-yellow-500/40 bg-yellow-950/20 p-2.5">
-            <p class="mb-1.5 text-xs font-bold uppercase tracking-wider text-yellow-300">📐 Fibonacci Bounce (3m)</p>
+            <p class="mb-1.5 text-xs font-bold uppercase tracking-wider text-yellow-300">📐 Fibonacci Bounce (2m)</p>
             <div class="space-y-1 text-xs">
               <div class="flex items-center justify-between gap-2">
                 <span class="uppercase tracking-wider text-slate-500">Strike</span><span id="ai-fib-strike" class="text-right font-mono font-semibold whitespace-nowrap text-slate-50">--</span>
@@ -909,6 +910,30 @@
                 <span class="uppercase tracking-wider text-slate-500">Target</span><span id="ai-fib-target" class="text-right font-mono font-semibold whitespace-nowrap text-emerald-300">--</span>
               </div>
               <div id="fib-signal-box" class="rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wider text-amber-300">🟡 WAITING</div>
+            </div>
+          </div>
+          <div class="rounded-lg border border-rose-500/40 bg-rose-950/20 p-2.5 lg:col-span-2">
+            <p class="mb-1.5 flex items-center justify-between gap-2 text-xs font-bold uppercase tracking-wider text-rose-300">
+              <span>🎯 VWAP Breakdown Sniper (PE · C2-A)</span>
+              <span id="sniper-time-window" class="rounded-md border border-slate-600/60 bg-black/30 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">🕒 09:15–14:55 IST</span>
+            </p>
+            <div class="space-y-1 text-xs">
+              <div class="flex items-center justify-between gap-2">
+                <span class="uppercase tracking-wider text-slate-500">Strike</span><span id="sniper-strike" class="text-right font-mono font-semibold whitespace-nowrap text-slate-50">--</span>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="uppercase tracking-wider text-slate-500">SL</span><span id="sniper-sl" class="text-right font-mono font-semibold whitespace-nowrap text-rose-300">--</span>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="uppercase tracking-wider text-slate-500">Target</span><span id="sniper-target" class="text-right font-mono font-semibold whitespace-nowrap text-emerald-300">--</span>
+              </div>
+              <div class="grid grid-cols-2 gap-1 border-t border-slate-700/60 pt-1">
+                <div class="flex items-center justify-between gap-1"><span class="text-slate-500">VWAP Dist%</span><span id="sniper-vwap-dist" class="font-mono text-slate-200">--</span></div>
+                <div class="flex items-center justify-between gap-1"><span class="text-slate-500">OFI Imb</span><span id="sniper-ofi" class="font-mono text-slate-200">--</span></div>
+                <div class="flex items-center justify-between gap-1"><span class="text-slate-500">Rel Vol</span><span id="sniper-relvol" class="font-mono text-slate-200">--</span></div>
+                <div class="flex items-center justify-between gap-1"><span class="text-slate-500">3-Bar CVD Δ</span><span id="sniper-cvd3" class="font-mono text-slate-200">--</span></div>
+              </div>
+              <div id="sniper-signal-box" class="rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wider text-amber-300">🟡 WAITING</div>
             </div>
           </div>
           
@@ -1795,6 +1820,40 @@
       window.speechSynthesis.speak(new SpeechSynthesisUtterance(message));
     } catch (e) { /* speech engine unavailable — ignore */ }
   }
+  // ── 2-Minute ATR (Wilder's smoothing, 14-period) ─────────────────────────
+  // True Range = max(H-L, |H-prevClose|, |L-prevClose|). Requires ≥ period+1 bars,
+  // so it returns null during the first ~30 minutes after the 09:15 open and the
+  // caller degrades to the static percentage SL (no NaN/undefined ever rendered).
+  function computeAtr2m(candles, period = 14) {
+    if (!Array.isArray(candles) || candles.length < period + 1) return null;
+    const trs = [];
+    for (let i = 1; i < candles.length; i++) {
+      const h = Number(candles[i].high);
+      const l = Number(candles[i].low);
+      const pc = Number(candles[i - 1].close);
+      if (!Number.isFinite(h) || !Number.isFinite(l) || !Number.isFinite(pc)) return null;
+      trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+    }
+    if (trs.length < period) return null;
+    let atr = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < trs.length; i++) {
+      atr = ((atr * (period - 1)) + trs[i]) / period;
+    }
+    return atr;
+  }
+  // ── Current IST wall-clock as minutes-since-midnight (VWAP SNIPER window) ──
+  function istMinutesNow() {
+    try {
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Kolkata', hour12: false, hour: '2-digit', minute: '2-digit'
+      }).formatToParts(new Date());
+      const h = Number((parts.find(p => p.type === 'hour') || {}).value || 0);
+      const m = Number((parts.find(p => p.type === 'minute') || {}).value || 0);
+      return (h * 60) + m;
+    } catch (e) {
+      return -1;
+    }
+  }
   function updateAITrades(data) {
     // Frontend-only mode switch: in scalper mode the AI TRADE SETUPS card is
     // hidden and updateAITradesScalp() drives the visible SCALP SIGNALS card
@@ -1873,25 +1932,50 @@
 
     // Card A — Momentum pullback: buy a 15% dip off the ATM premium.
     const aEntry = ltp > 0 ? ltp * 0.85 : 0;
-    // Option-Buy logic: a long option (CE or PE) always profits when its premium
-    // RISES, so SL sits 20% BELOW entry and Target sits 40% ABOVE entry for both.
-    const aSl = aEntry * 0.80;
-    const aTarget = aEntry * 1.40;
-
     // Card B — Fibonacci Bounce: buy a 15% dip off the ATM premium (the same strict
-    // 0.85 factor fib_bounce_engine.FibBounceEngine uses for its entry). Option-Buy
-    // logic: a long option profits when its premium RISES, so SL sits 20% BELOW
-    // entry and Target sits 40% ABOVE entry for both.
+    // 0.85 factor fib_bounce_engine.FibBounceEngine uses for its entry).
     const bEntry = ltp > 0 ? ltp * 0.85 : 0;
-    const bSl = bEntry * 0.80;
+    const aTarget = aEntry * 1.40;
     const bTarget = bEntry * 1.40;
+
+    // ── 2-Minute ATR Stop Loss (2.2x ATR_2m_14) ──────────────────────────────
+    // Reuse the 2m OHLC series the VWAP Candle Close Gate card accumulates (shared
+    // via window.__vwapSignal). With ≥14 true ranges the SL is volatility-scaled;
+    // otherwise (right after 09:15 open) it degrades to the static 20% premium SL.
+    const closed2m = (window.__vwapSignal && typeof window.__vwapSignal.getClosedCandles === 'function')
+      ? window.__vwapSignal.getClosedCandles()
+      : [];
+    const atr2m14 = computeAtr2m(closed2m, 14);
+    const spotSlPoints = atr2m14 !== null ? Math.min(35.0, Math.max(15.0, 2.2 * atr2m14)) : null;
+    const entrySpot = number(data && data.spot_price) > 0 ? number(data.spot_price) : currentSpot;
+    // Selected strike's live Delta (CE/PE side) with ATM 0.50 fallback.
+    const deltaRaw = bearish ? (atm && atm.put_delta) : (atm && atm.call_delta);
+    const deltaVal = Number.isFinite(Number(deltaRaw)) ? Math.abs(Number(deltaRaw)) : 0.50;
+
+    const optionSl = (entry) => {
+      if (spotSlPoints === null || entry <= 0) return entry * 0.80;   // static fallback (warm-up)
+      return Math.max(entry - (spotSlPoints * deltaVal), entry * 0.75);
+    };
+    const aSl = optionSl(aEntry);
+    const bSl = optionSl(bEntry);
+
+    // Compact SL label: dynamic Option SL + Spot invalidation level.
+    const spotFmt = (v) => (Number.isFinite(v) && v > 0 ? v.toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '--');
+    const slLabel = (sl) => {
+      if (spotSlPoints === null || !(entrySpot > 0)) return px(sl);
+      const inval = bearish ? entrySpot + spotSlPoints : entrySpot - spotSlPoints;
+      const arrow = bearish ? '>' : '<';
+      return `${px(sl)} (Spot ${arrow} ${spotFmt(inval)})`;
+    };
+    const aSlText = slLabel(aSl);
+    const bSlText = slLabel(bSl);
 
     // NO_TRADE: blank the card instead of pretending a CE/PE edge exists.
     // Otherwise render the correct CE/PE strike and the staged entry/SL/target.
     const strikeText = noTrade
       ? '🚫 NO TRADE ZONE'
       : (atmStrike > 0 ? `${fmt(atmStrike)} ${optionSide}` : '--');
-    const render = (prefix, entry, sl, target) => {
+    const render = (prefix, entry, sl, target, slText) => {
       setText(`${prefix}-strike`, strikeText);
       if (noTrade) {
         setText(`${prefix}-entry`, 'WAIT');
@@ -1906,11 +1990,173 @@
         ? (atr > 0 ? `${px(zoneLow)} - ${px(entry + atr)}` : px(entry))
         : '--';
       setText(`${prefix}-entry`, entryText);
-      setText(`${prefix}-sl`, ltp > 0 ? px(sl) : '--');
+      setText(`${prefix}-sl`, ltp > 0 ? (slText || px(sl)) : '--');
       setText(`${prefix}-target`, ltp > 0 ? px(target) : '--');
     };
-    render('ai-mom', aEntry, aSl, aTarget);
-    render('ai-fib', bEntry, bSl, bTarget);
+    render('ai-mom', aEntry, aSl, aTarget, aSlText);
+    render('ai-fib', bEntry, bSl, bTarget, bSlText);
+
+    // ── 🎯 VWAP BREAKDOWN SNIPER (PE · C2-A) ─────────────────────────────────
+    // Scale-free, PE-only short setup. Independent of the score tri-state above:
+    // it keys off VWAP breakdown + order-flow imbalance + relative-volume surge +
+    // a 3-bar CVD divergence trap, reusing the shared 2m ATR SL computed above.
+
+    // Subtle audio chime + highlight pulse on a fresh Sniper trigger (once per 2m candle).
+    const playSniperChime = () => {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const now = ctx.currentTime;
+        [0, 0.18].forEach((t, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = i === 0 ? 880 : 1320;
+          gain.gain.setValueAtTime(0.0001, now + t);
+          gain.gain.exponentialRampToValueAtTime(0.16, now + t + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + t + 0.15);
+          osc.connect(gain).connect(ctx.destination);
+          osc.start(now + t);
+          osc.stop(now + t + 0.16);
+        });
+        setTimeout(() => { try { ctx.close(); } catch (e) {} }, 500);
+      } catch (e) { /* audio unavailable — ignore */ }
+    };
+    const pulseSniperBox = (el) => {
+      if (!el) return;
+      el.style.transition = 'box-shadow .3s ease, transform .3s ease';
+      el.style.boxShadow = '0 0 22px rgba(244,63,94,.85)';
+      el.style.transform = 'scale(1.04)';
+      setTimeout(() => { el.style.boxShadow = ''; el.style.transform = ''; }, 1000);
+    };
+
+    const renderSniper = () => {
+      const mins = istMinutesNow();
+      const inWindow = mins >= 555 && mins <= 895;    // 09:15–14:55 IST
+      const primeWindow = mins >= 690 && mins <= 840; // 11:30–14:00 IST
+      const timeBadge = document.getElementById('sniper-time-window');
+      if (timeBadge) {
+        if (primeWindow) {
+          timeBadge.textContent = '🟢 PRIME WINDOW 11:30–14:00';
+          timeBadge.className = 'rounded-md border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-300';
+        } else if (inWindow) {
+          timeBadge.textContent = '🕒 09:15–14:55 IST';
+          timeBadge.className = 'rounded-md border border-slate-600/60 bg-black/30 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-400';
+        } else {
+          timeBadge.textContent = '🚫 OUTSIDE WINDOW';
+          timeBadge.className = 'rounded-md border border-slate-600/60 bg-black/30 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-500';
+        }
+      }
+
+      // Reference price: future LTP if available, else index spot.
+      const refPrice = (Number.isFinite(Number(data && data.future_ltp)) && Number(data.future_ltp) > 0)
+        ? Number(data.future_ltp)
+        : (Number.isFinite(Number(data && data.spot_price)) && Number(data.spot_price) > 0 ? Number(data.spot_price) : entrySpot);
+      const vwapVal = (Number.isFinite(Number(data && data.vwap)) && Number(data.vwap) > 0) ? Number(data.vwap) : 0;
+      // +dist => price BELOW VWAP (the short-PE trigger).
+      const vwapDist = (vwapVal > 0 && refPrice > 0) ? ((vwapVal - refPrice) / vwapVal) : 0;
+      const ofiImb = Number.isFinite(Number(data && data.ofi_imbalance)) ? Number(data.ofi_imbalance) : 0;
+      const relVol = Number.isFinite(Number(data && data.rel_vol_ratio)) ? Number(data.rel_vol_ratio) : 1;
+      const cvd3 = Number.isFinite(Number(data && data.cvd_change_3)) ? Number(data.cvd_change_3) : 0;
+
+      // Live mini-telemetry (always visible so the trader can watch it build up).
+      setText('sniper-vwap-dist', (vwapDist * 100).toFixed(2) + '%');
+      setText('sniper-ofi', ofiImb.toFixed(2));
+      setText('sniper-relvol', relVol.toFixed(2) + 'x');
+      setText('sniper-cvd3', (cvd3 > 0 ? '+' : '') + Math.round(cvd3).toLocaleString('en-IN'));
+
+      const belowVwap = vwapDist >= 0.0015;
+      const flowOk = Math.abs(ofiImb) >= 0.35;
+      const volOk = relVol >= 1.20;
+      const cvdOk = cvd3 > 0;
+      const active = inWindow && belowVwap && flowOk && volOk && cvdOk;
+
+      const box = document.getElementById('sniper-signal-box');
+      if (active) {
+        // ATM PE strike rounded to nearest 50 + live put LTP from the chain.
+        const sniperStrike = entrySpot > 0 ? Math.round(entrySpot / 50) * 50 : 0;
+        const row = sniperStrike > 0 ? (allRows.find(r => number(r.strike) === sniperStrike) || null) : null;
+        const putLtp = row ? number(row.put_ltp) : 0;
+        setText('sniper-strike', sniperStrike > 0 ? (sniperStrike.toLocaleString('en-IN') + ' PE' + (putLtp > 0 ? ' @ ' + px(putLtp) : '')) : '--');
+
+        // SL: spot_sl = clamp(2.2 * atrVal, 15, 35); option SL ≈ 0.5 × spot_sl.
+        // Opening-safe ATR: server current_atr with 20.0 fallback (renders from 09:15).
+        const atrVal = Number(data && data.current_atr) > 0 ? Number(data.current_atr) : 20.0;
+        const sniperSlPoints = Math.min(35.0, Math.max(15.0, 2.2 * atrVal));
+        if (entrySpot > 0) {
+          const spotSlLevel = entrySpot + sniperSlPoints;   // short SL above entry
+          const optSl = 0.5 * sniperSlPoints;
+          setText('sniper-sl', 'Spot ' + spotFmt(spotSlLevel) + ' · Opt ~' + optSl.toFixed(1) + ' pts (NO EARLY BE TRAIL)');
+        } else {
+          setText('sniper-sl', 'WAIT (entry spot)');
+        }
+        // Target: 45 spot points (≈22.5 option pts).
+        setText('sniper-target', entrySpot > 0 ? ('Spot ' + spotFmt(entrySpot - 45) + ' · Opt ~22.5 pts') : '--');
+
+        const aplus = relVol >= 1.50;
+        if (box) {
+          box.textContent = aplus ? '🔥 A+ SNIPER (1.5x+) — ACTIVE SHORT PE' : '✅ VALID (1.2x+) — ACTIVE SHORT PE';
+          box.className = 'rounded-md border border-rose-500/50 bg-rose-500/15 px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wider text-rose-300';
+        }
+      } else {
+        setText('sniper-strike', '🚫 NO TRADE ZONE');
+        setText('sniper-sl', 'WAIT');
+        setText('sniper-target', 'WAIT');
+        if (box) {
+          box.textContent = '🟡 WAITING';
+          box.className = 'rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wider text-amber-300';
+        }
+      }
+
+      // Chime + pulse on transition into VALID/A+ (guarded to once per 2m candle).
+      const candleKey = Math.floor(mins / 2);
+      const wasActive = window.__sniperWasActive === true;
+      const lastChime = window.__sniperLastChimeCandle || -1;
+      if (active && !wasActive && candleKey !== lastChime) {
+        playSniperChime();
+        window.__sniperLastChimeCandle = candleKey;
+        pulseSniperBox(box);
+      }
+      window.__sniperWasActive = active;
+
+      // Forward-test logging: POST once per 2m candle whenever the card is active.
+      const logCandleKey = Math.floor(mins / 2);
+      if (active && window.__sniperLastLoggedCandle !== logCandleKey) {
+        window.__sniperLastLoggedCandle = logCandleKey;
+        const istNow = new Date(Date.now() + 5.5 * 3600 * 1000);
+        const tsIst = istNow.toISOString().slice(0, 19).replace('T', ' ');
+        const bMin = Math.floor(istNow.getUTCMinutes() / 2) * 2;
+        const bDt = new Date(istNow); bDt.setUTCMinutes(bMin, 0, 0);
+        const bucketIst = bDt.toISOString().slice(0, 16).replace('T', ' ');
+        const logAtr = Number(data && data.current_atr) > 0 ? Number(data.current_atr) : 20.0;
+        const logSl = Math.min(35.0, Math.max(15.0, 2.2 * logAtr));
+        const logStrike = entrySpot > 0 ? Math.round(entrySpot / 50) * 50 : 0;
+        const logRow = logStrike > 0 ? (allRows.find(r => number(r.strike) === logStrike) || null) : null;
+        fetch('/live-signals/log-sniper/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            timestamp_ist: tsIst,
+            candle_2m_bucket: bucketIst,
+            tier: (relVol >= 1.50) ? 'A+ SNIPER (1.5x+)' : 'VALID (1.2x+)',
+            spot_price: entrySpot,
+            future_ltp: refPrice,
+            vwap: vwapVal,
+            vwap_dist_pct: Number((vwapDist * 100).toFixed(6)),
+            ofi_imbalance: ofiImb,
+            rel_vol_ratio: relVol,
+            cvd_change_3: cvd3,
+            spot_sl_pts: logSl,
+            spot_target_pts: 45.0,
+            atm_pe_strike: logStrike,
+            atm_pe_ltp: logRow ? number(logRow.put_ltp) : 0,
+          }),
+        }).catch(() => { /* non-blocking; backend dedups too */ });
+      }
+    };
+    renderSniper();
+
     // Transparency: mirror the live math (score + momentum + decision) into the debug console.
     updateMathConsole(currentTradeState);
   }
@@ -2569,12 +2815,12 @@
   function render(payload) {
     if (!payload || typeof payload !== 'object') return;
     cvdValue.textContent = fmt(payload.cvd);
-    cvdTrend.textContent = fmt(payload.cvd_trend_4m);
+    cvdTrend.textContent = fmt(payload.cvd_trend_2m);
     cvdSymbol.textContent = payload.symbol || '--';
     cvdDelta.textContent = fmt(payload.delta);
     cvdClose.textContent = fmt(payload.close);
     setTone(cvdValue, payload.cvd);
-    setTone(cvdTrend, payload.cvd_trend_4m);
+    setTone(cvdTrend, payload.cvd_trend_2m);
     setStatus('Live', '#4ade80');
   }
 

@@ -1,17 +1,17 @@
 """
-Directional Fibonacci Bounce — live intraday engine (Index/Spot, 3-minute synthesis).
+Directional Fibonacci Bounce — live intraday engine (Index/Spot, 2-minute synthesis).
 
 Independent from the option-premium ``CandleConfirmationEngine``. This module is fed
 ONLY the live Index/Spot tick (``NSE_INDEX|Nifty 50``) and owns:
 
-  1. BASE ANCHOR      — exact High/Low of the first 3-minute candle of the session
-     (09:15:00 .. 09:17:59 IST).
+  1. BASE ANCHOR      — exact High/Low of the first 2-minute candle of the session
+     (09:15:00 .. 09:16:59 IST).
   2. DIRECTIONAL FIB  — the 0.0/0.236/0.5/0.786/1.0/1.618/2.618/3.618 grid drawn
      *bottom->top* for CE (bullish, 0.0 = Low) and *top->bottom* for PE
      (bearish, 0.0 = High).
   3. TRIGGER          — a live index touch within ``FIB_TOUCH_TOLERANCE_PCT`` (0.05%)
-     of a level starts a pattern check on the SYNTHESIZED 3-minute candle (merge of
-     the last three 1-minute candles).
+     of a level starts a pattern check on the SYNTHESIZED 2-minute candle (merge of
+     the last two 1-minute candles).
   4. STRICT 15% DIP   — option entry is ``ATM premium * PREMIUM_DIP_FACTOR`` (0.85),
      identical to the Momentum Pullback setup. Never bypassed.
   5. GAMMA-DRIVEN    — the CE/PE side is chosen from the live NIFTY DAY GAMMA
@@ -53,9 +53,9 @@ except (ImportError, ValueError, KeyError):
 FIB_RATIOS = (0.0, 0.236, 0.5, 0.786, 1.0, 1.618, 2.618, 3.618)
 FIB_TOUCH_TOLERANCE_PCT = float(os.getenv("FIB_TOUCH_TOLERANCE_PCT", "0.0005"))   # 0.05%
 PREMIUM_DIP_FACTOR = float(os.getenv("FIB_PREMIUM_DIP_FACTOR", "0.85"))           # STRICT 15% dip
-SYNTH_PERIOD = int(os.getenv("FIB_SYNTH_PERIOD", "3"))                            # 3x 1-minute -> 3m
-ANCHOR_START = time_of_day(9, 15)  # first 3-min candle opens 09:15:00 IST
-ANCHOR_END = time_of_day(9, 18)    # exclusive -> closes 09:17:59.999
+SYNTH_PERIOD = int(os.getenv("FIB_SYNTH_PERIOD", "2"))                            # 2x 1-minute -> 2m
+ANCHOR_START = time_of_day(9, 15)  # first 2-min candle opens 09:15:00 IST
+ANCHOR_END = time_of_day(9, 17)    # exclusive -> closes 09:16:59.999
 
 # Reversal-pattern tolerances (same spirit as ai_candle_confirmation).
 PIN_BAR_WICK_RATIO = float(os.getenv("FIB_PIN_BAR_WICK_RATIO", "2.0"))
@@ -95,13 +95,13 @@ __all__ = [
     "FIB_TOUCH_TOLERANCE_PCT",
     "PREMIUM_DIP_FACTOR",
     "directional_fib_levels",
-    "synthesize_3m_candle",
+    "synthesize_2m_candle",
     "nearest_fib_touch",
     "resolve_trade_side",
     "resolve_gamma_side",
     "GAMMA_DAY_NEUTRAL_FRACTION",
-    "has_bullish_reversal_3m",
-    "has_bearish_reversal_3m",
+    "has_bullish_reversal_2m",
+    "has_bearish_reversal_2m",
     "build_fib_trigger_payload",
 ]
 
@@ -252,7 +252,7 @@ def resolve_gamma_side(net_gex_ratio, neutral_fraction: float = GAMMA_DAY_NEUTRA
     return None
 
 
-# ── Synthesized 3-minute reversal patterns ────────────────────────────────────
+# ── Synthesized 2-minute reversal patterns ────────────────────────────────────
 def _ohlc(candle: Any) -> Optional[tuple]:
     """Return ``(open, high, low, close)`` or ``None`` when missing/invalid.
 
@@ -307,51 +307,51 @@ def _is_bearish_pin_bar(o: float, h: float, l: float, c: float) -> bool:
             and lower <= PIN_BAR_UPPER_WICK_FRAC * rng)
 
 
-def has_bullish_reversal_3m(candle, prev_candle=None) -> Optional[str]:
-    """Bullish reversal on the SYNTHESIZED 3-minute candle (vs prior synth candle)."""
+def has_bullish_reversal_2m(candle, prev_candle=None) -> Optional[str]:
+    """Bullish reversal on the SYNTHESIZED 2-minute candle (vs prior synth candle)."""
     ohlc = _ohlc(candle)
     if ohlc is None:
         return None
     o, h, l, c = ohlc
     if _is_bullish_pin_bar(o, h, l, c):
-        return "hammer_3m"
+        return "hammer_2m"
     prev = _ohlc(prev_candle)
     if prev is not None:
         po, _ph, pl, pc = prev
         if c > o and pc < po and o <= pc and c >= po:
-            return "bullish_engulfing_3m"
+            return "bullish_engulfing_2m"
         # FIX: require the second candle to be bullish (c > o). The original
         # matched just on lows, so a bearish candle at the same low as a bullish
-        # predecessor would falsely trigger "tweezer_bottoms_3m".
+        # predecessor would falsely trigger "tweezer_bottoms_2m".
         if c > o and abs(l - pl) <= TWEEZER_TOLERANCE * max(pl, 1.0):
-            return "tweezer_bottoms_3m"
+            return "tweezer_bottoms_2m"
     return None
 
 
-def has_bearish_reversal_3m(candle, prev_candle=None) -> Optional[str]:
-    """Bearish reversal on the SYNTHESIZED 3-minute candle (vs prior synth candle)."""
+def has_bearish_reversal_2m(candle, prev_candle=None) -> Optional[str]:
+    """Bearish reversal on the SYNTHESIZED 2-minute candle (vs prior synth candle)."""
     ohlc = _ohlc(candle)
     if ohlc is None:
         return None
     o, h, l, c = ohlc
     if _is_bearish_pin_bar(o, h, l, c):
-        return "shooting_star_3m"
+        return "shooting_star_2m"
     prev = _ohlc(prev_candle)
     if prev is not None:
         po, ph, _pl, pc = prev
         if c < o and pc > po and o >= pc and c <= po:
-            return "bearish_engulfing_3m"
+            return "bearish_engulfing_2m"
         # FIX: require the second candle to be bearish (c < o), same reasoning
         # as the bullish counterpart above.
         if c < o and abs(h - ph) <= TWEEZER_TOLERANCE * max(ph, 1.0):
-            return "tweezer_tops_3m"
+            return "tweezer_tops_2m"
     return None
 
 
-def synthesize_3m_candle(candles_1m: Sequence[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Merge the last three 1-minute candles into one 3-minute OHLC candle.
+def synthesize_2m_candle(candles_1m: Sequence[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Merge the last two 1-minute candles into one 2-minute OHLC candle.
 
-    Returns None when fewer than three valid 1-minute candles are available.
+    Returns None when fewer than two valid 1-minute candles are available.
 
     FIX vs original: parsed the dict 5x per call (``_ohlc(last[0])[0]`` +
     ``_ohlc(last[-1])[3]`` + ``_ohlc(b)[1] for b in last`` + ``_ohlc(b)[2] for b in last``
@@ -407,7 +407,7 @@ def build_fib_trigger_payload(
 
 # ── Stateful engine ───────────────────────────────────────────────────────────
 class FibBounceEngine:
-    """Owns anchor capture, directional Fib grids, 3-min synthesis and dispatch.
+    """Owns anchor capture, directional Fib grids, 2-min synthesis and dispatch.
 
     ``on_index_tick`` is the single entry point. The original docstring claimed "no
     internal locking is required" because the feed worker is single-threaded, but
@@ -478,7 +478,7 @@ class FibBounceEngine:
         # cached value when fresh; calls gamma_side_provider() only on cache miss.
         self._cached_side: Optional[str] = None
         self._cached_side_at: float = 0.0
-        # ARCHITECTURAL UPGRADE: 3m synth cache. Invalidated whenever a 1m candle
+        # ARCHITECTURAL UPGRADE: 2m synth cache. Invalidated whenever a 1m candle
         # closes (via _bucket_1m). On a 10-tick/sec feed this skips 9 of 10 synth
         # calls per second.
         self._cached_synth: Optional[Dict[str, Any]] = None
@@ -531,7 +531,7 @@ class FibBounceEngine:
                 "levels_ce": dict(self._levels.get("CE", {})),
                 "levels_pe": dict(self._levels.get("PE", {})),
                 "last_touch": dict(self.last_touch) if self.last_touch else None,
-                "latest_synth_3m": dict(self.latest_synth) if self.latest_synth else None,
+                "latest_synth_2m": dict(self.latest_synth) if self.latest_synth else None,
                 "stale_until": self._stale_until.isoformat() if self._stale_until else None,
                 "last_refusal_reason": self.last_refusal_reason,
             }
@@ -599,8 +599,8 @@ class FibBounceEngine:
             # 1m candle closes). On a 10-tick/sec feed this skips 9 of 10 synth
             # rebuilds per second.
             if self._synth_cache_invalid or self._cached_synth is None:
-                self._cached_synth = synthesize_3m_candle(list(self._one_min_history))
-                self._cached_prev_synth = synthesize_3m_candle(
+                self._cached_synth = synthesize_2m_candle(list(self._one_min_history))
+                self._cached_prev_synth = synthesize_2m_candle(
                     list(self._one_min_history)[:-SYNTH_PERIOD]
                 )
                 self._synth_cache_invalid = False
@@ -611,14 +611,14 @@ class FibBounceEngine:
             pattern = None
             if synth is not None:
                 pattern = (
-                    has_bullish_reversal_3m(synth, prev) if side == "CE"
-                    else has_bearish_reversal_3m(synth, prev)
+                    has_bullish_reversal_2m(synth, prev) if side == "CE"
+                    else has_bearish_reversal_2m(synth, prev)
                 )
             if not pattern:
                 # Still inside the band: keep armed and re-check on the next tick, so a
                 # reversal that completes a moment later still fires.
                 self.last_refusal_reason = (
-                    f"no_pattern (synth_3m={synth})"
+                    f"no_pattern (synth_2m={synth})"
                 )
                 return None
 
@@ -712,7 +712,7 @@ class FibBounceEngine:
             # ARCHITECTURAL UPGRADE: gap detection. If more than
             # GAP_STALE_THRESHOLD_MINUTES elapsed since the last candle opened,
             # the 1m history has holes - mark the engine stale until enough fresh
-            # candles accumulate to fill a 3m synth.
+            # candles accumulate to fill a 2m synth.
             gap_minutes = (bucket - cur["ts_open"]).total_seconds() / 60.0
             if gap_minutes > GAP_STALE_THRESHOLD_MINUTES:
                 # Need SYNTH_PERIOD fresh candles after the gap; that's
@@ -725,14 +725,14 @@ class FibBounceEngine:
                 )
             self._one_min_history.append(cur)
             self._cur_1m = self._new_1m(bucket, price)
-            # ARCHITECTURAL UPGRADE: invalidate the 3m synth cache when a candle
+            # ARCHITECTURAL UPGRADE: invalidate the 2m synth cache when a candle
             # closes. The next on_index_tick call will rebuild it.
             self._synth_cache_invalid = True
         # else: out-of-order older tick — ignored for candle construction.
 
     def _capture_anchor(self, price: float, ts: datetime) -> None:
         t = ts.time()
-        # Session-open anchor (09:15-09:18) — builds up _anchor_high/_low from
+        # Session-open anchor (09:15-09:17) — builds up _anchor_high/_low from
         # ticks inside the morning window.
         if ANCHOR_START <= t < ANCHOR_END:
             self._anchor_high = price if self._anchor_high is None else max(self._anchor_high, price)
@@ -742,7 +742,7 @@ class FibBounceEngine:
         # set, we're in fallback mode and must NOT enter the "immediate capture"
         # block below — otherwise the second late tick (which sees both _anchor_*
         # already initialized by the first late tick) would capture immediately
-        # and bypass the 3-minute fallback window.
+        # and bypass the 2-minute fallback window.
         in_fallback = self._fallback_anchor_started_at is not None
 
         # Normal session-open capture: morning window has ended and we have a
@@ -765,7 +765,7 @@ class FibBounceEngine:
         # ARCHITECTURAL UPGRADE: late-start fallback. If the worker started AFTER
         # ANCHOR_END (crash recovery, deploy mid-session), the original code NEVER
         # captured an anchor - the engine was permanently disabled for the rest
-        # of the session. Now use the first 3 minutes of post-start ticks as a
+        # of the session. Now use the first 2 minutes of post-start ticks as a
         # degenerate anchor. Less reliable than the session-open anchor (the
         # morning high/low is the standard), but far better than running blind.
         if t >= ANCHOR_END and not self._anchor_captured:
@@ -777,18 +777,18 @@ class FibBounceEngine:
                 logger.warning(
                     "Worker started after ANCHOR_END (%s); using late-start "
                     "fallback anchor window starting at %s. Fib levels will be "
-                    "based on the next 3 minutes of post-start ticks.",
+                    "based on the next 2 minutes of post-start ticks.",
                     ANCHOR_END, ts.isoformat(),
                 )
                 return
             elapsed = (ts - self._fallback_anchor_started_at).total_seconds()
             if elapsed < SYNTH_PERIOD * 60:
-                # Still inside the 3-minute fallback window - keep building the
+                # Still inside the 2-minute fallback window - keep building the
                 # anchor from each tick. DO NOT capture yet.
                 self._anchor_high = max(self._anchor_high, price)
                 self._anchor_low = min(self._anchor_low, price)
                 return
-            # 3 minutes have elapsed - capture now.
+            # 2 minutes have elapsed - capture now.
             if self._anchor_high is not None and self._anchor_low is not None:
                 if not self._anchor_captured:
                     logger.warning(
@@ -864,20 +864,19 @@ def _self_test() -> None:
     assert pe[0.0] == 200.0 and pe[1.0] == 100.0 and abs(pe[0.5] - 150.0) < 1e-6
     assert abs(ce[1.618] - 261.8) < 0.01
 
-    # 2) 3-minute synthesis (merge of 3 x 1-minute)
-    synth = synthesize_3m_candle([
+    # 2) 2-minute synthesis (merge of 2 x 1-minute)
+    synth = synthesize_2m_candle([
         {"open": 100, "high": 105, "low": 99, "close": 104},
         {"open": 104, "high": 107, "low": 103, "close": 106},
-        {"open": 106, "high": 108, "low": 101, "close": 102},
     ])
-    assert synth["open"] == 100 and synth["high"] == 108 and synth["low"] == 99
-    assert synth["close"] == 102
+    assert synth["open"] == 100 and synth["high"] == 107 and synth["low"] == 99
+    assert synth["close"] == 106
 
-    # 3) Reversal patterns on the synthesized 3m candle
+    # 3) Reversal patterns on the synthesized 2m candle
     hammer = {"open": 123.6, "high": 124.5, "low": 120.0, "close": 124.0}
     star = {"open": 101.0, "high": 110.0, "low": 100.0, "close": 102.0}
-    assert has_bullish_reversal_3m(hammer) == "hammer_3m"
-    assert has_bearish_reversal_3m(star) == "shooting_star_3m"
+    assert has_bullish_reversal_2m(hammer) == "hammer_2m"
+    assert has_bearish_reversal_2m(star) == "shooting_star_2m"
 
     # 4) Gamma-driven direction (Day Bias) + universal level scan sanity
     assert resolve_gamma_side(0.40) == "CE"    # positive gamma -> bullish
@@ -905,7 +904,7 @@ def _self_test() -> None:
         (0, 100.0),      # 09:15:00 anchor low
         (60, 200.0),     # 09:16:00 anchor high
         (120, 150.0),    # 09:17:00
-        (180, 123.6),    # 09:18:00 -> finalizes anchor (window closed)
+        (180, 123.6),    # 09:18:00 -> anchor already captured (09:17:00 closed the 2m window)
         (181, 123.8),
         (182, 123.0),
         (183, 123.5),    # 09:18 candle (open 123.6, high 123.8, low 123.0, close 123.5)
@@ -916,7 +915,7 @@ def _self_test() -> None:
         (300, 121.0),    # 09:20:00
         (301, 122.5),
         (302, 120.5),
-        (303, 124.0),    # 09:20 candle -> 3m synth = hammer
+        (303, 124.0),    # 09:20 candle -> 2m synth = hammer
     ]
     for sec, px in seq:
         engine.on_index_tick(px, t0 + timedelta(seconds=sec))
@@ -928,7 +927,7 @@ def _self_test() -> None:
     assert trigger is not None
     assert trigger["status"] == "BUY_NOW" and trigger["option_side"] == "CE"
     assert abs(trigger["fib_ratio"] - 0.236) < 1e-9
-    assert trigger["pattern"] == "hammer_3m"
+    assert trigger["pattern"] == "hammer_2m"
     assert trigger["premium"] == 150.0 and trigger["entry_price"] == round(150.0 * 0.85, 2)
 
     print("Fib bounce self-test PASSED")

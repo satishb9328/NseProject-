@@ -26,6 +26,13 @@ IST = timezone(timedelta(hours=5, minutes=30))
 MARKET_STATE_KEY_PREFIX = "market_state"
 MARKET_STATE_TTL_SECONDS = 24 * 60 * 60  # 24h
 
+# Redis key + rolling cap for the last-N completed 2m candles (OHLC + CVD) that the
+# dashboard rehydrates on page load so a browser refresh (F5) skips the ~30-minute
+# ATR/divergence warm-up. Written by upstox_live_feed.py on each 2m candle close,
+# read by views.py on the /live-signals/ page render.
+NIFTY_2M_SEED_CANDLES_KEY = "nifty_2m_seed_candles"
+NIFTY_2M_SEED_CANDLES_MAX = 20
+
 # ``peak_score`` defaults to 50 (the neutral centre of the 0..100 score scale),
 # while the other three defaults are 0.
 DEFAULT_MARKET_STATE = {
@@ -73,6 +80,12 @@ DEFAULT_MARKET_STATE = {
     # VWAP card compares future price vs future VWAP (apples-to-apples) instead of the
     # cash index against the futures VWAP.
     "future_ltp": 0.0,
+    # VWAP BREAKDOWN SNIPER (PE · C2-A): scale-free order-flow / volume / 3-bar CVD
+    # divergence telemetry, computed by the CVD engine on every completed 2m candle
+    # and folded into market_state on the next publish beat.
+    "ofi_imbalance": 0.0,
+    "rel_vol_ratio": 1.0,
+    "cvd_change_3": 0.0,
 }
 
 
