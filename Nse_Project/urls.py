@@ -32,6 +32,7 @@ urlpatterns = [
     path('', RedirectView.as_view(url='/live-signals/', permanent=False)),
     path('live-signals/', live_signals_view, name='live_signals'),
     path('live-signals/log-sniper/', views.log_sniper_api, name='log_sniper'),
+    path('live-signals/log-sniper-ce/', views.log_sniper_ce_api, name='log_sniper_ce'),
     path('swing-stocks/', swing_stocks_view, name='swing_stocks'),
 
     # Upstox OAuth login flow — top-level paths so the Render redirect URI can be

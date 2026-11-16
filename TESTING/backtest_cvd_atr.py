@@ -254,6 +254,78 @@ def fetch_1m_ohlc_range(from_date: str, to_date: str) -> pd.DataFrame:
     return out[~out.index.duplicated(keep="last")]
 
 
+SUPABASE_CONN_STRING = (
+    "postgresql://postgres.jryrijkauzlmuzcehlof:dZVAOHh1fe9RcauJ"
+    "@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres"
+)
+
+
+def fetch_1m_ohlc_range_from_supabase(from_date: str, to_date: str) -> pd.DataFrame:
+    """Fallback 1m NIFTY Futures OHLC source.
+
+    Builds 1-minute OHLC bars from the Supabase ``tbt_ticks`` table when the
+    Upstox expired-instruments API is unavailable (e.g. an expired access
+    token). The TBT feed carries a day-cumulative ``volume`` column, so each
+    minute's traded volume is computed as (max - min) of that cumulative value
+    within the minute.
+    """
+    try:
+        import psycopg2
+    except ImportError:
+        print("[FALLBACK] psycopg2 not available; cannot build OHLC from Supabase.")
+        return pd.DataFrame()
+
+    from_utc = pd.Timestamp(from_date, tz="Asia/Kolkata").tz_convert("UTC").to_pydatetime()
+    # ``to_date`` is inclusive in IST; +1 day bounds the whole final session.
+    to_utc = (
+        (pd.Timestamp(to_date, tz="Asia/Kolkata") + pd.Timedelta(days=1))
+        .tz_convert("UTC")
+        .to_pydatetime()
+    )
+
+    conn = psycopg2.connect(SUPABASE_CONN_STRING, connect_timeout=25)
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT timestamp, ltp, volume
+            FROM tbt_ticks
+            WHERE instrument LIKE 'NSE:NIFTY%%FUT'
+              AND timestamp >= %s AND timestamp < %s
+            ORDER BY timestamp
+            """,
+            (from_utc, to_utc),
+        )
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        return pd.DataFrame()
+
+    tdf = pd.DataFrame(rows, columns=["timestamp", "ltp", "volume"])
+    tdf["timestamp"] = pd.to_datetime(tdf["timestamp"], utc=True)
+    tdf["ltp"] = pd.to_numeric(tdf["ltp"], errors="coerce")
+    tdf["volume"] = pd.to_numeric(tdf["volume"], errors="coerce")
+    tdf = tdf.dropna(subset=["ltp"]).sort_values("timestamp")
+
+    tdf["minute"] = tdf["timestamp"].dt.floor("1min")
+    g = tdf.groupby("minute")
+    ohlc = pd.DataFrame(
+        {
+            "open": g["ltp"].first(),
+            "high": g["ltp"].max(),
+            "low": g["ltp"].min(),
+            "close": g["ltp"].last(),
+            "volume": g["volume"].max() - g["volume"].min(),
+        }
+    )
+    ohlc = ohlc.dropna(subset=["open", "close"])
+    ohlc.index.name = "timestamp"
+    print(f"[FALLBACK] Built {len(ohlc)} 1m OHLC bars from Supabase tbt_ticks ({from_date} -> {to_date}).")
+    return ohlc[["open", "high", "low", "close", "volume"]]
+
+
 def load_or_fetch_1m_ohlc(feature_min_date=None, feature_max_date=None) -> pd.DataFrame:
     """Dynamically ensure the 1m NIFTY Futures OHLC cache covers the full feature date range.
 
@@ -285,10 +357,23 @@ def load_or_fetch_1m_ohlc(feature_min_date=None, feature_max_date=None) -> pd.Da
 
     to_date = feature_max_date.strftime("%Y-%m-%d")
     print(f"[API] 1m OHLC cache ends {cache_max}; fetching missing range {from_date} -> {to_date} from Upstox Expired Instruments API...")
-    missing = fetch_1m_ohlc_range(from_date, to_date)
+    missing = pd.DataFrame()
+    fetch_error = None
+    try:
+        missing = fetch_1m_ohlc_range(from_date, to_date)
+    except Exception as exc:
+        fetch_error = exc
 
     if missing.empty:
-        raise RuntimeError(f"No 1-minute OHLC candles returned from Upstox API for {from_date} -> {to_date}.")
+        reason = f" ({type(fetch_error).__name__}: {fetch_error})" if fetch_error is not None else " (0 candles returned)"
+        print(f"[FALLBACK] Upstox 1m OHLC fetch failed{reason}. Building 1m OHLC from Supabase tbt_ticks instead.")
+        missing = fetch_1m_ohlc_range_from_supabase(from_date, to_date)
+
+    if missing.empty:
+        raise RuntimeError(
+            f"No 1-minute OHLC candles available for {from_date} -> {to_date} "
+            "(both the Upstox expired-instruments API and Supabase tbt_ticks returned nothing)."
+        )
 
     if ohlc is not None:
         ohlc = pd.concat([ohlc, missing]).sort_index()

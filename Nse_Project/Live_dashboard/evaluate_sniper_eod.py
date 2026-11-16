@@ -1,10 +1,12 @@
-"""Post-market EOD outcome evaluator for the VWAP Breakdown Sniper (PE · C2-A).
+"""Post-market EOD outcome evaluator for the VWAP Sniper forward logs.
 
-Fills in the exact ``TP_HIT`` (+45 pts) / ``SL_HIT`` / ``EOD_EXIT`` (15:18 IST)
-outcome for every live forward-logged Sniper signal using that trading day's
-1-minute intraday candles.  The bar-by-bar simulation mirrors ``Model C2-A`` in
-``TESTING/backtest_cvd_atr.py`` (short PE, no early breakeven trail, 1.0 pt
-round-trip slippage, 0.5 option-delta estimate).
+Evaluates BOTH forward logs against that trading day's 1-minute intraday candles:
+
+  - ``live_sniper_c2a_forward_log.csv``  → PE · C2-A (short, 45 pt TP)
+  - ``live_sniper_ce_pb_forward_log.csv`` → CE · C2-PB (long, 35 pt TP)
+
+Fills in ``TP_HIT`` / ``SL_HIT`` / ``EOD_EXIT`` (15:18 IST) with 1.0 pt
+round-trip slippage and a 0.5 option-delta estimate.
 
 Can be imported (pass ``candles_df`` to avoid network access) or run standalone:
 
@@ -49,7 +51,8 @@ UPSTOX_MASTER_HEADERS = {
 
 SLIPPAGE_PTS = 1.0          # round-trip slippage/brokerage in NIFTY points
 OPTION_DELTA_EST = 0.5       # ATM option delta for the rupee P&L estimate
-DEFAULT_TP_PTS = 45.0
+DEFAULT_TP_PTS = 45.0        # PE · C2-A default take-profit (short side)
+CE_TP_PTS = 35.0             # CE · C2-PB default take-profit (long side)
 EOD_EXIT_HHMM = (15, 18)     # flat time exit
 
 OUTCOME_COLUMNS = [
@@ -244,19 +247,29 @@ def _fmt_time(ts: Any) -> str:
         return str(ts)
 
 
-def _simulate_row(row: Dict[str, Any], candles: pd.DataFrame) -> Optional[Dict[str, Any]]:
-    """Bar-by-bar Model C2-A simulation for a single forward-log row.
+def _simulate_row(
+    row: Dict[str, Any],
+    candles: pd.DataFrame,
+    side: str = "PE",
+    default_tp: Optional[float] = None,
+) -> Optional[Dict[str, Any]]:
+    """Bar-by-bar 1-minute simulation for a single forward-log row.
 
-    Returns the 8 outcome-column values, or ``None`` when the row cannot be
-    evaluated (unparseable bucket or missing entry price).
+    ``side`` is ``"PE"`` (short underlying / long PE) or ``"CE"`` (long
+    underlying / long CE).  Returns the 8 outcome-column values, or ``None``
+    when the row cannot be evaluated (unparseable bucket or missing entry).
     """
+    if side not in ("PE", "CE"):
+        raise ValueError(f"unknown side: {side!r}")
+
     bucket = _parse_bucket(row.get("candle_2m_bucket"))
     if bucket is None:
         return None
 
     signal_close = bucket + timedelta(minutes=2)
     spot_sl = sniper_logger._to_float(row.get("spot_sl_pts"))
-    spot_tp = sniper_logger._to_float(row.get("spot_target_pts"), DEFAULT_TP_PTS)
+    tp_default = DEFAULT_TP_PTS if default_tp is None else default_tp
+    spot_tp = sniper_logger._to_float(row.get("spot_target_pts"), tp_default)
     future_ltp = sniper_logger._to_float(row.get("future_ltp"))
     spot_price = sniper_logger._to_float(row.get("spot_price"))
 
@@ -293,8 +306,14 @@ def _simulate_row(row: Dict[str, Any], candles: pd.DataFrame) -> Optional[Dict[s
     if entry_price <= 0:
         return None
 
-    sl_level = entry_price + spot_sl
-    tp_level = entry_price - spot_tp
+    if side == "PE":
+        # Short underlying / long PE: SL above entry, TP below entry.
+        sl_level = entry_price + spot_sl
+        tp_level = entry_price - spot_tp
+    else:
+        # Long underlying / long CE: SL below entry, TP above entry.
+        sl_level = entry_price - spot_sl
+        tp_level = entry_price + spot_tp
 
     mfe = 0.0
     mae = 0.0
@@ -305,24 +324,42 @@ def _simulate_row(row: Dict[str, Any], candles: pd.DataFrame) -> Optional[Dict[s
     for _, bar in window.iterrows():
         high = float(bar["high"])
         low = float(bar["low"])
-        mfe = max(mfe, max(0.0, entry_price - low))
-        mae = max(mae, max(0.0, high - entry_price))
-        if high >= sl_level:  # conservative: SL checked before TP in the same bar
-            outcome = "SL_HIT"
-            exit_price = sl_level
-            exit_time = bar["timestamp_ist"]
-            break
-        if low <= tp_level:
-            outcome = "TP_HIT"
-            exit_price = tp_level
-            exit_time = bar["timestamp_ist"]
-            break
+        if side == "PE":
+            mfe = max(mfe, max(0.0, entry_price - low))
+            mae = max(mae, max(0.0, high - entry_price))
+            if high >= sl_level:  # conservative: SL checked before TP in the same bar
+                outcome = "SL_HIT"
+                exit_price = sl_level
+                exit_time = bar["timestamp_ist"]
+                break
+            if low <= tp_level:
+                outcome = "TP_HIT"
+                exit_price = tp_level
+                exit_time = bar["timestamp_ist"]
+                break
+        else:
+            mfe = max(mfe, max(0.0, high - entry_price))
+            mae = max(mae, max(0.0, entry_price - low))
+            if low <= sl_level:  # conservative: SL checked before TP in the same bar
+                outcome = "SL_HIT"
+                exit_price = sl_level
+                exit_time = bar["timestamp_ist"]
+                break
+            if high >= tp_level:
+                outcome = "TP_HIT"
+                exit_price = tp_level
+                exit_time = bar["timestamp_ist"]
+                break
 
     if exit_price is None:  # neither hit before 15:18 IST -> flat EOD exit
         exit_price = float(window.iloc[-1]["close"])
         exit_time = window.iloc[-1]["timestamp_ist"]
 
-    net_spot = round((entry_price - exit_price) - SLIPPAGE_PTS, 2)
+    if side == "PE":
+        net_spot = round((entry_price - exit_price) - SLIPPAGE_PTS, 2)
+    else:
+        net_spot = round((exit_price - entry_price) - SLIPPAGE_PTS, 2)
+
     return {
         "entry_price": round(entry_price, 2),
         "exit_time_ist": _fmt_time(exit_time),
@@ -342,11 +379,11 @@ def _read_all_rows(csv_path: str) -> List[Dict[str, str]]:
         return [dict(r) for r in csv.DictReader(fh)]
 
 
-def _write_all_rows(csv_path: str, rows: List[Dict[str, Any]]) -> None:
+def _write_all_rows(csv_path: str, rows: List[Dict[str, Any]], headers: List[str]) -> None:
     os.makedirs(os.path.dirname(csv_path) or ".", exist_ok=True)
     tmp_path = csv_path + ".tmp"
     with open(tmp_path, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=sniper_logger.CSV_HEADERS, extrasaction="ignore")
+        writer = csv.DictWriter(fh, fieldnames=headers, extrasaction="ignore")
         writer.writeheader()
         for row in rows:
             writer.writerow(row)
@@ -392,9 +429,9 @@ def _build_summary(evaluated_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def _print_summary(summary: Dict[str, Any]) -> None:
+def _print_summary(summary: Dict[str, Any], title: str = "VWAP BREAKDOWN SNIPER (PE · C2-A) — FORWARD-TEST SUMMARY") -> None:
     print("=" * 66)
-    print("  VWAP BREAKDOWN SNIPER (PE · C2-A) — FORWARD-TEST SUMMARY")
+    print(f"  {title}")
     print("=" * 66)
     print(f"  Total Evaluated : {summary['total_evaluated']}")
     print(f"  TP_HIT          : {summary['tp_hit']}")
@@ -406,21 +443,52 @@ def _print_summary(summary: Dict[str, Any]) -> None:
     print("=" * 66)
 
 
-def evaluate_sniper_outcomes(
-    target_date: Optional[str] = None,
-    force: bool = False,
-    candles_df=None,
-) -> Dict[str, Any]:
-    """Evaluate + persist EOD outcomes for live VWAP Sniper (PE · C2-A) signals.
+def _build_combined_summary(pe: Dict[str, Any], ce: Dict[str, Any]) -> Dict[str, Any]:
+    total = pe["total_evaluated"] + ce["total_evaluated"]
+    tp = pe["tp_hit"] + ce["tp_hit"]
+    return {
+        "total_evaluated": total,
+        "tp_hit": tp,
+        "sl_hit": pe["sl_hit"] + ce["sl_hit"],
+        "eod_exit": pe["eod_exit"] + ce["eod_exit"],
+        "win_rate_pct": round((tp / total * 100.0) if total else 0.0, 2),
+        "net_spot_pts": round(pe["net_spot_pts"] + ce["net_spot_pts"], 2),
+        "net_opt_pts": round(pe["net_opt_pts"] + ce["net_opt_pts"], 2),
+    }
 
-    ``target_date``  : ISO date to evaluate (``None`` -> every unevaluated date).
-    ``force``        : re-evaluate rows that already carry an outcome.
-    ``candles_df``   : optional 1-minute DataFrame (timestamp_ist/open/high/low/close);
-                       when omitted, candles are fetched from Upstox.
+
+def _print_combined_summary(summary: Dict[str, Any]) -> None:
+    print("=" * 66)
+    print("  COMBINED PE + CE — FORWARD-TEST TOTAL")
+    print("=" * 66)
+    print(f"  Total Evaluated : {summary['total_evaluated']}")
+    print(f"  TP_HIT          : {summary['tp_hit']}")
+    print(f"  SL_HIT          : {summary['sl_hit']}")
+    print(f"  EOD_EXIT        : {summary['eod_exit']}")
+    print(f"  Win Rate %      : {summary['win_rate_pct']:.2f}")
+    print(f"  Net Spot Pts    : {summary['net_spot_pts']:.2f}")
+    print(f"  Est Option Pts  : {summary['net_opt_pts']:.2f}")
+    print("=" * 66)
+
+
+def _evaluate_log(
+    job: Dict[str, Any],
+    target_date: Optional[str],
+    force: bool,
+    normalized: pd.DataFrame,
+) -> tuple:
+    """Evaluate + persist EOD outcomes for a single forward log (PE or CE).
+
+    Returns ``(summary_dict, evaluated_rows)``.  Candles for each unique date
+    are fetched once (via ``_get_day_candles``'s module-level cache) and shared.
     """
-    sniper_logger.migrate_csv_header_if_needed(sniper_logger.SIGNAL_CSV_PATH)
+    csv_path = job["csv_path"]
+    headers = job["headers"]
+    lock = job["lock"]
+    side = job["side"]
+    default_tp = job["default_tp"]
 
-    rows = _read_all_rows(sniper_logger.SIGNAL_CSV_PATH)
+    rows = _read_all_rows(csv_path)
     to_evaluate: List[Dict[str, Any]] = []
     for row in rows:
         bucket = _parse_bucket(row.get("candle_2m_bucket"))
@@ -434,11 +502,7 @@ def evaluate_sniper_outcomes(
         to_evaluate.append(row)
 
     if not to_evaluate:
-        summary = _build_summary([])
-        _print_summary(summary)
-        return summary
-
-    normalized = _normalize_candles_df(candles_df) if candles_df is not None else None
+        return _build_summary([]), []
 
     results_by_bucket: Dict[str, Dict[str, Any]] = {}
     evaluated_rows: List[Dict[str, Any]] = []
@@ -452,7 +516,7 @@ def evaluate_sniper_outcomes(
         else:
             day_candles = _get_day_candles(row_date, use_futures)
 
-        result = _simulate_row(row, day_candles)
+        result = _simulate_row(row, day_candles, side=side, default_tp=default_tp)
         if result is None:
             continue
 
@@ -463,14 +527,14 @@ def evaluate_sniper_outcomes(
         evaluated_rows.append(merged)
 
     if results_by_bucket:
-        with sniper_logger._lock:
-            fresh_rows = _read_all_rows(sniper_logger.SIGNAL_CSV_PATH)
+        with lock:
+            fresh_rows = _read_all_rows(csv_path)
             for fresh in fresh_rows:
                 key = (fresh.get("candle_2m_bucket") or "").strip()
                 result = results_by_bucket.get(key)
                 if result:
                     fresh.update(result)
-            _write_all_rows(sniper_logger.SIGNAL_CSV_PATH, fresh_rows)
+            _write_all_rows(csv_path, fresh_rows, headers)
 
     for merged in evaluated_rows:
         print(
@@ -479,14 +543,69 @@ def evaluate_sniper_outcomes(
             f"(net {merged.get('net_spot_pts')} pts)"
         )
 
-    summary = _build_summary(evaluated_rows)
-    _print_summary(summary)
-    return summary
+    return _build_summary(evaluated_rows), evaluated_rows
+
+
+def evaluate_sniper_outcomes(
+    target_date: Optional[str] = None,
+    force: bool = False,
+    candles_df=None,
+) -> Dict[str, Any]:
+    """Evaluate + persist EOD outcomes for both VWAP Sniper forward logs.
+
+    - ``live_sniper_c2a_forward_log.csv``  → PE · C2-A (short, 45 pt TP)
+    - ``live_sniper_ce_pb_forward_log.csv`` → CE · C2-PB (long, 35 pt TP)
+
+    The trading day's 1-minute candles are fetched once per date and reused
+    across both logs.  Returns a backward-compatible dict (top-level PE summary
+    keys) plus ``pe`` / ``ce`` / ``combined`` sub-dicts.
+    """
+    normalized = _normalize_candles_df(candles_df) if candles_df is not None else None
+
+    # Migrate the legacy PE CSV header (the CE CSV is written natively in the
+    # current schema, so it needs no migration).
+    sniper_logger.migrate_csv_header_if_needed(sniper_logger.SIGNAL_CSV_PATH)
+
+    jobs = [
+        {
+            "side": "PE",
+            "label": "VWAP BREAKDOWN SNIPER (PE · C2-A) — FORWARD-TEST SUMMARY",
+            "csv_path": sniper_logger.SIGNAL_CSV_PATH,
+            "headers": sniper_logger.CSV_HEADERS,
+            "lock": sniper_logger._lock,
+            "default_tp": DEFAULT_TP_PTS,
+        },
+        {
+            "side": "CE",
+            "label": "VWAP RECLAIM SNIPER (CE · C2-PB) — FORWARD-TEST SUMMARY",
+            "csv_path": sniper_logger.SIGNAL_CE_PB_CSV_PATH,
+            "headers": sniper_logger.CSV_CE_PB_HEADERS,
+            "lock": sniper_logger._ce_pb_lock,
+            "default_tp": CE_TP_PTS,
+        },
+    ]
+
+    summaries: Dict[str, Dict[str, Any]] = {}
+    for job in jobs:
+        summary, _ = _evaluate_log(job, target_date, force, normalized)
+        summaries[job["side"]] = summary
+        _print_summary(summary, title=job["label"])
+
+    pe_summary = summaries["PE"]
+    ce_summary = summaries["CE"]
+    combined = _build_combined_summary(pe_summary, ce_summary)
+    _print_combined_summary(combined)
+
+    result = dict(pe_summary)  # backward-compatible top-level PE summary keys
+    result["pe"] = pe_summary
+    result["ce"] = ce_summary
+    result["combined"] = combined
+    return result
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Evaluate VWAP Breakdown Sniper (PE · C2-A) post-market outcomes."
+        description="Evaluate VWAP Sniper (PE · C2-A + CE · C2-PB) post-market outcomes."
     )
     parser.add_argument("--date", dest="target_date", default=None, help="Trading date YYYY-MM-DD.")
     parser.add_argument("--force", action="store_true", help="Re-evaluate already-evaluated rows.")

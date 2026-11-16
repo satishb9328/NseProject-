@@ -2042,6 +2042,107 @@ def _evaluate_sniper_c2a_and_log(payload: dict) -> None:
         logger.exception("VWAP Sniper C2-A backend logging failed")
 
 
+def _evaluate_sniper_ce_pb_and_log(payload: dict) -> None:
+    """Evaluate VWAP Reclaim Sniper (CE · C2-PB) on a closed 2m candle and log.
+
+    Mirrors ``_ce_pullback_signal`` from ``TESTING/backtest_cvd_atr.py`` (the
+    validated 11:30-14:55 IST CE VWAP pullback/reclaim model) and forwards any
+    trigger to the dedicated CE forward log.
+    """
+    try:
+        from Nse_Project.Live_dashboard.sniper_logger import log_sniper_ce_pb_trigger
+
+        now_ist = datetime.now(IST)
+        mins = now_ist.hour * 60 + now_ist.minute
+        if not (690 <= mins <= 895):  # 11:30-14:55 IST
+            return
+
+        vwap = float(market_state.get("vwap", 0.0) or 0.0)
+        future_ltp = float(market_state.get("future_ltp", 0.0) or 0.0)
+        spot_price = float(live_state.get("spot_price") or 0.0)
+        ref_price = future_ltp if future_ltp > 0 else spot_price
+        if not (vwap > 0 and ref_price > 0):
+            return
+
+        # VWAP pullback zone: ref_price within [-0.05%, +0.12%] of VWAP.
+        signed_vwap_dist = (ref_price - vwap) / vwap
+        if not (-0.0005 <= signed_vwap_dist <= 0.0012):
+            return
+
+        # Current closed 2m bar must close bullish above VWAP.
+        try:
+            curr_close = float(payload.get("close"))
+            curr_open = float(payload.get("open"))
+        except (TypeError, ValueError):
+            return
+        if not (curr_close > curr_open and curr_close > vwap):
+            return
+
+        # Previous closed 2m bar must have dipped/touched near VWAP. The rolling
+        # seed history holds the last-N completed bars, so [-1] is the bar just
+        # before the one being evaluated here (this runs before the append).
+        prev_low = None
+        if _seed_candles_2m:
+            try:
+                prev_low = float(_seed_candles_2m[-1].get("low"))
+            except (TypeError, ValueError):
+                prev_low = None
+        if prev_low is None or prev_low <= 0:
+            return
+        # Session VWAP is slow-moving across a single 2m bar, so the current VWAP
+        # is a faithful proxy for the previous bar's VWAP.
+        prev_vwap = vwap
+        if ((prev_low - prev_vwap) / prev_vwap) > 0.0005:
+            return
+
+        ofi = payload.get("ofi_imbalance")
+        relvol = payload.get("rel_vol_ratio")
+        cvd3 = payload.get("cvd_change_3")
+        if not (isinstance(ofi, (int, float)) and isinstance(relvol, (int, float)) and isinstance(cvd3, (int, float))):
+            return
+        ofi = float(ofi)
+        relvol = float(relvol)
+        cvd3 = float(cvd3)
+        if not (cvd3 > 0 and relvol >= 1.20 and ofi >= -0.15):
+            return
+
+        atr_val = float(market_state.get("current_atr", 0.0) or 0.0)
+        atr = atr_val if atr_val > 0 else 20.0
+        spot_sl = round(min(max(2.2 * atr, 15.0), 35.0), 2)
+        spot_target = 35.0
+
+        tier = "A+ CE SNIPER (1.5x+)" if (relvol >= 1.50 and ofi >= 0.00) else "VALID CE (1.2x+)"
+
+        ts_open = payload.get("ts_open")
+        try:
+            bucket_dt = datetime.fromisoformat(str(ts_open)) if isinstance(ts_open, str) else now_ist
+        except ValueError:
+            bucket_dt = now_ist
+        candle_2m_bucket = bucket_dt.astimezone(IST).strftime("%Y-%m-%d %H:%M")
+
+        log_sniper_ce_pb_trigger({
+            "timestamp_ist": now_ist.strftime("%Y-%m-%d %H:%M:%S"),
+            "candle_2m_bucket": candle_2m_bucket,
+            "tier": tier,
+            "window_tag": "PRIME_1130_1455",
+            "spot_price": spot_price,
+            "future_ltp": future_ltp,
+            "vwap": vwap,
+            "vwap_dist_pct": round(signed_vwap_dist * 100.0, 6),
+            "ofi_imbalance": ofi,
+            "rel_vol_ratio": relvol,
+            "cvd_change_3": cvd3,
+            "atr_2m_14": atr,
+            "spot_sl_pts": spot_sl,
+            "spot_target_pts": spot_target,
+            "atm_ce_strike": (round(spot_price / 50) * 50) if spot_price > 0 else 0.0,
+            "atm_ce_ltp": 0.0,
+            "source": "BACKEND_2M_CANDLE",
+        })
+    except Exception:
+        logger.exception("VWAP Reclaim Sniper (CE · C2-PB) backend logging failed")
+
+
 # Post-market EOD outcome evaluation guard: fired once per IST trading day after
 # 15:20 IST so the VWAP Sniper (PE · C2-A) forward log gets its TP/SL/EOD outcome
 # stamped without ever interrupting the live websocket feed.
@@ -2109,6 +2210,8 @@ def _on_cvd_candle(payload: dict) -> None:
     _latest_cvd_change_3 = float(cvd3) if isinstance(cvd3, (int, float)) else 0.0
     # VWAP Breakdown Sniper (PE · C2-A): evaluate + forward-log on candle close.
     _evaluate_sniper_c2a_and_log(payload)
+    # VWAP Reclaim Sniper (CE · C2-PB): evaluate + forward-log on candle close.
+    _evaluate_sniper_ce_pb_and_log(payload)
     bar = _seed_candle_bar(payload)
     if bar is None:
         return

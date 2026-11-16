@@ -62,13 +62,13 @@ def _to_float(value: Any, default: float = 0.0) -> float:
     return f if f == f else default
 
 
-def _load_existing_buckets() -> set:
-    """Read already-logged candle buckets from the CSV (file-backed dedup)."""
+def _load_existing_buckets_from(csv_path: str) -> set:
+    """Read already-logged candle buckets from a CSV (file-backed dedup)."""
     buckets = set()
-    if not os.path.exists(SIGNAL_CSV_PATH):
+    if not csv_path or not os.path.exists(csv_path):
         return buckets
     try:
-        with open(SIGNAL_CSV_PATH, "r", newline="", encoding="utf-8") as fh:
+        with open(csv_path, "r", newline="", encoding="utf-8") as fh:
             reader = csv.DictReader(fh)
             for row in reader:
                 bucket = (row.get("candle_2m_bucket") or "").strip()
@@ -77,6 +77,11 @@ def _load_existing_buckets() -> set:
     except (OSError, csv.Error):
         pass
     return buckets
+
+
+def _load_existing_buckets() -> set:
+    """Read already-logged candle buckets from the PE C2-A CSV (file-backed dedup)."""
+    return _load_existing_buckets_from(SIGNAL_CSV_PATH)
 
 
 def migrate_csv_header_if_needed(csv_path: str) -> bool:
@@ -197,4 +202,126 @@ def log_sniper_c2a_trigger(payload: dict) -> bool:
             writer.writerow(row)
 
         _logged_buckets.add(bucket)
+        return True
+
+
+SIGNAL_CE_PB_CSV_PATH = os.path.join(SIGNAL_CSV_DIR, "live_sniper_ce_pb_forward_log.csv")
+
+CSV_CE_PB_HEADERS = [
+    "timestamp_ist",
+    "candle_2m_bucket",
+    "tier",
+    "window_tag",
+    "spot_price",
+    "future_ltp",
+    "vwap",
+    "vwap_dist_pct",
+    "ofi_imbalance",
+    "rel_vol_ratio",
+    "cvd_change_3",
+    "atr_2m_14",
+    "spot_sl_pts",
+    "spot_target_pts",
+    "atm_ce_strike",
+    "atm_ce_ltp",
+    "est_opt_sl_pts",
+    "est_opt_target_pts",
+    "source",
+    "entry_price",
+    "exit_time_ist",
+    "exit_price",
+    "outcome",
+    "net_spot_pts",
+    "net_opt_pts",
+    "mfe_pts",
+    "mae_pts",
+]
+
+_ce_pb_lock = threading.Lock()
+_ce_pb_logged_buckets: set = set()
+_ce_pb_buckets_loaded = False
+
+
+def log_sniper_ce_pb_trigger(payload: dict) -> bool:
+    """Log a VWAP Reclaim Sniper (CE · C2-PB) trigger. Returns True if written.
+
+    Mirrors :func:`log_sniper_c2a_trigger` but writes to a dedicated CE forward
+    log (``live_sniper_ce_pb_forward_log.csv``) carrying ``atm_ce_strike`` /
+    ``atm_ce_ltp`` columns, under its own thread lock and 2m-bucket dedup set.
+    """
+    if not isinstance(payload, dict):
+        return False
+
+    bucket = str(payload.get("candle_2m_bucket") or "").strip()
+    if not bucket:
+        return False
+
+    with _ce_pb_lock:
+        global _ce_pb_buckets_loaded
+        if not _ce_pb_buckets_loaded:
+            _ce_pb_logged_buckets.update(_load_existing_buckets_from(SIGNAL_CE_PB_CSV_PATH))
+            _ce_pb_buckets_loaded = True
+
+        if bucket in _ce_pb_logged_buckets:
+            return False
+
+        spot_price = _to_float(payload.get("spot_price"))
+        future_ltp = _to_float(payload.get("future_ltp"))
+        vwap = _to_float(payload.get("vwap"))
+        ref_price = future_ltp if future_ltp > 0 else spot_price
+
+        # CE convention: positive dist => price ABOVE VWAP (reclaim side).
+        vwap_dist_pct = payload.get("vwap_dist_pct")
+        if vwap_dist_pct is None or vwap_dist_pct == "":
+            vwap_dist_pct = round(((ref_price - vwap) / vwap) * 100.0, 6) if vwap > 0 else 0.0
+
+        spot_sl = _to_float(payload.get("spot_sl_pts"))
+        spot_target = _to_float(payload.get("spot_target_pts"), 35.0)
+
+        est_opt_sl = payload.get("est_opt_sl_pts")
+        if est_opt_sl is None or est_opt_sl == "":
+            est_opt_sl = round(0.5 * spot_sl, 2)
+        est_opt_target = payload.get("est_opt_target_pts")
+        if est_opt_target is None or est_opt_target == "":
+            est_opt_target = round(0.5 * spot_target, 2)
+
+        row = {
+            "timestamp_ist": str(payload.get("timestamp_ist") or ""),
+            "candle_2m_bucket": bucket,
+            "tier": str(payload.get("tier") or ""),
+            "window_tag": str(payload.get("window_tag") or ""),
+            "spot_price": spot_price,
+            "future_ltp": future_ltp,
+            "vwap": vwap,
+            "vwap_dist_pct": vwap_dist_pct,
+            "ofi_imbalance": _to_float(payload.get("ofi_imbalance")),
+            "rel_vol_ratio": _to_float(payload.get("rel_vol_ratio")),
+            "cvd_change_3": _to_float(payload.get("cvd_change_3")),
+            "atr_2m_14": _to_float(payload.get("atr_2m_14")),
+            "spot_sl_pts": spot_sl,
+            "spot_target_pts": spot_target,
+            "atm_ce_strike": _to_float(payload.get("atm_ce_strike")),
+            "atm_ce_ltp": _to_float(payload.get("atm_ce_ltp")),
+            "est_opt_sl_pts": est_opt_sl,
+            "est_opt_target_pts": est_opt_target,
+            "source": str(payload.get("source") or ""),
+            "entry_price": "",
+            "exit_time_ist": "",
+            "exit_price": "",
+            "outcome": "",
+            "net_spot_pts": "",
+            "net_opt_pts": "",
+            "mfe_pts": "",
+            "mae_pts": "",
+        }
+
+        os.makedirs(SIGNAL_CSV_DIR, exist_ok=True)
+        file_exists = os.path.exists(SIGNAL_CE_PB_CSV_PATH)
+        with open(SIGNAL_CE_PB_CSV_PATH, "a", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=CSV_CE_PB_HEADERS, extrasaction="ignore")
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(row)
+
+        _ce_pb_logged_buckets.add(bucket)
         return True

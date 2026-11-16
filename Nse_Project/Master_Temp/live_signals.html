@@ -345,348 +345,131 @@
     .trap-tone-bullish, .trap-tone-bearish { animation: none; }
   }
 
-  /* =====================================================================
-     SCALPER MODE — frontend-only toggle (V3 scalp module)
-     =====================================================================
-     The toggle button lives in the top header (next to "Live Signals").
-     When ON, the AI TRADE SETUPS card (#ai-trade-setups) is hidden and a
-     dedicated SCALP SIGNALS card (#scalp-trade-setups) takes its place.
-     Color scheme: neon-cyan + amber-yellow (deliberately different from
-     the intraday green/red so the operator can tell which engine is
-     driving the AI card at a glance).
-     ===================================================================== */
+  /* ---- Math Console detached moving-average line charts (modal) ---- */
+  #open-math-lines-btn {
+    margin-left: .35rem;
+    padding: .15rem .5rem;
+    border: 1px solid rgba(56, 189, 248, .45);
+    border-radius: .45rem;
+    background: linear-gradient(180deg, rgba(56, 189, 248, .16), rgba(56, 189, 248, .05));
+    color: #7dd3fc;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .06em;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .18s ease, box-shadow .18s ease, color .18s ease;
+  }
+  #open-math-lines-btn:hover {
+    background: linear-gradient(180deg, rgba(56, 189, 248, .28), rgba(56, 189, 248, .10));
+    color: #e0f2fe;
+    box-shadow: 0 0 12px rgba(56, 189, 248, .45);
+  }
 
-  .scalper-toggle {
-    position: relative;
+  #math-lines-detached-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(4, 9, 18, 0.78);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+  }
+  #math-lines-detached-modal.is-open { display: flex; }
+  .math-lines-modal-card {
+    width: min(1080px, 94vw);
+    max-height: 88vh;
+    overflow-y: auto;
+    background: #0b1220;
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    border-radius: 14px;
+    padding: 20px 22px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.75);
+    color: #e2e8f0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .math-lines-modal-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding-bottom: 14px;
+    margin-bottom: 14px;
+    border-bottom: 1px solid rgba(51, 65, 85, .8);
+  }
+  .math-lines-modal-title { font-size: 15px; font-weight: 800; letter-spacing: .06em; color: #7dd3fc; }
+  .math-lines-modal-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .math-lines-state-pill {
+    padding: .25rem .6rem;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, .4);
+    background: rgba(15, 23, 42, .6);
+    font-size: 11px;
+    font-weight: 700;
+    color: #cbd5e1;
+  }
+  .math-lines-state-pill .state { font-weight: 800; }
+  .math-lines-state-pill .state.CE { color: #34d399; }
+  .math-lines-state-pill .state.PE { color: #fb7185; }
+  .math-lines-state-pill .state.NO_TRADE { color: #94a3b8; }
+  .math-lines-btn {
+    padding: .3rem .65rem;
+    border-radius: .5rem;
+    border: 1px solid rgba(148, 163, 184, .4);
+    background: rgba(30, 41, 59, .6);
+    color: #e2e8f0;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background .18s ease, border-color .18s ease;
+  }
+  .math-lines-btn:hover { background: rgba(51, 65, 85, .7); border-color: rgba(148, 163, 184, .7); }
+  .math-lines-close-btn { border-color: rgba(244, 63, 94, .5); color: #fda4af; }
+  .math-lines-close-btn:hover { background: rgba(244, 63, 94, .16); border-color: rgba(244, 63, 94, .8); }
+
+  .math-single-chart { display: flex; flex-direction: column; gap: 12px; }
+  .math-single-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 10px;
+    border: 1px solid rgba(51, 65, 85, .8);
+    border-radius: 10px;
+    background: rgba(15, 23, 42, .45);
+  }
+  .math-legend-chip {
     display: inline-flex;
     align-items: center;
-    gap: .5rem;
-    padding: .45rem .85rem;
-    border-radius: .55rem;
-    border: 1px solid rgba(34, 211, 238, .35);
-    background: rgba(8, 47, 73, .35);
-    color: #67e8f9;
+    gap: 6px;
+    padding: 4px 9px;
+    border-radius: 6px;
+    border: 1px solid rgba(51, 65, 85, .8);
+    background: rgba(15, 23, 42, .5);
+    color: #cbd5e1;
     font-size: 11px;
-    font-weight: 800;
-    letter-spacing: .14em;
-    text-transform: uppercase;
-    transition: background-color .25s ease, border-color .25s ease,
-                color .25s ease, box-shadow .25s ease;
+    font-weight: 700;
     cursor: pointer;
     user-select: none;
+    transition: opacity .15s ease, border-color .15s ease, background .15s ease;
   }
-  .scalper-toggle:hover {
-    background: rgba(8, 47, 73, .55);
-    border-color: rgba(34, 211, 238, .6);
-  }
-  .scalper-toggle .pulse-dot {
-    width: 8px; height: 8px; border-radius: 999px;
-    background: #475569;
-    box-shadow: 0 0 0 0 rgba(34, 211, 238, 0);
-    transition: background-color .25s ease, box-shadow .25s ease;
-  }
-  .scalper-toggle.is-active {
-    color: #fde047;
-    border-color: rgba(250, 204, 21, .85);
-    background: rgba(69, 26, 3, .45);
-    box-shadow: 0 0 14px rgba(250, 204, 21, .35), inset 0 0 0 1px rgba(250, 204, 21, .25);
-    animation: scalper-active-pulse 2.2s ease-in-out infinite;
-  }
-  .scalper-toggle.is-active .pulse-dot {
-    background: #fde047;
-    box-shadow: 0 0 10px #fde047, 0 0 18px rgba(250, 204, 21, .65);
-  }
-  @keyframes scalper-active-pulse {
-    0%, 100% { box-shadow: 0 0 14px rgba(250, 204, 21, .35), inset 0 0 0 1px rgba(250, 204, 21, .25); }
-    50%      { box-shadow: 0 0 22px rgba(250, 204, 21, .55), inset 0 0 0 1px rgba(250, 204, 21, .45); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .scalper-toggle.is-active { animation: none; }
-  }
-
-  /* ---- SCALP SIGNALS card (replaces #ai-trade-setups when scalper ON) ---- */
-  #scalp-trade-setups { display: none; }
-  body.scalper-on #ai-trade-setups { display: none !important; }
-  body.scalper-on #scalp-trade-setups { display: flex; }
-
-  .scalp-bias-box {
-    border-radius: .55rem;
-    border: 1px solid transparent;
-    padding: .65rem .75rem;
-    text-align: center;
-    transition: background-color .35s ease, border-color .35s ease, color .35s ease;
-  }
-  .scalp-bias-box .bias-label {
-    font-size: 10px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase;
-    opacity: .85;
-  }
-  .scalp-bias-box .bias-value {
-    display: block; margin-top: .15rem; font-size: 18px; font-weight: 800; letter-spacing: .04em;
-    font-variant-numeric: tabular-nums;
-  }
-  .scalp-bias-box.bias-bull { color: #4ade80; background: rgba(34,197,94,.10); border-color: rgba(34,197,94,.45); }
-  .scalp-bias-box.bias-bear { color: #f87171; background: rgba(239,68,68,.10); border-color: rgba(239,68,68,.45); }
-  .scalp-bias-box.bias-neutral { color: #fde047; background: rgba(250,204,21,.08); border-color: rgba(250,204,21,.35); }
-
-  .scalp-reason-list {
-    margin: 0; padding: 0; list-style: none;
-    font-size: 10.5px; line-height: 1.45; color: #cbd5e1;
-  }
-  .scalp-reason-list li {
-    padding: .15rem 0 .15rem .65rem;
-    border-left: 2px solid rgba(148, 163, 184, .35);
-  }
-  .scalp-reason-list li.pos { border-left-color: #4ade80; }
-  .scalp-reason-list li.neg { border-left-color: #f87171; }
-
-  .scalp-alert-feed { scrollbar-width: thin; scrollbar-color: rgba(250, 204, 21, .45) rgba(7, 11, 20, .8); }
-  .scalp-alert-item {
-    padding: .25rem .45rem;
-    border-left: 2px solid rgba(250, 204, 21, .55);
-    background: rgba(250, 204, 21, .05);
-    border-radius: .25rem;
-    font-size: 10.5px; line-height: 1.35;
-    color: #fef3c7;
-    word-break: break-word;
-  }
-  .scalp-alert-item.alert-bear { border-left-color: rgba(248, 113, 113, .65); background: rgba(239, 68, 68, .07); color: #fecaca; }
-  .scalp-alert-item.alert-bull { border-left-color: rgba(74, 222, 128, .65); background: rgba(34, 197, 94, .07); color: #bbf7d0; }
-
-  .scalp-velocity-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .35rem; }
-  .scalp-velocity-cell {
-    border: 1px solid rgba(34, 211, 238, .25);
-    background: rgba(8, 47, 73, .35);
-    border-radius: .35rem;
-    padding: .25rem .35rem;
-    text-align: center;
-    font-variant-numeric: tabular-nums;
-  }
-  .scalp-velocity-cell .v-label { font-size: 9px; font-weight: 700; letter-spacing: .12em; color: #67e8f9; text-transform: uppercase; }
-  .scalp-velocity-cell .v-value { display: block; margin-top: .1rem; font-size: 13px; font-weight: 700; color: #f8fafc; }
-  .scalp-velocity-cell .v-value.up { color: #4ade80; }
-  .scalp-velocity-cell .v-value.down { color: #f87171; }
-
-  .scalp-coi-row {
-    display: grid; grid-template-columns: minmax(50px, .6fr) minmax(38px, .4fr) minmax(0, 1fr) minmax(0, 1fr);
-    gap: .35rem;
-    padding: .2rem .35rem;
-    border-bottom: 1px solid rgba(148, 163, 184, .12);
-    font-size: 10.5px; line-height: 1.3; font-variant-numeric: tabular-nums;
-  }
-  .scalp-coi-row:last-child { border-bottom: 0; }
-  .scalp-coi-row .sc-strike { color: #e2e8f0; font-weight: 700; }
-  .scalp-coi-row .sc-side.call { color: #7dd3fc; }
-  .scalp-coi-row .sc-side.put { color: #fdba74; }
-  .scalp-coi-row .sc-delta.up { color: #4ade80; }
-  .scalp-coi-row .sc-delta.down { color: #f87171; }
-
-  .scalp-metric-row {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: .2rem .45rem; font-size: 10.5px; line-height: 1.3;
-    border-bottom: 1px solid rgba(148, 163, 184, .12);
-  }
-  .scalp-metric-row:last-child { border-bottom: 0; }
-  .scalp-metric-row .sm-label { color: #94a3b8; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; font-size: 9.5px; }
-  .scalp-metric-row .sm-value { color: #f8fafc; font-variant-numeric: tabular-nums; font-weight: 600; }
-
-  /* =====================================================================
-     V4: Impulse Override Badge + ATR Source Pill
-     ===================================================================== */
-
-  /* Flashing ⚡ badge shown when impulse override fires. Pulsing red/green
-     glow makes the override impossible to miss in peripheral vision. */
-  .impulse-badge {
-    display: none;
-    align-items: center;
-    gap: .35rem;
-    padding: .35rem .65rem;
-    border-radius: .45rem;
-    border: 1px solid;
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: .08em;
-    text-transform: uppercase;
-    animation: impulse-flash 1.0s ease-in-out infinite;
-    white-space: nowrap;
-  }
-  .impulse-badge.is-active { display: inline-flex; }
-  .impulse-badge.impulse-bull {
-    color: #4ade80;
-    background: rgba(34, 197, 94, .18);
-    border-color: rgba(34, 197, 94, .85);
-    box-shadow: 0 0 12px rgba(34, 197, 94, .45), inset 0 0 0 1px rgba(34, 197, 94, .25);
-  }
-  .impulse-badge.impulse-bear {
-    color: #f87171;
-    background: rgba(239, 68, 68, .18);
-    border-color: rgba(239, 68, 68, .85);
-    box-shadow: 0 0 12px rgba(239, 68, 68, .45), inset 0 0 0 1px rgba(239, 68, 68, .25);
-  }
-  @keyframes impulse-flash {
-    0%, 100% { filter: brightness(1); transform: scale(1); }
-    50%      { filter: brightness(1.6); transform: scale(1.04); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .impulse-badge.is-active { animation: none; }
-  }
-
-  /* Small pill next to ATR showing the source (live / prior_close / 5d_avg /
-     default / warming_up). Color-coded so the operator can tell at a glance
-     whether the ATR is real-time or seeded from yesterday's session. */
-  .atr-source-pill {
-    display: inline-block;
-    margin-left: .35rem;
-    padding: .1rem .35rem;
-    border-radius: 999px;
-    font-size: 8.5px;
-    font-weight: 700;
-    letter-spacing: .08em;
-    text-transform: uppercase;
-    vertical-align: middle;
-    border: 1px solid;
-  }
-  .atr-source-pill.src-live        { color: #4ade80; background: rgba(34,197,94,.10); border-color: rgba(34,197,94,.45); }
-  .atr-source-pill.src-prior_close { color: #fde047; background: rgba(250,204,21,.10); border-color: rgba(250,204,21,.45); }
-  .atr-source-pill.src-5d_avg      { color: #fdba74; background: rgba(251,146,60,.10); border-color: rgba(251,146,60,.45); }
-  .atr-source-pill.src-default     { color: #94a3b8; background: rgba(148,163,184,.10); border-color: rgba(148,163,184,.45); }
-  .atr-source-pill.src-warming_up  { color: #f87171; background: rgba(239,68,68,.10); border-color: rgba(239,68,68,.45); }
-
-  /* Impulse trigger chip list — shown when impulse_override fires. Each chip
-     is one trigger that fired this update (premium accel, spot velocity, etc). */
-  .impulse-trigger-list {
-    margin: .35rem 0 0 0;
-    padding: .35rem .5rem;
-    border-radius: .4rem;
-    border: 1px dashed rgba(250, 204, 21, .35);
-    background: rgba(250, 204, 21, .05);
-    font-size: 10px;
-    line-height: 1.4;
-    color: #fef3c7;
-  }
-  .impulse-trigger-list .trigger-title {
-    display: block;
-    font-weight: 800;
-    letter-spacing: .12em;
-    text-transform: uppercase;
-    color: #fde047;
-    margin-bottom: .15rem;
-  }
-  .impulse-trigger-list .trigger-item {
-    display: block;
-    padding: .1rem 0 .1rem .5rem;
-    border-left: 2px solid rgba(250, 204, 21, .4);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-
-  /* =====================================================================
-     V5: Three structured scalp setup cards (Pullback / Reversal / Breakout)
-     ===================================================================== */
-
-  /* Each setup card has a colored border + an "ACTIVE" flag + confidence bar.
-     The active card gets a glowing border + scale-up animation so the
-     operator's eye snaps to the recommended trade instantly. */
-  .scalp-setup-card {
+  .math-legend-chip:hover { border-color: rgba(148, 163, 184, .6); }
+  .math-legend-chip.is-off { opacity: .38; }
+  .math-legend-swatch { width: 14px; height: 3px; border-radius: 2px; display: inline-block; flex: none; }
+  .math-legend-name { letter-spacing: .05em; }
+  .math-legend-val { font-variant-numeric: tabular-nums; font-weight: 800; }
+  .math-single-canvas-wrap {
     position: relative;
-    border-radius: .55rem;
-    border: 1px solid;
-    padding: .5rem .6rem;
-    transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+    border: 1px solid rgba(51, 65, 85, .8);
+    border-radius: 12px;
+    background: rgba(7, 11, 20, .6);
+    padding: 6px;
   }
-  .scalp-setup-card.setup-pullback { border-color: rgba(34, 211, 238, .35); background: rgba(8, 47, 73, .25); }
-  .scalp-setup-card.setup-reversal { border-color: rgba(251, 191, 36, .35); background: rgba(69, 26, 3, .18); }
-  .scalp-setup-card.setup-breakout { border-color: rgba(168, 85, 247, .35); background: rgba(46, 16, 101, .22); }
-
-  .scalp-setup-card.is-active {
-    transform: scale(1.03);
-    box-shadow: 0 0 14px rgba(250, 204, 21, .35), inset 0 0 0 1px rgba(250, 204, 21, .55);
-    border-color: rgba(250, 204, 21, .85);
-    animation: setup-active-pulse 2.0s ease-in-out infinite;
-  }
-  @keyframes setup-active-pulse {
-    0%, 100% { box-shadow: 0 0 14px rgba(250, 204, 21, .35), inset 0 0 0 1px rgba(250, 204, 21, .55); }
-    50%      { box-shadow: 0 0 22px rgba(250, 204, 21, .55), inset 0 0 0 1px rgba(250, 204, 21, .75); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .scalp-setup-card.is-active { animation: none; }
-  }
-
-  .scalp-setup-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: .35rem;
-    margin-bottom: .25rem;
-  }
-  .scalp-setup-title {
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: .12em;
-    text-transform: uppercase;
-  }
-  .setup-pullback .scalp-setup-title { color: #67e8f9; }
-  .setup-reversal .scalp-setup-title { color: #fde047; }
-  .setup-breakout .scalp-setup-title { color: #c4b5fd; }
-
-  .scalp-active-flag {
-    display: none;
-    padding: .1rem .4rem;
-    border-radius: 999px;
-    font-size: 8px;
-    font-weight: 800;
-    letter-spacing: .14em;
-    text-transform: uppercase;
-    color: #1a1a1a;
-    background: #fde047;
-    box-shadow: 0 0 8px rgba(250, 204, 21, .65);
-  }
-  .is-active .scalp-active-flag { display: inline-block; }
-
-  .scalp-confidence-bar {
-    position: relative;
-    height: 4px;
-    border-radius: 999px;
-    background: rgba(148, 163, 184, .20);
-    overflow: hidden;
-    margin: .25rem 0 .35rem 0;
-  }
-  .scalp-confidence-fill {
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 0%;
-    border-radius: inherit;
-    transition: width .4s ease-out;
-  }
-  .setup-pullback .scalp-confidence-fill { background: linear-gradient(90deg, #06b6d4, #22d3ee); }
-  .setup-reversal .scalp-confidence-fill { background: linear-gradient(90deg, #f59e0b, #fde047); }
-  .setup-breakout .scalp-confidence-fill { background: linear-gradient(90deg, #7c3aed, #a855f7); }
-
-  .scalp-confidence-label {
-    display: flex;
-    justify-content: space-between;
-    font-size: 8.5px;
-    font-weight: 700;
-    letter-spacing: .08em;
-    text-transform: uppercase;
-    color: #94a3b8;
-    margin-bottom: .25rem;
-  }
-  .scalp-confidence-value {
-    color: #f8fafc;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .scalp-setup-reason {
-    margin-top: .2rem;
-    padding: .15rem .35rem;
-    border-radius: .25rem;
-    background: rgba(0, 0, 0, .35);
-    font-size: 9px;
-    line-height: 1.3;
-    color: #cbd5e1;
-    font-style: italic;
-  }
+  #math-unified-canvas { display: block; width: 100%; height: 390px; cursor: crosshair; }
 </style>
 {% endblock %}
 
@@ -699,9 +482,6 @@
   </div>
   <div class="flex items-center gap-3">
     <div class="hidden text-sm font-bold uppercase tracking-[.3em] text-neon-green sm:block">Live Signals</div>
-    <button id="scalper-toggle" type="button" class="scalper-toggle" aria-pressed="false" title="Toggle between intraday mode (V2 composite score) and scalper mode (V3 raw GEX flips + ATR stops + COI velocity)">
-      <span class="pulse-dot"></span><span class="toggle-label">⚡ SCALPER: OFF</span>
-    </button>
   </div>
 </div>
 {% endblock %}
@@ -912,7 +692,9 @@
               <div id="fib-signal-box" class="rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wider text-amber-300">🟡 WAITING</div>
             </div>
           </div>
-          <div class="rounded-lg border border-rose-500/40 bg-rose-950/20 p-2.5 lg:col-span-2">
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(360px, 1fr)); gap:14px; margin-top:14px;">
+          <div class="rounded-lg border border-rose-500/40 bg-rose-950/20 p-2.5">
             <p class="mb-1.5 flex items-center justify-between gap-2 text-xs font-bold uppercase tracking-wider text-rose-300">
               <span>🎯 VWAP Breakdown Sniper (PE · C2-A)</span>
               <span id="sniper-time-window" class="rounded-md border border-slate-600/60 bg-black/30 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">🕒 09:15–14:55 IST</span>
@@ -936,6 +718,30 @@
               <div id="sniper-signal-box" class="rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wider text-amber-300">🟡 WAITING</div>
             </div>
           </div>
+          <div class="rounded-lg border border-emerald-500/40 bg-emerald-950/20 p-2.5">
+            <p class="mb-1.5 flex items-center justify-between gap-2 text-xs font-bold uppercase tracking-wider text-emerald-300">
+              <span>🚀 VWAP Reclaim Sniper (CE · C2-PB)</span>
+              <span id="sniper-ce-time-window" class="rounded-md border border-slate-600/60 bg-black/30 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">🕒 11:30–14:55 IST (PF 1.97 · 64.3% WR)</span>
+            </p>
+            <div class="space-y-1 text-xs">
+              <div class="flex items-center justify-between gap-2">
+                <span class="uppercase tracking-wider text-slate-500">Strike</span><span id="sniper-ce-strike" class="text-right font-mono font-semibold whitespace-nowrap text-slate-50">--</span>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="uppercase tracking-wider text-slate-500">SL</span><span id="sniper-ce-sl" class="text-right font-mono font-semibold whitespace-nowrap text-rose-300">--</span>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="uppercase tracking-wider text-slate-500">Target</span><span id="sniper-ce-target" class="text-right font-mono font-semibold whitespace-nowrap text-emerald-300">--</span>
+              </div>
+              <div class="grid grid-cols-2 gap-1 border-t border-slate-700/60 pt-1">
+                <div class="flex items-center justify-between gap-1"><span class="text-slate-500">VWAP Dist%</span><span id="sniper-ce-vwap-dist" class="font-mono text-slate-200">--</span></div>
+                <div class="flex items-center justify-between gap-1"><span class="text-slate-500">OFI Imb</span><span id="sniper-ce-ofi" class="font-mono text-slate-200">--</span></div>
+                <div class="flex items-center justify-between gap-1"><span class="text-slate-500">Rel Vol</span><span id="sniper-ce-relvol" class="font-mono text-slate-200">--</span></div>
+                <div class="flex items-center justify-between gap-1"><span class="text-slate-500">3-Bar CVD Δ</span><span id="sniper-ce-cvd3" class="font-mono text-slate-200">--</span></div>
+              </div>
+              <div id="sniper-ce-signal-box" class="rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wider text-amber-300">🟡 WAITING</div>
+            </div>
+          </div>
           
         </div>
         <div id="math-console" class="mt-1.0 min-h-[120px] rounded-lg border border-cyan-800/50 bg-black/50 p-1.5 font-mono text-[11px] leading-5">
@@ -944,6 +750,7 @@
             <span class="flex items-center gap-2 text-[11px]">
               <span class="text-slate-500">Trade State</span>
               <span id="math-trade-state" class="text-slate-200">--</span>
+              <button type="button" id="open-math-lines-btn" title="Open Detached Moving-Average Line Charts">📈 Line Charts</button>
             </span>
           </div>
           <div class="math-console-metrics" role="group" aria-label="Math Console metrics">
@@ -1044,134 +851,6 @@
 
       </section>
 
-      <!-- ================================================================ -->
-      <!-- SCALP SIGNALS CARD — visible only when scalper toggle is ON.      -->
-      <!-- Replaces #ai-trade-setups (above) — same grid cell, same size.    -->
-      <!-- ================================================================ -->
-      <section id="scalp-trade-setups" class="flex h-fit flex-col rounded-xl border border-cyan-700/60 bg-slate-900/40 p-4">
-        <div class="mb-2 flex items-center justify-between gap-3">
-          <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-cyan-300">⚡ Scalp Signals (V4)</h2>
-          <div class="flex items-center gap-2">
-            <!-- V4: Impulse override badge — only visible when impulse_override.fired === true -->
-            <span id="impulse-badge" class="impulse-badge impulse-bull" role="status" aria-live="polite">
-              <span>⚡</span><span id="impulse-badge-text">IMPULSE BULLISH</span>
-            </span>
-            <span class="flex items-center gap-1.5 text-xs"><span class="uppercase tracking-wider text-slate-400">🎯 ATR(2m):</span> <span id="scalp-atr" class="font-mono font-semibold text-amber-300">--</span><span id="scalp-atr-source" class="atr-source-pill src-warming_up">warming_up</span></span>
-          </div>
-        </div>
-
-        <!-- V4: Impulse trigger breakdown — shown only when impulse fires -->
-        <div id="impulse-trigger-list" class="impulse-trigger-list" style="display:none;">
-          <span class="trigger-title">⚡ Impulse Triggers Fired</span>
-          <div id="impulse-trigger-items"></div>
-        </div>
-
-        <!-- Combined scalp bias gauge -->
-        <div id="scalp-bias-box" class="scalp-bias-box bias-neutral">
-          <span class="bias-label">Scalp Bias</span>
-          <span id="scalp-bias-value" class="bias-value">NEUTRAL</span>
-          <span id="scalp-bias-score" class="block mt-0.5 text-[10px] font-mono opacity-80">score: 0.00</span>
-        </div>
-
-        <!-- Bias reasons (factor breakdown) -->
-        <div class="mt-2 rounded-md border border-slate-700/60 bg-black/30 p-2">
-          <p class="mb-1 text-[9px] font-bold uppercase tracking-[.18em] text-cyan-400">Bias Reasons</p>
-          <ul id="scalp-bias-reasons" class="scalp-reason-list">
-            <li class="text-slate-500">Waiting for scalp signals…</li>
-          </ul>
-        </div>
-
-        <!-- V5: Three structured scalp setup cards (Pullback / Reversal / Breakout) -->
-        <div class="mt-2 grid grid-cols-1 gap-2 lg:grid-cols-3">
-          <!-- Setup 1: Pullback (trend continuation) -->
-          <div id="scalp-setup-pullback" class="scalp-setup-card setup-pullback">
-            <div class="scalp-setup-header">
-              <span class="scalp-setup-title">⚡ Pullback</span>
-              <span class="scalp-active-flag">ACTIVE</span>
-            </div>
-            <div class="space-y-1 text-[10.5px]">
-              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Strike</span><span id="scalp-mom-strike" class="text-right font-mono font-semibold text-slate-50">--</span></div>
-              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Entry</span><span id="scalp-mom-entry" class="text-right font-mono font-semibold text-[11px] text-slate-50">--</span></div>
-              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">SL</span><span id="scalp-mom-sl" class="text-right font-mono font-semibold text-rose-300">--</span></div>
-              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Target</span><span id="scalp-mom-target" class="text-right font-mono font-semibold text-emerald-300">--</span></div>
-            </div>
-            <div class="scalp-confidence-label"><span>Confidence</span><span class="scalp-confidence-value" id="scalp-mom-conf">0%</span></div>
-            <div class="scalp-confidence-bar"><div id="scalp-mom-fill" class="scalp-confidence-fill"></div></div>
-            <div id="scalp-mom-reason" class="scalp-setup-reason">—</div>
-          </div>
-
-          <!-- Setup 2: Reversal (counter-trend wall fade) -->
-          <div id="scalp-setup-reversal" class="scalp-setup-card setup-reversal">
-            <div class="scalp-setup-header">
-              <span class="scalp-setup-title">📐 Reversal</span>
-              <span class="scalp-active-flag">ACTIVE</span>
-            </div>
-            <div class="space-y-1 text-[10.5px]">
-              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Strike</span><span id="scalp-fib-strike" class="text-right font-mono font-semibold text-slate-50">--</span></div>
-              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Entry</span><span id="scalp-fib-entry" class="text-right font-mono font-semibold text-[11px] text-slate-50">--</span></div>
-              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">SL</span><span id="scalp-fib-sl" class="text-right font-mono font-semibold text-rose-300">--</span></div>
-              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Target</span><span id="scalp-fib-target" class="text-right font-mono font-semibold text-emerald-300">--</span></div>
-            </div>
-            <div class="scalp-confidence-label"><span>Confidence</span><span class="scalp-confidence-value" id="scalp-fib-conf">0%</span></div>
-            <div class="scalp-confidence-bar"><div id="scalp-fib-fill" class="scalp-confidence-fill"></div></div>
-            <div id="scalp-fib-reason" class="scalp-setup-reason">—</div>
-          </div>
-
-          <!-- Setup 3: Breakout (trade WITH wall break) -->
-          <div id="scalp-setup-breakout" class="scalp-setup-card setup-breakout">
-            <div class="scalp-setup-header">
-              <span class="scalp-setup-title">🚀 Breakout</span>
-              <span class="scalp-active-flag">ACTIVE</span>
-            </div>
-            <div class="space-y-1 text-[10.5px]">
-              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Strike</span><span id="scalp-brk-strike" class="text-right font-mono font-semibold text-slate-50">--</span></div>
-              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Entry</span><span id="scalp-brk-entry" class="text-right font-mono font-semibold text-[11px] text-slate-50">--</span></div>
-              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">SL</span><span id="scalp-brk-sl" class="text-right font-mono font-semibold text-rose-300">--</span></div>
-              <div class="flex items-center justify-between gap-2"><span class="uppercase tracking-wider text-slate-500">Target</span><span id="scalp-brk-target" class="text-right font-mono font-semibold text-emerald-300">--</span></div>
-            </div>
-            <div class="scalp-confidence-label"><span>Confidence</span><span class="scalp-confidence-value" id="scalp-brk-conf">0%</span></div>
-            <div class="scalp-confidence-bar"><div id="scalp-brk-fill" class="scalp-confidence-fill"></div></div>
-            <div id="scalp-brk-reason" class="scalp-setup-reason">—</div>
-          </div>
-        </div>
-
-        <!-- Live scalp alerts feed (raw GEX flips + wall tests + volume surges) -->
-        <div class="mt-2 flex flex-col rounded-md border border-slate-700/60 bg-black/30 p-2">
-          <p class="mb-1 text-[9px] font-bold uppercase tracking-[.18em] text-amber-300">⚡ Live Scalp Alerts</p>
-          <div id="scalp-alerts-feed" class="scalp-alert-feed max-h-32 space-y-1 overflow-y-auto">
-            <p class="text-[10px] text-slate-500">No scalp alerts yet…</p>
-          </div>
-        </div>
-
-        <!-- Spot velocity (5s / 10s / 30s) -->
-        <div class="mt-2 rounded-md border border-slate-700/60 bg-black/30 p-2">
-          <p class="mb-1 text-[9px] font-bold uppercase tracking-[.18em] text-cyan-400">Spot Velocity (pts/s)</p>
-          <div class="scalp-velocity-grid">
-            <div class="scalp-velocity-cell"><span class="v-label">5s</span><span id="scalp-vel-5" class="v-value">--</span></div>
-            <div class="scalp-velocity-cell"><span class="v-label">10s</span><span id="scalp-vel-10" class="v-value">--</span></div>
-            <div class="scalp-velocity-cell"><span class="v-label">30s</span><span id="scalp-vel-30" class="v-value">--</span></div>
-          </div>
-        </div>
-
-        <!-- Top COI movers -->
-        <div class="mt-2 rounded-md border border-slate-700/60 bg-black/30 p-2">
-          <p class="mb-1 text-[9px] font-bold uppercase tracking-[.18em] text-amber-300">Top COI Movers (ΔCOI)</p>
-          <div id="scalp-coi-movers">
-            <div class="scalp-coi-row text-slate-500"><span>Strike</span><span>Side</span><span>5s</span><span>30s</span></div>
-          </div>
-        </div>
-
-        <!-- Quick metrics row (ATR candles used, evaluated_at) -->
-        <div class="mt-2 rounded-md border border-slate-700/60 bg-black/30 px-2 py-1">
-          <div class="scalp-metric-row"><span class="sm-label">ATR candles</span><span id="scalp-atr-candles" class="sm-value">0</span></div>
-          <div class="scalp-metric-row"><span class="sm-label">Last update</span><span id="scalp-evaluated-at" class="sm-value">--</span></div>
-          <div class="scalp-metric-row"><span class="sm-label">Trade state</span><span id="scalp-trade-state" class="sm-value">--</span></div>
-        </div>
-
-        <div class="mt-auto flex w-full justify-end gap-1.5 pt-2">
-          <button id="scalp-audio-toggle" type="button" class="rounded-md border border-cyan-700/60 bg-cyan-900/40 px-2 py-1 text-xs font-bold uppercase tracking-[.12em] text-cyan-300 transition hover:bg-cyan-800/60" aria-pressed="false">🔇 ALERTS OFF</button>
-        </div>
-      </section>
     </div>
       </div>
     </section>
@@ -1191,6 +870,33 @@
 
   </div>
 </section>
+    <!-- Detached Floating Card: MATH CONSOLE live trajectory lines (6 MA charts) -->
+    <div id="math-lines-detached-modal" role="dialog" aria-modal="true" aria-labelledby="math-lines-modal-title">
+      <div class="math-lines-modal-card" id="math-lines-modal-card">
+        <div class="math-lines-modal-topbar">
+          <h2 class="math-lines-modal-title" id="math-lines-modal-title">📈 MATH CONSOLE — LIVE TRAJECTORY LINES</h2>
+          <div class="math-lines-modal-actions">
+            <span class="math-lines-state-pill">Trade State: <span class="state" id="math-lines-trade-state">--</span></span>
+            <button type="button" id="math-lines-reset-btn" class="math-lines-btn" title="Clear today's recorded history">Reset Today</button>
+            <button type="button" id="math-lines-close-btn" class="math-lines-btn math-lines-close-btn" title="Close (Esc)">✕ Close</button>
+          </div>
+        </div>
+        <div class="math-single-chart">
+          <div class="math-single-legend" id="math-single-legend" role="toolbar" aria-label="Toggle series visibility">
+            <button type="button" class="math-legend-chip is-on" id="math-legend-bias" data-key="bias" title="Toggle BIAS"><span class="math-legend-swatch" style="background:#f59e0b"></span><span class="math-legend-name">BIAS</span><span class="math-legend-val" id="math-legend-val-bias">--</span></button>
+            <button type="button" class="math-legend-chip is-on" id="math-legend-momentum" data-key="momentum" title="Toggle MOMENTUM"><span class="math-legend-swatch" style="background:#3b82f6"></span><span class="math-legend-name">MOMENTUM</span><span class="math-legend-val" id="math-legend-val-momentum">--</span></button>
+            <button type="button" class="math-legend-chip is-on" id="math-legend-deltaWt" data-key="deltaWt" title="Toggle DELTA WT"><span class="math-legend-swatch" style="background:#06b6d4"></span><span class="math-legend-name">DELTA WT</span><span class="math-legend-val" id="math-legend-val-deltaWt">--</span></button>
+            <button type="button" class="math-legend-chip is-on" id="math-legend-score" data-key="score" title="Toggle SCORE"><span class="math-legend-swatch" style="background:#10b981"></span><span class="math-legend-name">SCORE</span><span class="math-legend-val" id="math-legend-val-score">--</span></button>
+            <button type="button" class="math-legend-chip is-off" id="math-legend-gammaBoost" data-key="gammaBoost" title="Toggle GAMMA BOOST"><span class="math-legend-swatch" style="background:#f43f5e"></span><span class="math-legend-name">GAMMA BOOST</span><span class="math-legend-val" id="math-legend-val-gammaBoost">--</span></button>
+            <button type="button" class="math-legend-chip is-off" id="math-legend-ivSkew" data-key="ivSkew" title="Toggle IV SKEW"><span class="math-legend-swatch" style="background:#a855f7"></span><span class="math-legend-name">IV SKEW</span><span class="math-legend-val" id="math-legend-val-ivSkew">--</span></button>
+          </div>
+          <div class="math-single-canvas-wrap" id="math-single-canvas-wrap">
+            <canvas id="math-unified-canvas" height="390"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
 {% endblock %}
 {% block extra_js %}
 <script>
@@ -1210,22 +916,6 @@
   // once per CE/PE/NO_TRADE transition, never on every 1 Hz poll.
   let audioAlertsEnabled = false;
   let previousTradeState = 'NO_TRADE';
-  // ---- V3 Scalper mode state -------------------------------------------
-  // Frontend-only toggle. When ON the dashboard renders the SCALP SIGNALS card
-  // (hidden by default) instead of #ai-trade-setups, drives AI entries from
-  // scalp_signals.bias + bias_score + atr_2min, and swaps voice alerts to fire
-  // on bias BULLISH/BEARISH transitions. State persists in localStorage so a
-  // refresh doesn't drop the operator back into intraday mode mid-trade.
-  let scalperMode = localStorage.getItem('scalper_mode') === 'on';
-  // Latest scalp_signals snapshot captured from /gamma/status/ (refreshGamma).
-  // Stays null until the V3 engine publishes its first scalp_signals payload.
-  let currentScalpSignals = null;
-  // Voice-alert dedup for scalper mode (separate from intraday previousTradeState
-  // so toggling the mode doesn't double-fire announcements).
-  let previousScalpBias = 'NEUTRAL';
-  // Tracks seen scalp alert strings so the feed doesn't grow infinitely on a
-  // repeated wall-proximity message.
-  const seenScalpAlerts = new Set();
   // Client-side High-Water Mark cache — seeded from the Redis-backed market state
   // injected by views.py so a hard refresh keeps the accumulated peaks. A peak now
   // decays exponentially toward its `center` with a 5-minute half-life, so a peak
@@ -1782,8 +1472,423 @@
     const momentum = Number.isFinite(Number(data.momentum)) ? Number(data.momentum) : currentMomentum;
     const delta_wt_impact = Number.isFinite(Number(data.delta_wt_impact)) ? Number(data.delta_wt_impact) : 0;
     applyMathConsolePulse(score, bias, momentum, delta_wt_impact);
+    recordMathLinesPoint(data);
   }
 
+  // ── 📈 MATH CONSOLE — LIVE TRAJECTORY LINES (unified TradingView-style chart) ─
+  // Always-on recorder (samples every 5s, up to 240 pts, persisted per IST date) +
+  // a live 1s "tip" point. One single multi-line canvas plots every enabled metric
+  // on a shared 0-centred axis (SCORE is plotted as score-50 while displaying 0-100).
+  const MATH_LINES_MAX_POINTS = 240;
+  const MATH_LINES_SAMPLE_MS = 5000;
+  const MATH_LINES_STORAGE_PREFIX = 'math_console_lines_';
+  const MATH_LINES_VIS_KEY = 'math_console_visible_series_v1';
+  const MATH_UNIFIED_METRICS = [
+    { key: 'bias',       label: 'BIAS',        color: '#f59e0b', unit: '%', decimals: 1, defVisible: true,  plot: v => v },
+    { key: 'momentum',   label: 'MOMENTUM',    color: '#3b82f6', unit: '%', decimals: 1, defVisible: true,  plot: v => v },
+    { key: 'deltaWt',    label: 'DELTA WT',    color: '#06b6d4', unit: '',  decimals: 1, defVisible: true,  plot: v => v },
+    { key: 'score',      label: 'SCORE',       color: '#10b981', unit: '',  decimals: 0, defVisible: true,  plot: v => v - 50 },
+    { key: 'gammaBoost', label: 'GAMMA BOOST', color: '#f43f5e', unit: '',  decimals: 1, defVisible: false, plot: v => v },
+    { key: 'ivSkew',     label: 'IV SKEW',     color: '#a855f7', unit: '%', decimals: 1, defVisible: false, plot: v => v },
+  ];
+  const MATH_UNIFIED_LEFT = 8;
+  const MATH_UNIFIED_RIGHT = 78;
+  const MATH_UNIFIED_TOP = 12;
+  const MATH_UNIFIED_BOTTOM = 14;
+  const MATH_UNIFIED_HEIGHT = 390;
+
+  let mathLinesHistory = null;
+  let mathLinesLive = null;
+  let mathLinesLastSampleTs = 0;
+  let mathLinesVisible = null;
+  let mathLinesHoverIndex = null;
+  let mathLinesHoverY = null;
+  const toNum = v => (Number.isFinite(Number(v)) ? Number(v) : NaN);
+
+  function istShifted(date) { return new Date(date.getTime() + (5.5 * 60 + date.getTimezoneOffset()) * 60000); }
+  function mathLinesDateKey(now = new Date()) {
+    const ist = istShifted(now);
+    return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}-${String(ist.getUTCDate()).padStart(2, '0')}`;
+  }
+  function mathLinesTimeStr(now = new Date()) {
+    const ist = istShifted(now);
+    return `${String(ist.getUTCHours()).padStart(2, '0')}:${String(ist.getUTCMinutes()).padStart(2, '0')}:${String(ist.getUTCSeconds()).padStart(2, '0')}`;
+  }
+  function mathLinesStorageKey() { return MATH_LINES_STORAGE_PREFIX + mathLinesDateKey(); }
+  function mathLinesLoad() {
+    if (mathLinesHistory !== null) return mathLinesHistory;
+    try {
+      const raw = localStorage.getItem(mathLinesStorageKey());
+      const arr = raw ? JSON.parse(raw) : [];
+      mathLinesHistory = Array.isArray(arr) ? arr.filter(p => p && typeof p === 'object') : [];
+    } catch (e) { mathLinesHistory = []; }
+    return mathLinesHistory;
+  }
+  function mathLinesSave() {
+    try {
+      localStorage.setItem(mathLinesStorageKey(), JSON.stringify(mathLinesHistory || []));
+      const keep = mathLinesStorageKey();
+      Object.keys(localStorage).forEach(k => {
+        if (k.indexOf(MATH_LINES_STORAGE_PREFIX) === 0 && k !== keep) localStorage.removeItem(k);
+      });
+    } catch (e) {}
+  }
+  function mathLinesLoadVisible() {
+    if (mathLinesVisible) return mathLinesVisible;
+    const state = {};
+    MATH_UNIFIED_METRICS.forEach(m => { state[m.key] = m.defVisible; });
+    try {
+      const raw = localStorage.getItem(MATH_LINES_VIS_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw);
+        if (saved && typeof saved === 'object') {
+          MATH_UNIFIED_METRICS.forEach(m => { if (typeof saved[m.key] === 'boolean') state[m.key] = saved[m.key]; });
+        }
+      }
+    } catch (e) {}
+    mathLinesVisible = state;
+    return state;
+  }
+  function mathLinesSaveVisible() {
+    try { localStorage.setItem(MATH_LINES_VIS_KEY, JSON.stringify(mathLinesLoadVisible())); } catch (e) {}
+  }
+  function mathLinesVisibleMetrics() {
+    const vis = mathLinesLoadVisible();
+    return MATH_UNIFIED_METRICS.filter(m => vis[m.key]);
+  }
+
+  // Hooked into renderAdvancedMetrics → runs on every 1 Hz option-chain poll.
+  // The live tip refreshes every second; a durable sample is appended every 5 s.
+  function recordMathLinesPoint(data) {
+    if (!data || typeof data !== 'object') return;
+    const bias = Number.isFinite(Number(data.bias)) ? Number(data.bias) : 0;
+    const momentum = Number.isFinite(Number(data.momentum)) ? Number(data.momentum) : 0;
+    const deltaWt = Number.isFinite(Number(data.delta_wt_impact)) ? Number(data.delta_wt_impact) : 0;
+    const score = Number.isFinite(Number(data.score)) ? Number(data.score) : 50;
+    const ivSkew = Number.isFinite(Number(data.iv_skew_est)) ? Number(data.iv_skew_est) : 0;
+    const gammaBoost = Number.isFinite(Number(data.gamma_boost_val)) ? Number(data.gamma_boost_val) : 0;
+    const now = Date.now();
+    const live = { ts: now, timeStr: mathLinesTimeStr(new Date(now)), bias, momentum, deltaWt, score, ivSkew, gammaBoost };
+    mathLinesLive = live;
+    if (!mathLinesLastSampleTs || now - mathLinesLastSampleTs >= MATH_LINES_SAMPLE_MS) {
+      const history = mathLinesLoad();
+      history.push(live);
+      if (history.length > MATH_LINES_MAX_POINTS) history.splice(0, history.length - MATH_LINES_MAX_POINTS);
+      mathLinesLastSampleTs = now;
+      mathLinesSave();
+    }
+    const modal = document.getElementById('math-lines-detached-modal');
+    if (modal && modal.classList.contains('is-open')) renderUnifiedChart();
+  }
+
+  function mathUnifiedFormat(metric, v) {
+    if (!Number.isFinite(v)) return '--';
+    if (metric.key === 'score') return v.toFixed(0);
+    const sign = v > 0 ? '+' : '';
+    return sign + v.toFixed(metric.decimals) + metric.unit;
+  }
+  function mathUnifiedPoints() {
+    const history = mathLinesLoad();
+    const live = mathLinesLive;
+    if (!live) return history.slice();
+    if (!history.length || live.ts > history[history.length - 1].ts) return history.concat([live]);
+    return history.slice(0, history.length - 1).concat([live]);
+  }
+
+  function mathUnifiedSmooth(values, windowSize = 3) {
+    const out = [];
+    for (let i = 0; i < values.length; i++) {
+      let sum = 0, count = 0;
+      for (let j = Math.max(0, i - windowSize + 1); j <= i; j++) { sum += values[j]; count++; }
+      out.push(sum / count);
+    }
+    return out;
+  }
+  function mathUnifiedTracePath(ctx, pts) {
+    ctx.moveTo(pts[0].x, pts[0].y);
+    if (pts.length === 1) return;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const xc = (pts[i].x + pts[i + 1].x) / 2;
+      const yc = (pts[i].y + pts[i + 1].y) / 2;
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
+    }
+    ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+  }
+  function mathRoundRect(ctx, x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function renderUnifiedChart() {
+    const canvas = document.getElementById('math-unified-canvas');
+    if (!canvas) return;
+    const wrap = canvas.parentElement;
+    const cssW = wrap ? wrap.clientWidth : canvas.clientWidth;
+    const cssH = MATH_UNIFIED_HEIGHT;
+    if (!cssW) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.round(cssW * dpr));
+    canvas.height = Math.max(1, Math.round(cssH * dpr));
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+
+    const points = mathUnifiedPoints();
+    const visible = mathLinesVisibleMetrics();
+    const leftPad = MATH_UNIFIED_LEFT, rightMargin = MATH_UNIFIED_RIGHT;
+    const topPad = MATH_UNIFIED_TOP, bottomPad = MATH_UNIFIED_BOTTOM;
+    const plotW = Math.max(1, cssW - leftPad - rightMargin);
+    const plotH = Math.max(1, cssH - topPad - bottomPad);
+    const N = points.length;
+    const xFor = i => leftPad + (N <= 1 ? 0 : (i / (N - 1)) * plotW);
+
+    let maxAbs = 30;
+    visible.forEach(m => {
+      points.forEach(p => {
+        const pv = m.plot(toNum(p[m.key]));
+        if (Number.isFinite(pv)) { const a = Math.abs(pv); if (a > maxAbs) maxAbs = a; }
+      });
+    });
+    maxAbs *= 1.12;
+    const lo = -maxAbs, hi = maxAbs;
+    const yFor = v => topPad + (1 - (v - lo) / (hi - lo)) * plotH;
+    const centerY = yFor(0);
+
+    ctx.font = '9px ui-monospace, Menlo, Consolas, monospace';
+    ctx.lineWidth = 1;
+    const tickCount = 5;
+    for (let i = 0; i < tickCount; i++) {
+      const frac = i / (tickCount - 1);
+      const v = lo + frac * (hi - lo);
+      const y = topPad + frac * plotH;
+      ctx.strokeStyle = 'rgba(51, 65, 85, 0.5)';
+      ctx.beginPath(); ctx.moveTo(leftPad, y); ctx.lineTo(leftPad + plotW, y); ctx.stroke();
+      ctx.fillStyle = '#64748b';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(Math.abs(v) >= 10 ? v.toFixed(0) : v.toFixed(1), leftPad + plotW + 7, y);
+    }
+    const vTicks = 6;
+    for (let i = 0; i < vTicks; i++) {
+      const x = leftPad + (i / (vTicks - 1)) * plotW;
+      ctx.strokeStyle = 'rgba(51, 65, 85, 0.35)';
+      ctx.beginPath(); ctx.moveTo(x, topPad); ctx.lineTo(x, topPad + plotH); ctx.stroke();
+    }
+    ctx.save();
+    ctx.strokeStyle = 'rgba(250, 204, 21, 0.75)';
+    ctx.setLineDash([5, 4]);
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(leftPad, centerY); ctx.lineTo(leftPad + plotW, centerY); ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = '#eab308';
+    ctx.font = 'bold 9px ui-monospace, Menlo, Consolas, monospace';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+    ctx.fillText('0.0', leftPad + plotW + 7, centerY - 2);
+
+    if (!N) { updateUnifiedLegend(null); return; }
+
+    const seriesPts = {};
+    visible.forEach(m => {
+      const plotted = points.map(p => { const v = toNum(p[m.key]); return Number.isFinite(v) ? m.plot(v) : NaN; });
+      const smoothed = mathUnifiedSmooth(plotted);
+      seriesPts[m.key] = smoothed.map((pv, i) => ({ x: xFor(i), y: yFor(pv), v: pv, raw: toNum(points[i][m.key]), ts: points[i].ts, timeStr: points[i].timeStr }));
+    });
+
+    visible.forEach(m => {
+      const pts = seriesPts[m.key].filter(p => Number.isFinite(p.v));
+      if (!pts.length) return;
+      ctx.strokeStyle = m.color;
+      ctx.lineWidth = 2.3;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      mathUnifiedTracePath(ctx, pts);
+      ctx.stroke();
+    });
+
+    drawUnifiedPills(ctx, visible, seriesPts, points[N - 1], cssW, cssH);
+
+    if (mathLinesHoverIndex !== null && mathLinesHoverIndex >= 0 && mathLinesHoverIndex < N) {
+      const idx = mathLinesHoverIndex;
+      const hx = xFor(idx);
+      let hy = null, bestDist = Infinity;
+      visible.forEach(m => {
+        const p = seriesPts[m.key][idx];
+        if (p && Number.isFinite(p.v)) {
+          const d = mathLinesHoverY !== null ? Math.abs(p.y - mathLinesHoverY) : 0;
+          if (d < bestDist) { bestDist = d; hy = p.y; }
+        }
+      });
+      if (hy === null) hy = mathLinesHoverY;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.7)';
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1;
+      if (hy !== null && hy >= topPad && hy <= topPad + plotH) { ctx.beginPath(); ctx.moveTo(leftPad, hy); ctx.lineTo(leftPad + plotW, hy); ctx.stroke(); }
+      ctx.beginPath(); ctx.moveTo(hx, topPad); ctx.lineTo(hx, topPad + plotH); ctx.stroke();
+      ctx.restore();
+
+      visible.forEach(m => {
+        const p = seriesPts[m.key][idx];
+        if (!p || !Number.isFinite(p.v)) return;
+        ctx.fillStyle = m.color;
+        ctx.beginPath(); ctx.arc(p.x, p.y, 3.6, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#0b1220'; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.arc(p.x, p.y, 3.6, 0, Math.PI * 2); ctx.stroke();
+      });
+
+      const tStr = points[idx].timeStr || '--:--:--';
+      ctx.font = 'bold 10px ui-monospace, Menlo, Consolas, monospace';
+      const tw = ctx.measureText(tStr).width + 16;
+      const tx = Math.max(leftPad, Math.min(hx - tw / 2, cssW - rightMargin - tw));
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+      mathRoundRect(ctx, tx, cssH - 20, tw, 16, 8); ctx.fill();
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.5)'; ctx.lineWidth = 1;
+      mathRoundRect(ctx, tx, cssH - 20, tw, 16, 8); ctx.stroke();
+      ctx.fillStyle = '#e2e8f0';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(tStr, tx + tw / 2, cssH - 12);
+
+      updateUnifiedLegend(points[idx]);
+    } else {
+      updateUnifiedLegend(points[N - 1]);
+    }
+    updateMathLinesTradeState();
+  }
+  function drawUnifiedPills(ctx, visible, seriesPts, lastPoint, cssW, cssH) {
+    const gap = 24;
+    const pills = visible
+      .map(m => {
+        const arr = seriesPts[m.key];
+        const p = arr && arr.length ? arr[arr.length - 1] : null;
+        return p && Number.isFinite(p.v) ? { m, y: p.y, text: mathUnifiedFormat(m, lastPoint[m.key]) } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.y - b.y);
+    for (let i = 1; i < pills.length; i++) {
+      if (pills[i].y - pills[i - 1].y < gap) pills[i].y = pills[i - 1].y + gap;
+    }
+    ctx.font = 'bold 10px ui-monospace, Menlo, Consolas, monospace';
+    pills.forEach(p => {
+      p.y = Math.max(14, Math.min(cssH - 14, p.y));
+      const tw = ctx.measureText(p.text).width + 14;
+      const x = cssW - 8 - tw;
+      const y = p.y - 9;
+      ctx.fillStyle = p.m.color;
+      mathRoundRect(ctx, x, y, tw, 18, 9); ctx.fill();
+      ctx.fillStyle = '#0b1220';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(p.text, x + 7, p.y);
+    });
+  }
+
+  function updateUnifiedLegend(point) {
+    MATH_UNIFIED_METRICS.forEach(m => {
+      const chip = document.getElementById('math-legend-' + m.key);
+      if (chip) {
+        const on = mathLinesLoadVisible()[m.key];
+        chip.classList.toggle('is-on', on);
+        chip.classList.toggle('is-off', !on);
+      }
+      const valEl = document.getElementById('math-legend-val-' + m.key);
+      if (valEl) valEl.textContent = point ? mathUnifiedFormat(m, point[m.key]) : '--';
+    });
+  }
+
+  function toggleMathLinesMetric(key) {
+    const vis = mathLinesLoadVisible();
+    const enabled = MATH_UNIFIED_METRICS.filter(m => vis[m.key]);
+    if (vis[key]) {
+      if (enabled.length <= 1) return;
+      vis[key] = false;
+    } else {
+      vis[key] = true;
+    }
+    mathLinesSaveVisible();
+    renderUnifiedChart();
+  }
+
+  function updateMathLinesTradeState() {
+    const el = document.getElementById('math-lines-trade-state');
+    if (!el) return;
+    const state = (typeof previousTradeState !== 'undefined' && previousTradeState) || 'NO_TRADE';
+    el.textContent = state;
+    el.className = 'state ' + (state === 'CE' ? 'CE' : state === 'PE' ? 'PE' : 'NO_TRADE');
+  }
+
+  function openMathLinesModal() {
+    const modal = document.getElementById('math-lines-detached-modal');
+    if (!modal) return;
+    modal.classList.add('is-open');
+    updateMathLinesTradeState();
+    renderUnifiedChart();
+  }
+  function closeMathLinesModal() {
+    const modal = document.getElementById('math-lines-detached-modal');
+    if (!modal) return;
+    modal.classList.remove('is-open');
+  }
+  function resetMathLines() {
+    mathLinesHistory = [];
+    mathLinesLastSampleTs = 0;
+    try { localStorage.removeItem(mathLinesStorageKey()); } catch (e) {}
+    renderUnifiedChart();
+  }
+
+  function initMathLinesModal() {
+    const openBtn = document.getElementById('open-math-lines-btn');
+    const modal = document.getElementById('math-lines-detached-modal');
+    const closeBtn = document.getElementById('math-lines-close-btn');
+    const resetBtn = document.getElementById('math-lines-reset-btn');
+    if (openBtn) openBtn.addEventListener('click', openMathLinesModal);
+    if (closeBtn) closeBtn.addEventListener('click', closeMathLinesModal);
+    if (resetBtn) resetBtn.addEventListener('click', resetMathLines);
+    if (modal) modal.addEventListener('click', e => { if (e.target === modal) closeMathLinesModal(); });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && modal && modal.classList.contains('is-open')) closeMathLinesModal();
+    });
+    MATH_UNIFIED_METRICS.forEach(m => {
+      const chip = document.getElementById('math-legend-' + m.key);
+      if (chip) chip.addEventListener('click', () => toggleMathLinesMetric(m.key));
+    });
+    const canvas = document.getElementById('math-unified-canvas');
+    if (canvas) {
+      canvas.addEventListener('mousemove', e => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const points = mathUnifiedPoints();
+        if (!points.length) return;
+        const leftPad = MATH_UNIFIED_LEFT, rightMargin = MATH_UNIFIED_RIGHT;
+        const plotW = Math.max(1, rect.width - leftPad - rightMargin);
+        const N = points.length;
+        const xFor = i => leftPad + (N <= 1 ? 0 : (i / (N - 1)) * plotW);
+        let idx = 0, best = Infinity;
+        for (let i = 0; i < N; i++) { const d = Math.abs(xFor(i) - x); if (d < best) { best = d; idx = i; } }
+        mathLinesHoverIndex = idx;
+        mathLinesHoverY = y;
+        renderUnifiedChart();
+      });
+      canvas.addEventListener('mouseleave', () => {
+        mathLinesHoverIndex = null;
+        mathLinesHoverY = null;
+        renderUnifiedChart();
+      });
+    }
+    let raf = null;
+    window.addEventListener('resize', () => {
+      if (!modal || !modal.classList.contains('is-open')) return;
+      if (raf) return;
+      raf = requestAnimationFrame(() => { raf = null; renderUnifiedChart(); });
+    });
+  }
+
+  initMathLinesModal();
   // ---- Advanced Greek Blend → DAY GAMMA card ---------------------------------
   // The 1 Hz option-chain API broadcasts the exact DAY-profile greeks driving the
   // score's gamma boost (net_vanna / net_charm / gamma_flip_level). These mirror
@@ -1855,11 +1960,6 @@
     }
   }
   function updateAITrades(data) {
-    // Frontend-only mode switch: in scalper mode the AI TRADE SETUPS card is
-    // hidden and updateAITradesScalp() drives the visible SCALP SIGNALS card
-    // instead. The intraday math (below) still runs every tick so toggling
-    // back is instant — no re-warmup needed.
-    if (scalperMode) { updateAITradesScalp(data); return; }
     const atm = aiAtmRow();
     const atmStrike = atm ? number(atm.strike) : 0;
     const px = value => `₹${value.toFixed(2)}`;
@@ -2155,7 +2255,166 @@
         }).catch(() => { /* non-blocking; backend dedups too */ });
       }
     };
+    // ── 🚀 VWAP RECLAIM SNIPER (CE · C2-PB) audio/pulse helpers ────────────
+    const playSniperCeChime = () => {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const now = ctx.currentTime;
+        [660, 990, 1320].forEach((freq, i) => {
+          const t = now + i * 0.16;
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0.0001, t);
+          gain.gain.exponentialRampToValueAtTime(0.16, t + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+          osc.connect(gain).connect(ctx.destination);
+          osc.start(t);
+          osc.stop(t + 0.16);
+        });
+        setTimeout(() => { try { ctx.close(); } catch (e) {} }, 800);
+      } catch (e) { /* audio unavailable — ignore */ }
+    };
+    const pulseSniperCeBox = (el) => {
+      if (!el) return;
+      el.style.transition = 'box-shadow .3s ease, transform .3s ease';
+      el.style.boxShadow = '0 0 22px rgba(16,185,129,.85)';
+      el.style.transform = 'scale(1.04)';
+      setTimeout(() => { el.style.boxShadow = ''; el.style.transform = ''; }, 1000);
+    };
+    const renderSniperCe = () => {
+      const mins = istMinutesNow();
+      const inWindow = mins >= 690 && mins <= 895;    // 11:30–14:55 IST
+
+      const timeBadge = document.getElementById('sniper-ce-time-window');
+      if (timeBadge) {
+        if (inWindow) {
+          timeBadge.textContent = '🕒 11:30–14:55 IST (PF 1.97 · 64.3% WR)';
+          timeBadge.className = 'rounded-md border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-300';
+        } else {
+          timeBadge.textContent = '⏳ WAITING (11:30–14:55 IST)';
+          timeBadge.className = 'rounded-md border border-slate-600/60 bg-black/30 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-500';
+        }
+      }
+
+      // Reference price: future LTP if available, else index spot.
+      const refPrice = (Number.isFinite(Number(data && data.future_ltp)) && Number(data.future_ltp) > 0)
+        ? Number(data.future_ltp)
+        : (Number.isFinite(Number(data && data.spot_price)) && Number(data.spot_price) > 0 ? Number(data.spot_price) : entrySpot);
+      const vwapVal = (Number.isFinite(Number(data && data.vwap)) && Number(data.vwap) > 0) ? Number(data.vwap) : 0;
+      // +dist => price ABOVE VWAP (the long-CE reclaim trigger).
+      const signedDist = (vwapVal > 0 && refPrice > 0) ? ((refPrice - vwapVal) / vwapVal) : 0;
+      const ofiImb = Number.isFinite(Number(data && data.ofi_imbalance)) ? Number(data.ofi_imbalance) : 0;
+      const relVol = Number.isFinite(Number(data && data.rel_vol_ratio)) ? Number(data.rel_vol_ratio) : 1;
+      const cvd3 = Number.isFinite(Number(data && data.cvd_change_3)) ? Number(data.cvd_change_3) : 0;
+
+      // Current + previous closed 2m candles (shared OHLC series used for the ATR SL).
+      const currCandle = closed2m.length ? closed2m[closed2m.length - 1] : null;
+      const prevCandle = closed2m.length > 1 ? closed2m[closed2m.length - 2] : null;
+      const currClose = currCandle ? number(currCandle.close) : 0;
+      const currOpen = currCandle ? number(currCandle.open) : 0;
+      const prevLow = prevCandle ? number(prevCandle.low) : 0;
+
+      // Live mini-telemetry (always visible so the trader can watch it build up).
+      setText('sniper-ce-vwap-dist', (signedDist * 100).toFixed(2) + '%');
+      setText('sniper-ce-ofi', ofiImb.toFixed(2));
+      setText('sniper-ce-relvol', relVol.toFixed(2) + 'x');
+      setText('sniper-ce-cvd3', (cvd3 > 0 ? '+' : '') + Math.round(cvd3).toLocaleString('en-IN'));
+
+      const inPullbackZone = signedDist >= -0.0005 && signedDist <= 0.0012;
+      const bullishReclaim = currClose > 0 && currOpen > 0 && (currClose > currOpen) && (currClose > vwapVal);
+      const priorDip = prevLow > 0 && vwapVal > 0 && (((prevLow - vwapVal) / vwapVal) <= 0.0005);
+      const flowOk = cvd3 > 0 && relVol >= 1.20 && ofiImb >= -0.15;
+      const active = inWindow && inPullbackZone && bullishReclaim && priorDip && flowOk;
+      const box = document.getElementById('sniper-ce-signal-box');
+      if (active) {
+        // ATM CE strike rounded to nearest 50 + live call LTP from the chain.
+        const sniperStrike = entrySpot > 0 ? Math.round(entrySpot / 50) * 50 : 0;
+        const row = sniperStrike > 0 ? (allRows.find(r => number(r.strike) === sniperStrike) || null) : null;
+        const callLtp = row ? number(row.call_ltp) : 0;
+        setText('sniper-ce-strike', sniperStrike > 0 ? (sniperStrike.toLocaleString('en-IN') + ' CE' + (callLtp > 0 ? ' @ ' + px(callLtp) : '')) : '--');
+
+        // SL: spot_sl = clamp(2.2 * atrVal, 15, 35); option SL ≈ 0.5 × spot_sl.
+        const atrVal = Number(data && data.current_atr) > 0 ? Number(data.current_atr) : 20.0;
+        const ceSlPoints = Math.min(35.0, Math.max(15.0, 2.2 * atrVal));
+        if (entrySpot > 0) {
+          const spotSlLevel = entrySpot - ceSlPoints;   // long SL below entry
+          const optSl = 0.5 * ceSlPoints;
+          setText('sniper-ce-sl', 'Spot ' + spotFmt(spotSlLevel) + ' · Opt ~' + optSl.toFixed(1) + ' pts (NO EARLY BE TRAIL)');
+        } else {
+          setText('sniper-ce-sl', 'WAIT (entry spot)');
+        }
+        // Target: 35 spot points (≈17.5 option pts).
+        setText('sniper-ce-target', entrySpot > 0 ? ('Spot ' + spotFmt(entrySpot + 35) + ' · Opt ~17.5 pts') : '--');
+
+        const aplus = relVol >= 1.50 && ofiImb >= 0.00;
+        if (box) {
+          box.textContent = aplus ? '🔥 A+ CE SNIPER (1.5x+) — ACTIVE LONG CE' : '✅ VALID CE (1.2x+) — ACTIVE LONG CE';
+          box.className = aplus
+            ? 'rounded-md border border-amber-400/60 bg-amber-400/15 px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wider text-amber-200'
+            : 'rounded-md border border-emerald-500/50 bg-emerald-500/15 px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wider text-emerald-300';
+        }
+      } else {
+        setText('sniper-ce-strike', '🚫 NO TRADE ZONE');
+        setText('sniper-ce-sl', 'WAIT');
+        setText('sniper-ce-target', 'WAIT');
+        if (box) {
+          box.textContent = '⏳ WAITING (11:30–14:55 IST)';
+          box.className = 'rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-1 text-center text-[10px] font-bold uppercase tracking-wider text-amber-300';
+        }
+      }
+
+      // Distinct ascending chime + emerald pulse on transition into VALID/A+ (once per 2m candle).
+      const candleKey = Math.floor(mins / 2);
+      const wasActive = window.__sniperCeWasActive === true;
+      const lastChime = window.__sniperCeLastChimeCandle || -1;
+      if (active && !wasActive && candleKey !== lastChime) {
+        playSniperCeChime();
+        window.__sniperCeLastChimeCandle = candleKey;
+        pulseSniperCeBox(box);
+      }
+      window.__sniperCeWasActive = active;
+
+      // Forward-test logging: POST once per 2m candle whenever the card is active.
+      const logCandleKey = Math.floor(mins / 2);
+      if (active && window.__sniperCeLastLoggedCandle !== logCandleKey) {
+        window.__sniperCeLastLoggedCandle = logCandleKey;
+        const istNow = new Date(Date.now() + 5.5 * 3600 * 1000);
+        const tsIst = istNow.toISOString().slice(0, 19).replace('T', ' ');
+        const bMin = Math.floor(istNow.getUTCMinutes() / 2) * 2;
+        const bDt = new Date(istNow); bDt.setUTCMinutes(bMin, 0, 0);
+        const bucketIst = bDt.toISOString().slice(0, 16).replace('T', ' ');
+        const logAtr = Number(data && data.current_atr) > 0 ? Number(data.current_atr) : 20.0;
+        const logSl = Math.min(35.0, Math.max(15.0, 2.2 * logAtr));
+        const logStrike = entrySpot > 0 ? Math.round(entrySpot / 50) * 50 : 0;
+        const logRow = logStrike > 0 ? (allRows.find(r => number(r.strike) === logStrike) || null) : null;
+        fetch('/live-signals/log-sniper-ce/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            timestamp_ist: tsIst,
+            candle_2m_bucket: bucketIst,
+            tier: (relVol >= 1.50 && ofiImb >= 0.00) ? 'A+ CE SNIPER (1.5x+)' : 'VALID CE (1.2x+)',
+            spot_price: entrySpot,
+            future_ltp: refPrice,
+            vwap: vwapVal,
+            vwap_dist_pct: Number((signedDist * 100).toFixed(6)),
+            ofi_imbalance: ofiImb,
+            rel_vol_ratio: relVol,
+            cvd_change_3: cvd3,
+            spot_sl_pts: logSl,
+            spot_target_pts: 35.0,
+            atm_ce_strike: logStrike,
+            atm_ce_ltp: logRow ? number(logRow.call_ltp) : 0,
+          }),
+        }).catch(() => { /* non-blocking; backend dedups too */ });
+      }
+    };
     renderSniper();
+    renderSniperCe();
 
     // Transparency: mirror the live math (score + momentum + decision) into the debug console.
     updateMathConsole(currentTradeState);
@@ -2223,16 +2482,6 @@
       const status = data?.status || data;
       if (status?.last_profile) {
         renderProfile(status.last_profile);
-        // V3: capture scalp_signals (only present when the backend runs with
-        // GAMMA_SCALP_MODE=on). Stored globally so updateAITradesScalp() can
-        // pick it up on the next 1 Hz option-chain tick without waiting for
-        // the next /gamma/status/ poll.
-        const scalp = status.last_profile.scalp_signals;
-        if (scalp && typeof scalp === 'object' && scalp.enabled !== false) {
-          currentScalpSignals = scalp;
-          renderScalpSignals(currentScalpSignals);
-          if (scalperMode) updateAITradesScalp(null);
-        }
       }
       if (Array.isArray(status?.gamma_alerts)) status.gamma_alerts.forEach(renderSignal);
       if (status?.last_signal != null) renderSignal(status.last_signal);
@@ -2241,349 +2490,6 @@
     }
   }
 
-  // ====================================================================
-  // V3 SCALPER MODE — frontend rendering + AI setup logic.
-  // All scalp_signals data comes from /gamma/status/ (refreshGamma, above).
-  // The 1 Hz option-chain poll only contributes the ATM row (LTP/strike) so
-  // scalp entries can use a fresh premium between gamma-status ticks.
-  // ====================================================================
-
-  // ====================================================================
-  // V4: Impulse Override rendering helpers + ATR source pill
-  // ====================================================================
-
-  function setAtrSourcePill(source) {
-    const pill = document.getElementById('scalp-atr-source');
-    if (!pill) return;
-    const src = String(source || 'warming_up').toLowerCase();
-    pill.textContent = src;
-    pill.className = 'atr-source-pill src-' + src;
-  }
-
-  function hideImpulseUI() {
-    const badge = document.getElementById('impulse-badge');
-    if (badge) badge.classList.remove('is-active');
-    const list = document.getElementById('impulse-trigger-list');
-    if (list) list.style.display = 'none';
-  }
-
-  function renderImpulseOverride(impulse) {
-    const badge = document.getElementById('impulse-badge');
-    const badgeText = document.getElementById('impulse-badge-text');
-    const list = document.getElementById('impulse-trigger-list');
-    const items = document.getElementById('impulse-trigger-items');
-
-    // No impulse fired this update — hide all impulse UI.
-    if (!impulse || !impulse.fired) {
-      hideImpulseUI();
-      return;
-    }
-
-    // Impulse fired — show flashing badge with direction.
-    const dir = String(impulse.direction || 'NEUTRAL').toUpperCase();
-    if (badge) {
-      badge.classList.remove('impulse-bull', 'impulse-bear');
-      badge.classList.add(dir === 'BULLISH' ? 'impulse-bull' : 'impulse-bear');
-      badge.classList.add('is-active');
-    }
-    if (badgeText) {
-      badgeText.textContent = '⚡ IMPULSE ' + dir;
-    }
-
-    // Trigger list — show every trigger that fired this update.
-    const triggers = Array.isArray(impulse.triggers) ? impulse.triggers : [];
-    if (list && items && triggers.length > 0) {
-      list.style.display = 'block';
-      items.innerHTML = triggers.map(t => {
-        const text = String(t || '');
-        const cls = /BULLISH/i.test(text) ? 'pos' : /BEARISH/i.test(text) ? 'neg' : '';
-        return '<div class="trigger-item ' + cls + '">' + text + '</div>';
-      }).join('');
-    } else if (list) {
-      list.style.display = 'none';
-    }
-  }
-
-  // ====================================================================
-  // end V4 helpers
-  // ====================================================================
-
-  function applyScalperMode() {
-    // Toggle body class which CSS uses to show/hide the two AI cards.
-    document.body.classList.toggle('scalper-on', scalperMode);
-    const btn = document.getElementById('scalper-toggle');
-    if (btn) {
-      const label = btn.querySelector('.toggle-label');
-      if (label) label.textContent = scalperMode ? '⚡ SCALPER: ON' : '⚡ SCALPER: OFF';
-      btn.classList.toggle('is-active', scalperMode);
-      btn.setAttribute('aria-pressed', String(scalperMode));
-    }
-    // Re-render whichever card is now active so the toggle is instantly visible.
-    if (scalperMode) {
-      renderScalpSignals(currentScalpSignals);
-      updateAITradesScalp(null);
-    } else {
-      // Force a re-render of the intraday card so stale scalp values don't linger.
-      updateMathConsole(previousTradeState);
-    }
-  }
-
-  function renderScalpSignals(scalp) {
-    const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
-    const biasBox = document.getElementById('scalp-bias-box');
-
-    // No payload yet — paint a neutral placeholder.
-    if (!scalp || typeof scalp !== 'object') {
-      if (biasBox) { biasBox.className = 'scalp-bias-box bias-neutral'; }
-      setText('scalp-bias-value', 'WAITING');
-      setText('scalp-bias-score', 'score: --');
-      setText('scalp-atr', '--');
-      setText('scalp-atr-candles', '0');
-      setText('scalp-evaluated-at', '--');
-      setText('scalp-vel-5', '--');
-      setText('scalp-vel-10', '--');
-      setText('scalp-vel-30', '--');
-      const reasonsEl = document.getElementById('scalp-bias-reasons');
-      if (reasonsEl) reasonsEl.innerHTML = '<li class="text-slate-500">Waiting for scalp signals…</li>';
-      const feed = document.getElementById('scalp-alerts-feed');
-      if (feed) feed.innerHTML = '<p class="text-[10px] text-slate-500">No scalp alerts yet…</p>';
-      // V4: hide impulse UI when no data
-      hideImpulseUI();
-      setAtrSourcePill('warming_up');
-      // V5: reset all three setup cards
-      renderScalpSetup(null, 'mom', false);
-      renderScalpSetup(null, 'fib', false);
-      renderScalpSetup(null, 'brk', false);
-      return;
-    }
-
-    // Bias + score
-    const bias = String(scalp.bias || 'NEUTRAL').toUpperCase();
-    if (biasBox) {
-      biasBox.className = 'scalp-bias-box ' + (
-        bias === 'BULLISH' ? 'bias-bull' :
-        bias === 'BEARISH' ? 'bias-bear' : 'bias-neutral'
-      );
-    }
-    setText('scalp-bias-value', bias);
-    setText('scalp-bias-score', `score: ${Number(scalp.bias_score || 0).toFixed(2)}`);
-
-    // Bias reasons
-    const reasonsEl = document.getElementById('scalp-bias-reasons');
-    if (reasonsEl) {
-      const reasons = Array.isArray(scalp.bias_reasons) ? scalp.bias_reasons : [];
-      if (!reasons.length) {
-        reasonsEl.innerHTML = '<li class="text-slate-500">No contributing factors yet…</li>';
-      } else {
-        reasonsEl.innerHTML = reasons.map(r => {
-          const txt = String(r || '');
-          const cls = txt.startsWith('+') ? 'pos' : txt.startsWith('-') ? 'neg' : '';
-          return `<li class="${cls}">${txt}</li>`;
-        }).join('');
-      }
-    }
-
-    // ATR + candles + evaluated_at
-    const atrVal = (scalp.atr_2min === null || scalp.atr_2min === undefined) ? null : Number(scalp.atr_2min);
-    setText('scalp-atr', atrVal !== null && Number.isFinite(atrVal) ? atrVal.toFixed(2) : '--');
-    setText('scalp-atr-candles', String(scalp.atr_candles_used || 0));
-    setText('scalp-evaluated-at', scalp.evaluated_at || '--');
-    // V4: ATR source pill (live / prior_close / 5d_avg / default / warming_up)
-    setAtrSourcePill(scalp.atr_source || 'warming_up');
-
-    // V4: Impulse Override badge + trigger list
-    renderImpulseOverride(scalp.impulse_override);
-
-    // V5: Render the three structured scalp setup cards
-    const activeSetupName = scalp.active_setup || 'NONE';
-    renderScalpSetup(scalp.pullback_setup, 'mom', activeSetupName === 'Pullback');
-    renderScalpSetup(scalp.reversal_setup, 'fib', activeSetupName === 'Reversal');
-    renderScalpSetup(scalp.breakout_setup, 'brk', activeSetupName === 'Breakout');
-
-    // Spot velocity
-    const v = scalp.spot_velocity || {};
-    const fmtVel = (val) => {
-      const n = Number(val);
-      if (!Number.isFinite(n)) return '--';
-      return (n >= 0 ? '+' : '') + n.toFixed(2);
-    };
-    const setVel = (id, val) => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.textContent = fmtVel(val);
-      const n = Number(val);
-      el.classList.remove('up', 'down');
-      if (!Number.isFinite(n)) return;
-      const cls = n > 0 ? 'up' : n < 0 ? 'down' : '';
-      if (cls) el.classList.add(cls);
-    };
-    setVel('scalp-vel-5', v[5]);
-    setVel('scalp-vel-10', v[10]);
-    setVel('scalp-vel-30', v[30]);
-
-    // Alerts feed (raw GEX flips + wall proximity + volume surges)
-    const feed = document.getElementById('scalp-alerts-feed');
-    if (feed) {
-      const alerts = Array.isArray(scalp.alerts) ? scalp.alerts : [];
-      if (!alerts.length) {
-        feed.innerHTML = '<p class="text-[10px] text-slate-500">No scalp alerts yet…</p>';
-      } else {
-        // Newest first; dedupe identical strings so a held wall test doesn't
-        // flood the panel.
-        const fresh = [];
-        for (const a of alerts) {
-          const txt = String(a || '').trim();
-          if (!txt || seenScalpAlerts.has(txt)) continue;
-          seenScalpAlerts.add(txt);
-          fresh.unshift(txt);
-        }
-        // Keep at most the 20 most recent unique alerts.
-        if (seenScalpAlerts.size > 20) {
-          const arr = Array.from(seenScalpAlerts);
-          seenScalpAlerts.clear();
-          arr.slice(-20).forEach(s => seenScalpAlerts.add(s));
-        }
-        if (fresh.length === 0) {
-          feed.innerHTML = '<p class="text-[10px] text-slate-500">No new scalp alerts…</p>';
-        } else {
-          feed.innerHTML = fresh.map(txt => {
-            const cls = /NEGATIVE/i.test(txt) ? 'alert-bear' : /POSITIVE/i.test(txt) ? 'alert-bull' : '';
-            return `<div class="scalp-alert-item ${cls}">${txt}</div>`;
-          }).join('');
-        }
-      }
-    }
-
-    // Top COI movers
-    const coiHost = document.getElementById('scalp-coi-movers');
-    if (coiHost) {
-      const movers = Array.isArray(scalp.top_coi_velocity) ? scalp.top_coi_velocity : [];
-      if (!movers.length) {
-        coiHost.innerHTML = '<div class="scalp-coi-row text-slate-500"><span>Strike</span><span>Side</span><span>5s</span><span>30s</span></div><div class="scalp-coi-row text-slate-500"><span colspan="4">No COI movers yet…</span></div>';
-      } else {
-        const fmtDelta = (val) => {
-          const n = Number(val);
-          if (!Number.isFinite(n)) return '--';
-          return (n >= 0 ? '+' : '') + Math.round(n).toLocaleString('en-IN');
-        };
-        const rows = movers.slice(0, 5).map(m => {
-          const d = m.deltas || {};
-          const d5 = fmtDelta(d[5]);
-          const d30 = fmtDelta(d[30]);
-          const cls5 = Number(d[5]) < 0 ? 'down' : 'up';
-          const cls30 = Number(d[30]) < 0 ? 'down' : 'up';
-          const sideCls = String(m.side || '').toLowerCase() === 'put' ? 'put' : 'call';
-          return `<div class="scalp-coi-row">
-            <span class="sc-strike">${Number(m.strike || 0).toLocaleString('en-IN')}</span>
-            <span class="sc-side ${sideCls}">${String(m.side || '').toUpperCase()}</span>
-            <span class="sc-delta ${cls5}">${d5}</span>
-            <span class="sc-delta ${cls30}">${d30}</span>
-          </div>`;
-        }).join('');
-        coiHost.innerHTML = '<div class="scalp-coi-row text-slate-500"><span>Strike</span><span>Side</span><span>5s</span><span>30s</span></div>' + rows;
-      }
-    }
-  }
-
-  function updateAITradesScalp(data) {
-    // V5: All three setup cards are now populated by renderScalpSignals() from
-    // the structured ScalpSetup objects sent by the V5 backend. This function
-    // now only handles voice-alert transitions + math-console score mirroring.
-    // The actual entry/SL/target/confidence rendering moved into renderScalpSignals()
-    // so all three cards stay in sync from a single source of truth.
-    const scalp = currentScalpSignals;
-    const bias = scalp && scalp.bias ? String(scalp.bias).toUpperCase() : 'NEUTRAL';
-    const noTrade = bias === 'NEUTRAL' || !scalp;
-    const optionSide = bias === 'BEARISH' ? 'PE' : bias === 'BULLISH' ? 'CE' : 'NO_TRADE';
-
-    // Voice-alert transitions in scalper mode fire on bias change.
-    const currentBias = bias;
-    if (audioAlertsEnabled && currentBias !== previousScalpBias) {
-      if (currentBias === 'BULLISH') speakAlert('Scalp mode: Bullish bias detected. Buy C E.');
-      else if (currentBias === 'BEARISH') speakAlert('Scalp mode: Bearish bias detected. Buy P E.');
-    }
-    previousScalpBias = currentBias;
-
-    // Update trade-state badge (top-level summary, mirrors active_setup if present).
-    const activeSetup = scalp ? (scalp.active_setup || 'NONE') : 'NONE';
-    const stateEl = document.getElementById('scalp-trade-state');
-    if (stateEl) {
-      const displayText = activeSetup !== 'NONE'
-        ? `${activeSetup.toUpperCase()} (${optionSide})`
-        : (noTrade ? 'NO_TRADE' : optionSide);
-      stateEl.textContent = displayText;
-      stateEl.classList.remove('text-emerald-300', 'text-rose-300', 'text-slate-200');
-      stateEl.classList.add(noTrade ? 'text-slate-200' : optionSide === 'PE' ? 'text-rose-300' : 'text-emerald-300');
-    }
-
-    // Mirror the scalp bias score into the Math Console's Score row.
-    const scoreEl = document.getElementById('math-score');
-    if (scoreEl) {
-      const s = scalp ? Number(scalp.bias_score || 0) : 0;
-      const visual = Math.max(0, Math.min(100, 50 + (s * 20)));
-      const scorePeak = bumpPeak('score', Number.isFinite(visual) ? visual : 50, 50);
-      // Peak is tracked on the 0–100 visual scale; convert back to the raw bias-score scale for display.
-      const rawPeak = (scorePeak - 50) / 20;
-      scoreEl.textContent = `${s.toFixed(2)} (Peak: ${rawPeak.toFixed(2)})`;
-      scoreEl.style.color = s >= 1.5 ? '#00ff00' : s <= -1.5 ? '#ff0000' : '#ffffff';
-      const scoreRow = scoreEl.closest('.math-metric-row');
-      const scoreTrack = scoreRow ? scoreRow.querySelector('.math-progress-track') : null;
-      if (scoreTrack) {
-        renderBar(scoreTrack, { bipolar: false, value: visual, min: 0, max: 100, peak: scorePeak });
-      }
-    }
-    // Trade state badge in Math Console mirrors scalp state too.
-    const consoleStateEl = document.getElementById('math-trade-state');
-    if (consoleStateEl) {
-      consoleStateEl.textContent = activeSetup !== 'NONE' ? `${activeSetup.toUpperCase()} ${optionSide}` : (noTrade ? 'NO_TRADE' : optionSide);
-      consoleStateEl.classList.remove('text-emerald-300', 'text-rose-300', 'text-slate-200');
-      consoleStateEl.classList.add(noTrade ? 'text-slate-200' : optionSide === 'PE' ? 'text-rose-300' : 'text-emerald-300');
-    }
-  }
-
-  // ====================================================================
-  // V5: Render the three structured scalp setup cards (Pullback/Reversal/Breakout)
-  // ====================================================================
-
-  function renderScalpSetup(setup, prefix, isActive) {
-    // prefix is 'mom' / 'fib' / 'brk' (the legacy field-id prefix)
-    // setupName is 'pullback' / 'reversal' / 'breakout' (the card container id)
-    const setupName = prefix === 'mom' ? 'pullback' : prefix === 'fib' ? 'reversal' : 'breakout';
-    const fullPrefix = prefix === 'mom' ? 'scalp-mom' : prefix === 'fib' ? 'scalp-fib' : 'scalp-brk';
-    const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
-    const px = value => `₹${Number(value).toFixed(2)}`;
-    const card = document.getElementById(`scalp-setup-${setupName}`);
-
-    // Toggle the is-active class for the glowing border + ACTIVE flag
-    if (card) {
-      card.classList.toggle('is-active', !!isActive);
-    }
-
-    if (!setup || !setup.active) {
-      setText(`${fullPrefix}-strike`, '--');
-      setText(`${fullPrefix}-entry`, 'WAIT');
-      setText(`${fullPrefix}-sl`, 'WAIT');
-      setText(`${fullPrefix}-target`, 'WAIT');
-      setText(`${fullPrefix}-conf`, '0%');
-      setText(`${fullPrefix}-reason`, 'Setup inactive — waiting for alignment');
-      const fill = document.getElementById(`${fullPrefix}-fill`);
-      if (fill) fill.style.width = '0%';
-      return;
-    }
-
-    // Setup is active — populate strike/entry/SL/target/confidence
-    const strikeText = setup.strike > 0
-      ? `${Number(setup.strike).toLocaleString('en-IN')} ${setup.option_side || ''}`
-      : '--';
-    setText(`${fullPrefix}-strike`, strikeText);
-    setText(`${fullPrefix}-entry`, setup.entry > 0 ? px(setup.entry) : '--');
-    setText(`${fullPrefix}-sl`, setup.sl > 0 ? px(setup.sl) : '--');
-    setText(`${fullPrefix}-target`, setup.target > 0 ? px(setup.target) : '--');
-    setText(`${fullPrefix}-conf`, `${Number(setup.confidence_pct || 0).toFixed(1)}%`);
-    setText(`${fullPrefix}-reason`, setup.reason || '');
-    const fill = document.getElementById(`${fullPrefix}-fill`);
-    if (fill) fill.style.width = `${Math.min(100, Math.max(0, Number(setup.confidence_pct || 0)))}%`;
-  }
 
   // Blink whichever of MAX/MIN IEP the Final IEP settled closest to.
   // - Final nearer MAX  -> MAX blinks green  (.blink-bullish)
@@ -2728,49 +2634,6 @@
   // because updatePreopen is scoped to this IIFE's closure.
   window.updatePreopen = updatePreopen;
 
-  // ====================================================================
-  // V3 SCALPER TOGGLE — frontend-only mode switch with localStorage.
-  // applyScalperMode() lives above (defined next to renderScalpSignals so the
-  // scalp data flow stays in one place). The toggle button sits in the top
-  // header; a second audio-toggle button lives inside the SCALP SIGNALS card
-  // so each mode has its own visible mute control.
-  // ====================================================================
-  const scalperToggleBtn = document.getElementById('scalper-toggle');
-  if (scalperToggleBtn) {
-    scalperToggleBtn.addEventListener('click', () => {
-      scalperMode = !scalperMode;
-      localStorage.setItem('scalper_mode', scalperMode ? 'on' : 'off');
-      applyScalperMode();
-    });
-  }
-  // Mirror the existing audio-toggle onto the SCALP SIGNALS card. Same state
-  // (audioAlertsEnabled) so toggling one updates both buttons.
-  const scalpAudioToggleBtn = document.getElementById('scalp-audio-toggle');
-  if (scalpAudioToggleBtn) {
-    const syncScalpAudioBtn = () => {
-      scalpAudioToggleBtn.textContent = audioAlertsEnabled ? '🔊 ALERTS ON' : '🔇 ALERTS OFF';
-      scalpAudioToggleBtn.setAttribute('aria-pressed', String(audioAlertsEnabled));
-      scalpAudioToggleBtn.classList.toggle('text-amber-300', audioAlertsEnabled);
-      scalpAudioToggleBtn.classList.toggle('text-cyan-300', !audioAlertsEnabled);
-    };
-    syncScalpAudioBtn();
-    scalpAudioToggleBtn.addEventListener('click', () => {
-      audioAlertsEnabled = !audioAlertsEnabled;
-      syncScalpAudioBtn();
-      // Keep the intraday card's button in sync too.
-      const mainBtn = document.getElementById('audio-toggle');
-      if (mainBtn) {
-        mainBtn.textContent = audioAlertsEnabled ? '🔊 ALERTS ON' : '🔇 ALERTS OFF';
-        mainBtn.setAttribute('aria-pressed', String(audioAlertsEnabled));
-        mainBtn.classList.toggle('text-emerald-300', audioAlertsEnabled);
-        mainBtn.classList.toggle('text-slate-300', !audioAlertsEnabled);
-      }
-    });
-  }
-
-  // Apply persisted scalper mode on load. Hides #ai-trade-setups and shows
-  // #scalp-trade-setups if the operator left it ON last session.
-  applyScalperMode();
 
 })();
 </script>

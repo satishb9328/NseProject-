@@ -1504,6 +1504,27 @@ def log_sniper_api(request):
     return JsonResponse({"ok": True, "logged": logged})
 
 
+@csrf_exempt
+def log_sniper_ce_api(request):
+    """Log a VWAP Reclaim Sniper (CE · C2-PB) trigger forwarded from the browser."""
+    if request.method != "POST":
+        return JsonResponse({"ok": False, "error": "POST required"}, status=405)
+    try:
+        payload = json.loads(request.body or b"{}")
+    except (ValueError, TypeError):
+        return JsonResponse({"ok": False, "error": "invalid JSON"}, status=400)
+    if not isinstance(payload, dict):
+        return JsonResponse({"ok": False, "error": "payload must be an object"}, status=400)
+    payload["source"] = "LIVE_UI_TRIGGER"
+    try:
+        from Nse_Project.Live_dashboard.sniper_logger import log_sniper_ce_pb_trigger
+        logged = bool(log_sniper_ce_pb_trigger(payload))
+    except Exception as exc:
+        logger.error("log_sniper_ce_api failed: %s", exc, exc_info=True)
+        return JsonResponse({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status=500)
+    return JsonResponse({"ok": True, "logged": logged})
+
+
 def live_option_chain_api(request):
     """Serve the live option chain, and NEVER answer a 1 Hz poll with an HTML 500.
 
