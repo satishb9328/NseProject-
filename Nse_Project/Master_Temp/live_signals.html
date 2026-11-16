@@ -141,6 +141,120 @@
     text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 0 6px rgba(0,0,0,0.9);
   }
 
+  /* ---- Compact Options Chain sizing overrides ---- */
+  #compact-options-chain {
+    height: fit-content;
+    max-height: none;
+    flex: 0 0 auto;
+    align-self: start;
+    min-width: 0;
+  }
+  #compact-options-chain > div.overflow-hidden {
+    width: 100%;
+    min-width: 0;
+    height: fit-content;
+    max-height: none;
+    flex: 0 0 auto;
+    align-self: start;
+  }
+  #compact-options-chain #compact-options-table {
+    width: 100%;
+    max-width: 100%;
+    height: fit-content;
+    table-layout: fixed;
+    border-collapse: collapse;
+  }
+  #compact-options-chain #compact-options-table th:nth-child(1),
+  #compact-options-chain #compact-options-table td:nth-child(1),
+  #compact-options-chain #compact-options-table th:nth-child(7),
+  #compact-options-chain #compact-options-table td:nth-child(7) {
+    width: 12% !important;
+  }
+  #compact-options-chain #compact-options-table th:nth-child(2),
+  #compact-options-chain #compact-options-table td:nth-child(2),
+  #compact-options-chain #compact-options-table th:nth-child(6),
+  #compact-options-chain #compact-options-table td:nth-child(6) {
+    width: 10.5% !important;
+  }
+  #compact-options-chain #compact-options-table th:nth-child(3),
+  #compact-options-chain #compact-options-table td:nth-child(3),
+  #compact-options-chain #compact-options-table th:nth-child(5),
+  #compact-options-chain #compact-options-table td:nth-child(5) {
+    width: 20.5% !important;
+  }
+  #compact-options-chain #compact-options-table th:nth-child(4),
+  #compact-options-chain #compact-options-table td:nth-child(4) {
+    width: 14% !important;
+  }
+  #compact-options-chain #compact-options-table th:nth-child(1),
+  #compact-options-chain #compact-options-table td:nth-child(1) {
+    text-align: right !important;
+  }
+  #compact-options-chain #compact-options-table th:nth-child(2),
+  #compact-options-chain #compact-options-table td:nth-child(2) {
+    text-align: right !important;
+  }
+  #compact-options-chain #compact-options-table th:nth-child(3),
+  #compact-options-chain #compact-options-table td:nth-child(3) {
+    text-align: center !important;
+  }
+  #compact-options-chain #compact-options-table th:nth-child(4),
+  #compact-options-chain #compact-options-table td:nth-child(4),
+  #compact-options-chain #compact-options-table th:nth-child(5),
+  #compact-options-chain #compact-options-table td:nth-child(5) {
+    text-align: center !important;
+  }
+  #compact-options-chain #compact-options-table th:nth-child(6),
+  #compact-options-chain #compact-options-table td:nth-child(6) {
+    text-align: left !important;
+  }
+  #compact-options-chain #compact-options-table th:nth-child(7),
+  #compact-options-chain #compact-options-table td:nth-child(7) {
+    text-align: left !important;
+  }
+  #compact-options-chain #compact-options-table th {
+    padding: 6px 4px !important;
+    font-size: 8.5px !important;
+    letter-spacing: 0 !important;
+    line-height: 1.15 !important;
+    white-space: nowrap !important;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.25) !important;
+  }
+  #compact-options-chain #compact-options-table td {
+    display: table-cell !important;
+    box-sizing: border-box !important;
+    vertical-align: middle !important;
+    height: 42px !important;
+    padding: 3px 4px !important;
+    font-family: inherit !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    line-height: 1.18 !important;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.12) !important;
+  }
+  #compact-options-chain #compact-options-table td.coi-rel-cell {
+    min-width: 0;
+    padding: 3px 4px !important;
+  }
+  #compact-options-chain .coi-rel-wrap {
+    height: 36px;
+    min-height: 36px;
+    max-height: 36px;
+    gap: 0;
+    padding: 0;
+    overflow: visible;
+  }
+  #compact-options-chain #compact-options-table td:nth-child(3) div,
+  #compact-options-chain #compact-options-table td:nth-child(3) span,
+  #compact-options-chain #compact-options-table td:nth-child(5) div,
+  #compact-options-chain #compact-options-table td:nth-child(5) span {
+    font-family: inherit !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    line-height: 1.16 !important;
+    white-space: nowrap !important;
+  }
+
   /* ---- Neon pulse animations (box-shadow + text-shadow) ---- */
   @keyframes coi-neon-pulse {
     0%, 100% { box-shadow: 0 0 3px var(--coi-glow, #00ff88); }
