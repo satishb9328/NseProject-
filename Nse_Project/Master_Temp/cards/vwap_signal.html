@@ -87,6 +87,27 @@
   // lookback) is retained without immediate eviction.
   const closedCandles = [];
 
+  // Timestamp-keyed Map for completed 2m candles: duplicate `ts` values are merged in
+  // place (never appended twice) and the array is rebuilt sorted ascending by `ts`, so
+  // bars[len-2] and bars[len-1] are always two distinct consecutive 2m candles.
+  const closedCandleMap = new Map();
+  const syncClosedCandles = (cap = 20) => {
+    const kept = Array.from(closedCandleMap.values())
+      .sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0))
+      .slice(-cap);
+    closedCandleMap.clear();
+    for (const bar of kept) closedCandleMap.set(Number(bar.ts), bar);
+    closedCandles.length = 0;
+    for (const bar of kept) closedCandles.push(bar);
+    lastClosed = closedCandles[closedCandles.length - 1] || null;
+  };
+  const upsertClosedCandle = (bar) => {
+    const ts = Number(bar && bar.ts);
+    if (!Number.isFinite(ts)) return;
+    closedCandleMap.set(ts, bar);
+    syncClosedCandles(20);
+  };
+
   // ── Backend seed hydration (skip the ~30-minute warm-up after F5) ─────────
   // views.py renders the last 20 completed 2m candles (OHLC + CVD) into a
   // <script type="application/json" id="seed-2m-candles"> via json_script. Parse,
@@ -98,19 +119,15 @@
     let raw = null;
     try { raw = JSON.parse(el.textContent || '[]'); } catch (e) { raw = null; }
     if (!Array.isArray(raw) || raw.length === 0) return;
-    const bars = [];
     for (const b of raw) {
       if (!b || typeof b !== 'object') continue;
       const o = number(b.open), h = number(b.high), l = number(b.low), c = number(b.close);
       if (o === null || h === null || l === null || c === null) continue;
-      bars.push({ ts: number(b.ts), open: o, high: h, low: l, close: c, cvd_value: number(b.cvd) });
+      const ts = number(b.ts);
+      if (ts === null) continue;
+      closedCandleMap.set(ts, { ts: ts, open: o, high: h, low: l, close: c, cvd_value: number(b.cvd) });
     }
-    if (!bars.length) return;
-    bars.sort((a, b) => (a.ts || 0) - (b.ts || 0));
-    while (bars.length > 20) bars.shift();
-    closedCandles.length = 0;
-    for (const bar of bars) closedCandles.push(bar);
-    lastClosed = closedCandles[closedCandles.length - 1] || null;
+    syncClosedCandles(20);
   }
 
   const minuteKey = (d) => {
@@ -133,18 +150,12 @@
     const now = new Date(), key = minuteKey(now);
     if (!candle || candle.key !== key) {
       if (candle) {
-        lastClosed = candle;
         // Freeze the completed 2m candle with the CVD observed at its close so the
         // divergence gate correlates price vs cumulative delta on the same boundary.
         candle.cvd_value = number(cvd);
-        // Dedup guard: if the last bar is the same 2m bucket as this closed candle
-        // (a backend-seeded bar), update it in place instead of pushing a duplicate.
-        if (closedCandles.length && closedCandles[closedCandles.length - 1].ts === candle.ts) {
-          closedCandles[closedCandles.length - 1] = candle;
-        } else {
-          closedCandles.push(candle);
-          if (closedCandles.length > 20) closedCandles.shift();
-        }
+        // Timestamp-keyed upsert: a duplicate 2m bucket is merged in place (never
+        // appended twice) and the array stays sorted ascending by `ts`.
+        upsertClosedCandle(candle);
       }
       candle = { key: key, ts: bucketTs(now), open: p, high: p, low: p, close: p };
     }

@@ -1,0 +1,97 @@
+# Spec-to-Plan Traceability Checkpoint
+metadata:
+  generated: "2026-11-18"
+  source_spec: "User request: Phase-1 Volume Flow Engine module plan"
+  target_plan: "plan.md"
+
+summary:
+  total_requirements: 7
+  covered_requirements: 7
+  missing_requirements: 0
+  coverage_percentage: 100.0
+
+requirements:
+  - req_id: "REQ-001"
+    req_description: "Keep Phase-1 implementation isolated to the new volume_flow_engine.py module; do not modify existing formulas or add integration."
+    priority: "P1"
+    plan_mapping:
+      phase: "Phase-1"
+      phase_name: "Volume Flow Engine module"
+      items:
+        - item_id: "1.1"
+          description: "Establish module contracts and deterministic test fixtures."
+        - item_id: "1.5"
+          description: "Complete unit coverage and module verification."
+    notes: "Implementation scope is one new production module plus its requested new unit-test file."
+  - req_id: "REQ-002"
+    req_description: "Define class structure, dataclasses, and public engine API."
+    priority: "P1"
+    plan_mapping:
+      phase: "Phase-1"
+      phase_name: "Volume Flow Engine module"
+      items:
+        - item_id: "1.1"
+          description: "Establish module contracts and deterministic test fixtures."
+    notes: ""
+  - req_id: "REQ-003"
+    req_description: "Design bounded internal buffers and correct cumulative VTT delta/reset tracking."
+    priority: "P1"
+    plan_mapping:
+      phase: "Phase-1"
+      phase_name: "Volume Flow Engine module"
+      items:
+        - item_id: "1.2"
+          description: "Implement VTT delta tracking and state resets."
+    notes: ""
+  - req_id: "REQ-004"
+    req_description: "Calculate 20s/40s/60s call and put volume velocities with timestamp, expiry, freshness, and coverage handling."
+    priority: "P1"
+    plan_mapping:
+      phase: "Phase-1"
+      phase_name: "Volume Flow Engine module"
+      items:
+        - item_id: "1.3"
+          description: "Implement 20s/40s/60s volume aggregation."
+    notes: ""
+  - req_id: "REQ-005"
+    req_description: "Use a bounded nonblocking queue, single worker, safe lifecycle, and thread-safe immutable snapshots."
+    priority: "P1"
+    plan_mapping:
+      phase: "Phase-1"
+      phase_name: "Volume Flow Engine module"
+      items:
+        - item_id: "1.4"
+          description: "Implement quote-side flow, spot metrics, and immutable snapshots."
+    notes: ""
+  - req_id: "REQ-006"
+    req_description: "Provide quote-side flow and canonical spot velocity/acceleration outputs."
+    priority: "P1"
+    plan_mapping:
+      phase: "Phase-1"
+      phase_name: "Volume Flow Engine module"
+      items:
+        - item_id: "1.4"
+          description: "Implement quote-side flow, spot metrics, and immutable snapshots."
+    notes: ""
+  - req_id: "REQ-007"
+    req_description: "Provide deterministic standalone unit tests for formulas, resets, queue behavior, coverage, spot metrics, and concurrency."
+    priority: "P1"
+    plan_mapping:
+      phase: "Phase-1"
+      phase_name: "Volume Flow Engine module"
+      items:
+        - item_id: "1.1"
+          description: "Establish module contracts and deterministic test fixtures."
+        - item_id: "1.5"
+          description: "Complete unit coverage and module verification."
+    notes: ""
+
+missing_requirements: []
+orphan_plan_items: []
+
+validation:
+  passed: true
+  errors: []
+  warnings:
+    - "No constitution.md or project-topology.md was found; no group labels apply."
+    - "The user request serves as the feature specification; no separate spec.md exists."

@@ -1,0 +1,99 @@
+# =============================================================================
+# Signal Validation System — Logger configuration (Phase 1 Contract)
+# -----------------------------------------------------------------------------
+# Read by the long-lived `run_logger.py` process (Phase 3). This file only
+# declares the CONTRACT for Phase 1; no implementation depends on it yet.
+#
+# SAFETY CONTRACT: this system is strictly read-only against the live platform.
+# It SUBSCRIBEs to the publish channel and GETs the snapshot + market-state
+# keys. It never writes to any existing Redis key, never publishes, and never
+# imports any module outside Signal_Validation/.
+# =============================================================================
+
+version: 1
+
+# Forward-return horizons (seconds). Ascending. max(horizons) drives the ring
+# buffer depth, so 120 is the largest buffer horizon here.
+horizons: [15, 30, 60, 120]
+
+timezone:
+  name: "Asia/Kolkata"
+  utc_offset: "+05:30"
+
+# ---------------------------------------------------------------------------
+# Redis (read-only). Every key can be overridden via SIGVAL_* env vars.
+# ---------------------------------------------------------------------------
+redis:
+  url: "redis://127.0.0.1:6379/0"          # SIGVAL_REDIS_URL
+  channel: "gamma:live_options_updated"    # SIGVAL_REDIS_CHANNEL
+  data_key: "live_options_data"            # SIGVAL_REDIS_DATA_KEY (the option-chain snapshot)
+  market_state_key_prefix: "market_state"  # SIGVAL_MARKET_STATE_KEY_PREFIX -> key = <prefix>:<IST-date>
+  socket_timeout_seconds: 5
+  socket_connect_timeout_seconds: 5
+  decode_responses: true
+  read_only: true                          # HARD SAFETY: client must never SET/PUBLISH/DEL
+
+# ---------------------------------------------------------------------------
+# Storage. SIGVAL_DATA_DIR overrides data_dir and relocates the whole tree.
+# Resolved defaults (data_dir = D:/Signal_Validation_Data):
+#   raw       -> D:/Signal_Validation_Data/raw
+#   processed -> D:/Signal_Validation_Data/processed
+#   reports   -> D:/Signal_Validation_Data/reports
+#   logs      -> D:/Signal_Validation_Data/logs
+# ---------------------------------------------------------------------------
+storage:
+  data_dir: "D:/Signal_Validation_Data"
+  raw_subdir: "raw"
+  processed_subdir: "processed"
+  reports_subdir: "reports"
+  logs_subdir: "logs"
+  retention_days: 90                       # SIGVAL_RETENTION_DAYS
+
+# ---------------------------------------------------------------------------
+# Writer — append-only JSONL, one object per line, day-scoped files.
+# ---------------------------------------------------------------------------
+writer:
+  raw_filename_pattern: "signal_{date}.jsonl"           # {date} = IST YYYY-MM-DD
+  processed_filename_pattern: "signal_{date}.enriched.jsonl"
+  encoding: "utf-8"
+  append_only: true
+  flush_interval_seconds: 5                # SIGVAL_FLUSH_INTERVAL_SECONDS
+  flush_max_rows: 100                      # SIGVAL_FLUSH_MAX_ROWS
+  truncate_trailing_partial_line_on_start: true
+
+# ---------------------------------------------------------------------------
+# Enrichment — deferred forward-value fill from a bounded ring buffer.
+# ---------------------------------------------------------------------------
+enrichment:
+  warmup_seconds: 120                      # buffer must be >= this deep before finalizing
+  ring_buffer_max_seconds: 120             # == max(horizons)
+  max_gap_seconds: 10                      # gap > this invalidates in-flight horizons
+  pin_contract: true                       # CE/PE forward uses captured atm_strike (never re-derived ATM)
+
+# ---------------------------------------------------------------------------
+# Dedup — skip a snapshot whose key was already processed.
+# ---------------------------------------------------------------------------
+dedup:
+  enabled: true
+  key_fields: ["updated_at", "seq"]        # skip when both match the last captured row
+
+# ---------------------------------------------------------------------------
+# Quality gates.
+# ---------------------------------------------------------------------------
+quality:
+  min_spot: 0.0                            # spot must be > 0 to be captured at all
+  drop_if_spot_missing: true
+  allow_stale: false                       # stale rows are captured but flagged (never silently dropped)
+  require_feed_connected: false            # capture regardless; evaluator excludes disconnected rows
+  atm_selection: "nearest_strike"          # ATM = active-expiry chain strike minimizing |strike - spot|
+
+# ---------------------------------------------------------------------------
+# Health + logging.
+# ---------------------------------------------------------------------------
+health:
+  health_file: "health.json"               # written under logs_dir
+  heartbeat_interval_seconds: 5
+
+logging:
+  level: "INFO"                            # SIGVAL_LOG_LEVEL
+  format: "%(asctime)s %(levelname)s %(name)s %(message)s"

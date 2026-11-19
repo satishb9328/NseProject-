@@ -352,6 +352,10 @@ class CVDEngine:
         self._redis_down = False
         self._session_date: Optional[date] = None
         self._states: Dict[str, dict] = {}
+        # Per-symbol monotonic high-water mark of the most recently emitted 2m bucket
+        # (epoch seconds). Late ticks belonging to an already-emitted bucket are dropped
+        # so a closed candle can never be reopened or re-emitted.
+        self._last_emitted_bucket_ts: Dict[str, int] = {}
 
         self.logger = logging.getLogger(f"{__name__}.CVDEngine")
 
@@ -377,6 +381,10 @@ class CVDEngine:
     def ingest(self, tick: "CVDTick") -> bool:
         """Enqueue a tick. Non-blocking; drops the oldest tick if the queue is full."""
         if self._symbol_allowlist is not None and tick.symbol not in self._symbol_allowlist:
+            return False
+        # Fast-path: drop late ticks whose 2m bucket has already been emitted. The
+        # authoritative (lock-protected) check also runs in ``_process_tick``.
+        if self._is_stale_bucket(tick.symbol, tick.timestamp):
             return False
         try:
             self._tick_queue.put_nowait(tick)
@@ -472,6 +480,10 @@ class CVDEngine:
         if not tick.symbol:
             return
         ts = self._to_ist(tick.timestamp)
+        # Authoritative late-tick guard (runs under the state lock): never reopen an
+        # already-emitted 2m bucket.
+        if self._is_stale_bucket(tick.symbol, ts):
+            return
         self._check_session_reset(ts)
         st = self._state_for(tick.symbol)
 
@@ -536,19 +548,35 @@ class CVDEngine:
             if not closed.empty:
                 for bucket_ts, grp in closed.groupby("bucket", sort=True):
                     grp = grp.sort_values("ts")
-                    to_publish.append(self._emit_candle(symbol, st, bucket_ts, grp))
+                    candle = self._emit_candle(symbol, st, bucket_ts, grp)
+                    if candle is not None:
+                        to_publish.append(candle)
 
             st["buffer"] = open_rows.to_dict("records")
 
         return to_publish
 
-    def _emit_candle(self, symbol, st, bucket_ts, grp) -> dict:
+    def _emit_candle(self, symbol, st, bucket_ts, grp) -> Optional[dict]:
         open_ = float(grp["price"].iloc[0])
         high = float(grp["price"].max())
         low = float(grp["price"].min())
         close = float(grp["price"].iloc[-1])
         volume = int(grp["volume"].sum())
         delta = float(grp["delta"].sum())
+
+        # Per-symbol monotonic high-water mark: a 2m bucket may close only once.
+        bucket_ts_int = self._bucket_epoch_seconds(bucket_ts)
+        self._last_emitted_bucket_ts[symbol] = bucket_ts_int
+
+        # Zero-volume phantom candle: advance the high-water mark but do NOT emit, so
+        # downstream callbacks never overwrite live ofi_imbalance / rel_vol_ratio /
+        # cvd_change_3 with the neutral 0 / 1.00 / 0 defaults.
+        if volume <= 0:
+            self.logger.info(
+                "CVD: suppressed zero-volume candle %s @ %s",
+                symbol, pd.Timestamp(bucket_ts).isoformat(),
+            )
+            return None
 
         # Order-flow split within this 2m candle: aggressive buy vs sell volume.
         # Each tick delta is already signed (+vol buy / -vol sell / 0 inside spread).
@@ -626,6 +654,16 @@ class CVDEngine:
         return pd.Timestamp(ts).floor(self._freq)
 
     @staticmethod
+    def _bucket_epoch_seconds(bucket_ts) -> int:
+        """Epoch-second integer of a 2-minute bucket boundary."""
+        return int(pd.Timestamp(bucket_ts).timestamp())
+
+    def _is_stale_bucket(self, symbol: str, ts: datetime) -> bool:
+        """True if ``ts`` belongs to a 2m bucket that was already emitted."""
+        bucket = self._bucket_epoch_seconds(self._floor_bucket(self._to_ist(ts)))
+        return bucket <= self._last_emitted_bucket_ts.get(symbol, 0)
+
+    @staticmethod
     def _to_ist(ts: datetime) -> datetime:
         if ts.tzinfo is None:
             return ts.replace(tzinfo=IST)
@@ -644,6 +682,7 @@ class CVDEngine:
 
     def _reset_all(self) -> None:
         self._states.clear()
+        self._last_emitted_bucket_ts.clear()
         self.logger.info("CVD state reset for a new trading session (09:15 IST).")
 
     def _state_for(self, symbol: str) -> dict:

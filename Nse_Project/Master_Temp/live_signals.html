@@ -45,7 +45,7 @@
   .cvd-neutral { color: #eab308; }
   .gamma-snapshot-grid { grid-template-columns: minmax(0, 1fr); }
   @media (min-width: 1024px) {
-    .gamma-snapshot-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1fr); }
+    .gamma-snapshot-grid { grid-template-columns: minmax(320px, 0.96fr) minmax(435px, 475px) minmax(380px, 1.14fr) !important; }
   }
 
   section.relative.overflow-hidden.rounded-3xl.glass.px-6 {
@@ -157,6 +157,8 @@
 
   /* ---- Compact Options Chain sizing overrides ---- */
   #compact-options-chain {
+    width: 100%;
+    max-width: 475px;
     height: fit-content;
     max-height: none;
     flex: 0 0 auto;
@@ -182,7 +184,7 @@
   #compact-options-chain #compact-options-table td:nth-child(1),
   #compact-options-chain #compact-options-table th:nth-child(7),
   #compact-options-chain #compact-options-table td:nth-child(7) {
-    width: 12% !important;
+    width: 11.5% !important;
   }
   #compact-options-chain #compact-options-table th:nth-child(2),
   #compact-options-chain #compact-options-table td:nth-child(2),
@@ -194,11 +196,11 @@
   #compact-options-chain #compact-options-table td:nth-child(3),
   #compact-options-chain #compact-options-table th:nth-child(5),
   #compact-options-chain #compact-options-table td:nth-child(5) {
-    width: 20.5% !important;
+    width: 21.5% !important;
   }
   #compact-options-chain #compact-options-table th:nth-child(4),
   #compact-options-chain #compact-options-table td:nth-child(4) {
-    width: 14% !important;
+    width: 13% !important;
   }
   #compact-options-chain #compact-options-table th:nth-child(1),
   #compact-options-chain #compact-options-table td:nth-child(1) {
@@ -227,7 +229,7 @@
     text-align: left !important;
   }
   #compact-options-chain #compact-options-table th {
-    padding: 6px 4px !important;
+    padding: 3px 2px !important;
     font-size: 8.5px !important;
     letter-spacing: 0 !important;
     line-height: 1.15 !important;
@@ -239,7 +241,7 @@
     box-sizing: border-box !important;
     vertical-align: middle !important;
     height: 42px !important;
-    padding: 3px 4px !important;
+    padding: 3px 2px !important;
     font-family: inherit !important;
     font-size: 11px !important;
     font-weight: 600 !important;
@@ -248,7 +250,28 @@
   }
   #compact-options-chain #compact-options-table td.coi-rel-cell {
     min-width: 0;
-    padding: 3px 4px !important;
+    padding: 3px 2px !important;
+  }
+  #compact-options-chain #compact-options-table td.day-call-wall-strike {
+    background: rgba(239, 68, 68, 0.24) !important;
+    color: #fecaca !important;
+    box-shadow: inset 0 0 0 1.5px rgba(248, 113, 113, 0.75) !important;
+    border-radius: 4px !important;
+    font-weight: 800 !important;
+  }
+  #compact-options-chain #compact-options-table td.day-put-wall-strike {
+    background: rgba(34, 197, 94, 0.24) !important;
+    color: #bbf7d0 !important;
+    box-shadow: inset 0 0 0 1.5px rgba(74, 222, 128, 0.75) !important;
+    border-radius: 4px !important;
+    font-weight: 800 !important;
+  }
+  #compact-options-chain #compact-options-table td.day-both-wall-strike {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.26) 50%, rgba(34, 197, 94, 0.26) 50%) !important;
+    color: #fef08a !important;
+    box-shadow: inset 0 0 0 1.5px rgba(250, 204, 21, 0.8) !important;
+    border-radius: 4px !important;
+    font-weight: 800 !important;
   }
   #compact-options-chain .coi-rel-wrap {
     height: 36px;
@@ -598,6 +621,107 @@
     padding: 6px;
   }
   #math-unified-canvas { display: block; width: 100%; height: 390px; cursor: crosshair; }
+
+  /* ---- VWAP + candle confirmation: compact three-row presentation ---- */
+  #vwap-signal-card {
+    gap: 4px !important;
+    padding: 8px !important;
+  }
+  #vwap-signal-card > div:first-child {
+    margin: 0 0 2px !important;
+  }
+  #vwap-signal-card > .grid {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    grid-template-areas:
+      "future vwap source"
+      "price-gate price-gate price-gate"
+      "candle-gate candle-gate candle-gate";
+    gap: 4px !important;
+  }
+  #vwap-signal-card > .grid > div {
+    display: contents !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+  #vwap-signal-card > .grid > div > p {
+    display: none !important;
+  }
+  #vwap-signal-card > .grid > div > .space-y-1 {
+    display: contents !important;
+  }
+  #vwap-signal-card > .grid > div > .space-y-1 > * {
+    margin: 0 !important;
+  }
+  #vwap-signal-card > .grid > div:first-child > .space-y-1 > div:nth-child(1) {
+    grid-area: future;
+  }
+  #vwap-signal-card > .grid > div:first-child > .space-y-1 > div:nth-child(2) {
+    grid-area: vwap;
+  }
+  #vwap-signal-card > .grid > div:first-child > .space-y-1 > div:nth-child(3) {
+    grid-area: source;
+  }
+  #vwap-signal-card > .grid > div:first-child > .space-y-1 > div:nth-child(-n+3) {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    gap: 0 !important;
+    min-width: 0;
+    padding: 4px 8px !important;
+    font-size: 11px !important;
+    line-height: 1.15 !important;
+  }
+  #vwap-signal-card > .grid > div:nth-child(2) > .space-y-1 > div:nth-child(-n+3) {
+    display: none !important;
+  }
+  #vwap-signal-card #vwap-side {
+    grid-area: price-gate;
+    margin: 0 !important;
+    padding: 4px 8px !important;
+    font-size: 10px !important;
+  }
+  #vwap-signal-card #vwap-candle-side {
+    grid-area: candle-gate;
+    margin: 0 !important;
+    padding: 4px 8px !important;
+    font-size: 10px !important;
+  }
+  #vwap-signal-card > div:last-child {
+    display: grid !important;
+    grid-template-columns: max-content minmax(0, 1fr) max-content !important;
+    align-items: center !important;
+    gap: 4px !important;
+    margin: 0 !important;
+    padding: 4px 8px !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+  #vwap-signal-card > div:last-child > span:first-child {
+    font-size: 8px !important;
+    white-space: nowrap !important;
+  }
+  #vwap-signal-card > div:last-child > span:nth-child(2) {
+    display: contents !important;
+  }
+  #vwap-signal-card #vwap-confluence {
+    min-width: 0;
+    font-size: 8px !important;
+    letter-spacing: -0.035em !important;
+    white-space: nowrap !important;
+  }
+  #vwap-signal-card #vwap-verdict-badge {
+    padding: 3px 5px !important;
+    font-size: 8px !important;
+    line-height: 1.1 !important;
+    white-space: nowrap !important;
+  }
 </style>
 {% endblock %}
 
@@ -1788,35 +1912,56 @@
     const yFor = v => topPad + (1 - (v - lo) / (hi - lo)) * plotH;
     const centerY = yFor(0);
 
-    ctx.font = '9px ui-monospace, Menlo, Consolas, monospace';
-    ctx.lineWidth = 1;
-    const tickCount = 5;
-    for (let i = 0; i < tickCount; i++) {
-      const frac = i / (tickCount - 1);
-      const v = lo + frac * (hi - lo);
-      const y = topPad + frac * plotH;
-      ctx.strokeStyle = 'rgba(51, 65, 85, 0.5)';
-      ctx.beginPath(); ctx.moveTo(leftPad, y); ctx.lineTo(leftPad + plotW, y); ctx.stroke();
-      ctx.fillStyle = '#64748b';
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillText(Math.abs(v) >= 10 ? v.toFixed(0) : v.toFixed(1), leftPad + plotW + 7, y);
-    }
+    const plotRight = leftPad + plotW;
+
+    // Vertical time grid lines.
     const vTicks = 6;
     for (let i = 0; i < vTicks; i++) {
       const x = leftPad + (i / (vTicks - 1)) * plotW;
       ctx.strokeStyle = 'rgba(51, 65, 85, 0.35)';
       ctx.beginPath(); ctx.moveTo(x, topPad); ctx.lineTo(x, topPad + plotH); ctx.stroke();
     }
-    ctx.save();
-    ctx.strokeStyle = 'rgba(250, 204, 21, 0.75)';
-    ctx.setLineDash([5, 4]);
-    ctx.lineWidth = 1.2;
-    ctx.beginPath(); ctx.moveTo(leftPad, centerY); ctx.lineTo(leftPad + plotW, centerY); ctx.stroke();
-    ctx.restore();
-    ctx.fillStyle = '#eab308';
-    ctx.font = 'bold 9px ui-monospace, Menlo, Consolas, monospace';
-    ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
-    ctx.fillText('0.0', leftPad + plotW + 7, centerY - 2);
+
+    // Y-axis scale ticks, horizontal reference grid lines + right axis divider.
+    const tickCount = 5;
+    for (let i = 0; i < tickCount; i++) {
+      const frac = i / (tickCount - 1);
+      const v = lo + frac * (hi - lo);
+      const y = topPad + frac * plotH;
+      const isZero = Math.abs(v) < 1e-9;
+
+      // Horizontal reference grid line across the full plot width.
+      if (isZero) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(250, 204, 21, 0.55)';
+        ctx.setLineDash([5, 4]);
+        ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(leftPad, y); ctx.lineTo(plotRight, y); ctx.stroke();
+        ctx.restore();
+      } else {
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.22)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(leftPad, y); ctx.lineTo(plotRight, y); ctx.stroke();
+      }
+
+      // Crisp 5px tick mark on the right axis border.
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.6)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(plotRight, y); ctx.lineTo(plotRight + 5, y); ctx.stroke();
+
+      // High-visibility scale label with explicit +/- signs and a single 0.0.
+      const label = isZero ? '0.0' : ((v > 0 ? '+' : '') + (Math.abs(v) >= 10 ? v.toFixed(0) : v.toFixed(1)));
+      ctx.font = '600 11.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+      ctx.fillStyle = '#e2e8f0';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, plotRight + 7, y);
+    }
+
+    // Vertical axis divider separating the plot from the right scale/pills column.
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(plotRight, topPad); ctx.lineTo(plotRight, topPad + plotH); ctx.stroke();
 
     if (!N) { updateUnifiedLegend(null); return; }
 
@@ -3396,6 +3541,57 @@
   }
 
   connect();
+})();
+</script>
+<script>
+function syncDayGammaWallStrikes() {
+  const compactBody = document.querySelector('#compact-options-chain #compact-options-table tbody');
+  if (!compactBody) return;
+
+  const parseStrike = (value) => {
+    const digits = String(value ?? '').replace(/[^\d]/g, '');
+    if (!digits) return null;
+    const strike = Number(digits);
+    return Number.isFinite(strike) ? strike : null;
+  };
+  const callWall = parseStrike(document.getElementById('day-call-wall')?.textContent);
+  const putWall = parseStrike(document.getElementById('day-put-wall')?.textContent);
+
+  compactBody.querySelectorAll('tr').forEach((row) => {
+    const strikeCell = row.querySelector('td:nth-child(4)');
+    if (!strikeCell) return;
+
+    strikeCell.classList.remove('day-call-wall-strike', 'day-put-wall-strike', 'day-both-wall-strike');
+    const strike = parseStrike(strikeCell.textContent);
+    const matchesCall = callWall !== null && strike === callWall;
+    const matchesPut = putWall !== null && strike === putWall;
+
+    if (matchesCall && matchesPut) strikeCell.classList.add('day-both-wall-strike');
+    else if (matchesCall) strikeCell.classList.add('day-call-wall-strike');
+    else if (matchesPut) strikeCell.classList.add('day-put-wall-strike');
+  });
+}
+
+(() => {
+  const callWall = document.getElementById('day-call-wall');
+  const putWall = document.getElementById('day-put-wall');
+  const compactBody = document.querySelector('#compact-options-chain #compact-options-table tbody');
+  const observer = new MutationObserver(syncDayGammaWallStrikes);
+
+  if (callWall) observer.observe(callWall, { childList: true, characterData: true, subtree: true });
+  if (putWall) observer.observe(putWall, { childList: true, characterData: true, subtree: true });
+  if (compactBody) observer.observe(compactBody, { childList: true, characterData: true, subtree: true });
+
+  const renderCompactChain = window.renderCompactChain;
+  if (typeof renderCompactChain === 'function') {
+    window.renderCompactChain = function (...args) {
+      const result = renderCompactChain.apply(this, args);
+      syncDayGammaWallStrikes();
+      return result;
+    };
+  }
+
+  syncDayGammaWallStrikes();
 })();
 </script>
 {% endblock %}

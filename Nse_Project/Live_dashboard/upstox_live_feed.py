@@ -292,6 +292,10 @@ _latest_cvd_change_3 = 0.0
 # closedCandles and skip the 30-minute ATR/divergence warm-up.
 _seed_candles_2m = deque(maxlen=NIFTY_2M_SEED_CANDLES_MAX)
 _seed_candles_date = None
+# Per-symbol monotonic high-water mark (epoch-ms) of the last closed 2m candle accepted
+# into the seed history. Out-of-order / duplicate / zero-volume bars are dropped here so
+# downstream sniper state and the seed deque never hold the same bucket twice.
+_last_symbol_candle_ts: dict[str, int] = {}
 # Live NIFTY index-future instrument key (FUTIDX). Its `atp` (average traded price)
 # is the real volume-weighted VWAP proxy that feeds market_state["vwap"].
 _nifty_future_key = None
@@ -1910,13 +1914,18 @@ def _compute_live_sentiment(instrument_data=None) -> tuple[float, float, float]:
 
 
 # ── 2m candle seed history (OHLC + CVD) for frontend warm-up hydration ────────
+def _candle_ts_ms(payload: dict) -> int:
+    """Epoch-ms of a candle payload's bucket-open timestamp (fallback: now)."""
+    ts_raw = payload.get("ts_open") if isinstance(payload, dict) else None
+    try:
+        return int(datetime.fromisoformat(str(ts_raw)).timestamp() * 1000)
+    except (TypeError, ValueError):
+        return int(time.time() * 1000)
+
+
 def _seed_candle_bar(payload: dict):
     """Compact a CVD-engine candle payload into {ts, open, high, low, close, cvd}."""
-    ts_raw = payload.get("ts_open")
-    try:
-        ts_ms = int(datetime.fromisoformat(str(ts_raw)).timestamp() * 1000)
-    except (TypeError, ValueError):
-        ts_ms = int(time.time() * 1000)
+    ts_ms = _candle_ts_ms(payload)
     try:
         return {
             "ts": ts_ms,
@@ -1956,9 +1965,17 @@ def _load_seed_candles_2m() -> None:
         if not isinstance(data, list):
             return
         _seed_candles_2m.clear()
+        seen_ts = set()
+        deduped = []
         for bar in data:
             if isinstance(bar, dict) and isinstance(bar.get("ts"), (int, float)):
-                _seed_candles_2m.append(bar)
+                ts = int(bar["ts"])
+                if ts in seen_ts:
+                    continue
+                seen_ts.add(ts)
+                deduped.append(bar)
+        deduped.sort(key=lambda b: int(b.get("ts") or 0))
+        _seed_candles_2m.extend(deduped[-NIFTY_2M_SEED_CANDLES_MAX:])
         if _seed_candles_2m:
             ts = _seed_candles_2m[-1].get("ts")
             try:
@@ -2189,12 +2206,52 @@ def _run_eod_sniper_evaluation(today_ist: str) -> None:
         logger.exception("VWAP Sniper (PE · C2-A) EOD evaluation failed for %s", today_ist)
 
 
+def _upsert_seed_candle_2m(bar: dict) -> None:
+    """Insert ``bar`` into ``_seed_candles_2m`` keyed by ts (no duplicates, sorted).
+
+    The deque is kept strictly ascending by ``ts`` and capped to
+    ``NIFTY_2M_SEED_CANDLES_MAX`` so ``bars[-2]`` / ``bars[-1]`` are always two
+    distinct consecutive 2m candles for the CE/PE sniper evaluators.
+    """
+    ts = int(bar.get("ts") or 0)
+    if ts <= 0:
+        return
+    for idx, existing in enumerate(_seed_candles_2m):
+        if int(existing.get("ts") or 0) == ts:
+            _seed_candles_2m[idx] = bar
+            return
+    _seed_candles_2m.append(bar)
+    ordered = sorted(_seed_candles_2m, key=lambda b: int(b.get("ts") or 0))
+    _seed_candles_2m.clear()
+    _seed_candles_2m.extend(ordered[-NIFTY_2M_SEED_CANDLES_MAX:])
+
+
 def _on_cvd_candle(payload: dict) -> None:
     """Record the latest cumulative CVD + append the candle to the 2m seed history."""
     global _latest_cumulative_cvd, _seed_candles_date
     global _latest_ofi_imbalance, _latest_rel_vol_ratio, _latest_cvd_change_3
+    global _last_symbol_candle_ts
     if not isinstance(payload, dict):
         return
+
+    symbol = payload.get("symbol")
+    candle_ts = _candle_ts_ms(payload)
+    volume = payload.get("volume")
+    vol_ok = isinstance(volume, (int, float)) and float(volume) > 0
+
+    # Guard 1: a zero-volume phantom candle must never overwrite live order-flow
+    # state (ofi_imbalance / rel_vol_ratio / cvd_change_3) with neutral defaults and
+    # must never enter the seed history.
+    if not vol_ok:
+        if symbol and candle_ts:
+            _last_symbol_candle_ts[symbol] = candle_ts
+        return
+    # Guard 2: drop out-of-order / duplicate closed buckets (ts <= last accepted ts).
+    if symbol and candle_ts and candle_ts <= _last_symbol_candle_ts.get(symbol, 0):
+        return
+    if symbol:
+        _last_symbol_candle_ts[symbol] = candle_ts
+
     cvd = payload.get("cvd")
     if isinstance(cvd, (int, float)):
         _latest_cumulative_cvd = float(cvd)
@@ -2224,7 +2281,7 @@ def _on_cvd_candle(payload: dict) -> None:
         _seed_candles_2m.clear()
     if bar_date is not None:
         _seed_candles_date = bar_date
-    _seed_candles_2m.append(bar)
+    _upsert_seed_candle_2m(bar)
     _persist_seed_candles_2m()
 
 

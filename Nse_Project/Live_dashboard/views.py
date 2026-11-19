@@ -859,6 +859,41 @@ def _read_market_state_for_today() -> dict:
     return load_market_state(get_live_options_redis())
 
 
+def _deduplicate_2m_candles(candles: list) -> list:
+    """Collapse duplicate 2m candles by integer ``ts`` into strictly ascending bars.
+
+    When the same timestamp appears more than once the entry with the greatest
+    ``volume`` wins (zero-volume duplicates never shadow a valid bar). The result is
+    sorted ascending and holds no duplicate ``ts`` values, so ``bars[-2]`` and
+    ``bars[-1]`` are always two distinct consecutive 2m candles.
+    """
+    if not candles:
+        return []
+    best: dict = {}
+    for candle in candles:
+        if not isinstance(candle, dict):
+            continue
+        ts = candle.get("ts")
+        if isinstance(ts, bool) or not isinstance(ts, (int, float)):
+            continue
+        key = int(ts)
+        try:
+            vol = float(candle.get("volume"))
+        except (TypeError, ValueError):
+            vol = 0.0
+        existing = best.get(key)
+        if existing is None:
+            best[key] = candle
+            continue
+        try:
+            existing_vol = float(existing.get("volume"))
+        except (TypeError, ValueError):
+            existing_vol = 0.0
+        if vol > existing_vol:
+            best[key] = candle
+    return [best[k] for k in sorted(best)]
+
+
 def _read_seed_candles_2m() -> list:
     """Return the last 20 completed 2m candles (OHLC + CVD) for frontend hydration.
 
@@ -873,7 +908,7 @@ def _read_seed_candles_2m() -> list:
         if not raw:
             return []
         data = json.loads(raw)
-        return data if isinstance(data, list) else []
+        return _deduplicate_2m_candles(data) if isinstance(data, list) else []
     except Exception:
         return []
 

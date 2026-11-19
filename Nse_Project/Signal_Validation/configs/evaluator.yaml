@@ -1,0 +1,97 @@
+# =============================================================================
+# Signal Validation System — Evaluator configuration (Phase 1 Contract)
+# -----------------------------------------------------------------------------
+# Read by the batch `run_evaluator.py` process (Phase 4). Declares thresholds,
+# cost model, split policy, and significance rules for judging whether the
+# existing Score / Bias / Momentum / Gamma Boost signals have real edge.
+# =============================================================================
+
+version: 1
+
+horizons: [15, 30, 60, 120]
+
+# ---------------------------------------------------------------------------
+# Paths. SIGVAL_DATA_DIR overrides data_dir; the four outputs are relocated
+# with it (see logger.yaml for the resolved defaults).
+# ---------------------------------------------------------------------------
+paths:
+  data_dir: "D:/Signal_Validation_Data"
+  raw_dir: "D:/Signal_Validation_Data/raw"
+  processed_dir: "D:/Signal_Validation_Data/processed"
+  reports_dir: "D:/Signal_Validation_Data/reports"
+  logs_dir: "D:/Signal_Validation_Data/logs"
+
+# ---------------------------------------------------------------------------
+# Signal direction convention (bullish = +1):
+#   score       -> sign(score - 50)
+#   bias        -> sign(bias)
+#   momentum    -> sign(momentum)
+#   gamma_boost -> sign(gamma_boost)
+#   iv_skew     -> -sign(iv_skew)   (falling put-minus-call skew is bullish)
+# ---------------------------------------------------------------------------
+signals:
+  score:
+    bull_threshold: 55                      # SIGVAL_SCORE_BULL_THRESHOLD (score >= 55 -> bull)
+    bear_threshold: 45                      # SIGVAL_SCORE_BEAR_THRESHOLD (score <= 45 -> bear)
+    neutral_band: [45, 55]                  # (exclusive) -> no call
+  direction:
+    score: "sign(score - 50)"
+    bias: "sign(bias)"
+    momentum: "sign(momentum)"
+    gamma_boost: "sign(gamma_boost)"
+    iv_skew: "-sign(iv_skew)"
+
+# ---------------------------------------------------------------------------
+# Labels. Economic (cost-adjusted) labels are the decision labels; directional
+# labels are diagnostics. A call is emitted only for threshold-crossing rows.
+# ---------------------------------------------------------------------------
+labels:
+  cost:
+    spot_points: 2.0                        # SIGVAL_COST_SPOT_POINTS (min |directed spot return|, index points)
+    option_pct: 1.0                         # SIGVAL_COST_OPTION_PCT  (min |directed premium return|, %)
+  neutral:
+    inside_buffer: "neutral"                # |directed return| < cost -> excluded from hit_rate, counted separately
+  mode: "economic"
+
+# ---------------------------------------------------------------------------
+# Chronological / walk-forward split. Time series: never shuffle.
+# ---------------------------------------------------------------------------
+split:
+  method: "chronological"
+  train_ratio: 0.70
+  validation_ratio: 0.15
+  test_ratio: 0.15
+  min_train_days: 10
+  min_test_days: 3
+  gap_seconds: 120                          # drop rows whose forward horizon crosses a split boundary
+
+# ---------------------------------------------------------------------------
+# Statistical significance.
+# ---------------------------------------------------------------------------
+significance:
+  alpha: 0.05                               # SIGVAL_ALPHA
+  multiple_testing: "bonferroni"            # applied across (signal x threshold x horizon) combos
+  bootstrap_iterations: 2000
+  bootstrap_ci: 0.95
+
+# ---------------------------------------------------------------------------
+# Sampling floors — refuse to report a metric below these cell sizes.
+# ---------------------------------------------------------------------------
+sampling:
+  min_sample_size: 100                      # SIGVAL_MIN_SAMPLE_SIZE (calls per cell)
+  min_successes: 30
+  min_failures: 30
+
+# ---------------------------------------------------------------------------
+# Metrics + report output.
+# ---------------------------------------------------------------------------
+metrics:
+  compute: ["hit_rate", "expectancy", "profit_factor", "drawdown", "sharpe_ratio"]
+  pnl_series: "per_call"                    # expectancy/drawdown/sharpe computed on per-call net P&L
+  annualization_factor: 252                 # only for period-based sharpe; per-trade sharpe unannualized
+
+report:
+  formats: ["json", "markdown"]
+  version_by_timestamp: true                # never overwrite previous reports
+  include_cost_sweep: true                  # report expectancy at 0x / 1x / 2x cost buffer
+  benchmarks: ["always_long", "always_short", "hold_spot"]

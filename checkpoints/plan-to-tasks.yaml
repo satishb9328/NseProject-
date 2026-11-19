@@ -1,0 +1,92 @@
+# Plan-to-Tasks Traceability Checkpoint
+metadata:
+  generated: "2026-11-18"
+  source_plan: "plan.md"
+  target_tasks: "plan.md (inline checklist)"
+
+summary:
+  total_plan_items: 5
+  covered_plan_items: 5
+  missing_plan_items: 0
+  coverage_percentage: 100.0
+  total_tasks_generated: 9
+  orphan_tasks: 0
+
+phases:
+  - phase_id: "Phase-1"
+    phase_name: "Volume Flow Engine module"
+    items:
+      - item_id: "1.1"
+        description: "Establish module contracts and deterministic test fixtures."
+        tasks:
+          - task_id: "T001"
+            description: "Create a standalone test harness, fake clock, instrument fixtures, and assertion helpers."
+          - task_id: "T002"
+            description: "Define immutable input/output dataclasses and the public engine API."
+        notes: "The contract is frozen before calculation implementation."
+      - item_id: "1.2"
+        description: "Implement VTT delta tracking and state resets."
+        tasks:
+          - task_id: "T003"
+            description: "Implement histories, timestamp ordering/deduplication, bounded pruning, VTT transitions, and expiry/session resets."
+          - task_id: "T007"
+            description: "Test VTT initialization/increase/equality/reset and related history gates."
+        notes: ""
+      - item_id: "1.3"
+        description: "Implement 20s/40s/60s volume aggregation."
+        tasks:
+          - task_id: "T004"
+            description: "Implement near-ATM weighted multi-horizon rates, coverage/freshness, and optional baselines."
+          - task_id: "T007"
+            description: "Test volume horizons, strike weighting, expiry filtering, stale/coverage gates, and baseline behavior."
+        notes: ""
+      - item_id: "1.4"
+        description: "Implement quote-side flow, spot metrics, and immutable snapshots."
+        tasks:
+          - task_id: "T005"
+            description: "Implement aggressor classification, spot velocity/acceleration, and realized volatility."
+          - task_id: "T006"
+            description: "Implement the bounded queue, worker lifecycle, overflow health, and immutable snapshot publication."
+          - task_id: "T008"
+            description: "Test quote flow, spot calculations, queue behavior, lifecycle, and concurrency."
+        notes: ""
+      - item_id: "1.5"
+        description: "Complete unit coverage and module verification."
+        tasks:
+          - task_id: "T007"
+            description: "Add deterministic calculation and data-quality tests."
+          - task_id: "T008"
+            description: "Add worker/queue/concurrency tests."
+          - task_id: "T009"
+            description: "Run the suite and verify dependency isolation and scoped changes."
+        notes: ""
+
+missing_plan_items: []
+orphan_tasks: []
+
+upstream_trace:
+  - plan_item: "1.1"
+    source_requirements: ["REQ-001", "REQ-002", "REQ-007"]
+    tasks: ["T001", "T002"]
+    full_trace: "REQ-001,REQ-002,REQ-007 → Phase-1.1 → T001,T002"
+  - plan_item: "1.2"
+    source_requirements: ["REQ-003"]
+    tasks: ["T003", "T007"]
+    full_trace: "REQ-003 → Phase-1.2 → T003,T007"
+  - plan_item: "1.3"
+    source_requirements: ["REQ-004"]
+    tasks: ["T004", "T007"]
+    full_trace: "REQ-004 → Phase-1.3 → T004,T007"
+  - plan_item: "1.4"
+    source_requirements: ["REQ-005", "REQ-006"]
+    tasks: ["T005", "T006", "T008"]
+    full_trace: "REQ-005,REQ-006 → Phase-1.4 → T005,T006,T008"
+  - plan_item: "1.5"
+    source_requirements: ["REQ-001", "REQ-007"]
+    tasks: ["T007", "T008", "T009"]
+    full_trace: "REQ-001,REQ-007 → Phase-1.5 → T007,T008,T009"
+
+validation:
+  passed: true
+  errors: []
+  warnings: []
