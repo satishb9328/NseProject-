@@ -354,6 +354,17 @@
   @media (max-width: 640px) { .math-metric-row { grid-template-columns: 1fr; gap: .65rem; } }
   @media (prefers-reduced-motion: reduce) { .math-progress-track .math-fill, .math-progress-track .math-marker { transition: none; } .math-progress-track .math-marker.is-visible { animation: none; } }
 
+  /* ---- LTP Parity: compact dark badges (additive, below the 6 metric rows) ---- */
+  .math-parity-row { grid-template-columns: 1fr; }
+  .math-parity-badges { display: flex; flex-wrap: wrap; gap: .375rem; margin-top: .35rem; }
+  .math-parity-badge { display: inline-flex; align-items: center; gap: .35rem; padding: .15rem .55rem; border: 1px solid rgba(51, 65, 85, .85); border-radius: 999px; background: rgba(2, 6, 23, .72); color: #cbd5e1; font-size: 10px; font-weight: 700; line-height: 1.45; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .math-parity-badge .v { color: #f8fafc; }
+  .math-parity-regime { font-weight: 800; letter-spacing: .06em; }
+  .math-parity-regime.bullish { color: #4ade80; border-color: rgba(74, 222, 128, .5); background: rgba(34, 197, 94, .12); }
+  .math-parity-regime.bearish { color: #f87171; border-color: rgba(248, 113, 113, .5); background: rgba(239, 68, 68, .12); }
+  .math-parity-regime.chop { color: #facc15; border-color: rgba(250, 204, 21, .4); background: rgba(250, 204, 21, .08); }
+  .math-parity-regime.transition { color: #a5b4fc; border-color: rgba(165, 180, 252, .4); background: rgba(99, 102, 241, .10); }
+
   @keyframes pulse-green {
     0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.75); border-color: rgba(34, 197, 94, 0.9); }
     50% { box-shadow: 0 0 0 10px rgba(34, 197, 94, 0.18); border-color: rgba(34, 197, 94, 1); }
@@ -778,6 +789,29 @@
           </div>
         </section>
 
+        <section id="fno-decision-layer" class="rounded-xl border border-violet-500/30 bg-violet-950/20 px-3 py-3">
+          <div class="mb-3 flex items-center justify-between gap-3">
+            <h2 class="text-[11px] font-bold uppercase tracking-[.18em] text-violet-300">DECISION LAYER · Logic &amp; Bias</h2>
+            {% if daily_report.oi_date %}
+            <span class="rounded-lg border border-slate-700 bg-slate-900/60 px-2 py-1 font-mono text-[10px] text-slate-400">{{ daily_report.oi_date }}</span>
+            {% endif %}
+          </div>
+          <div class="grid grid-cols-1 gap-2 text-xs">
+            <div class="flex items-start justify-between gap-3 rounded-lg border border-slate-800 bg-slate-950/40 px-2 py-2">
+              <span class="text-[10px] font-semibold uppercase tracking-[.14em] text-slate-500">ACTION</span>
+              <span class="text-right font-mono text-sm font-semibold text-slate-100">{{ daily_report.action|default:"N/A" }}</span>
+            </div>
+            <div class="flex items-start justify-between gap-3 rounded-lg border border-slate-800 bg-slate-950/40 px-2 py-2">
+              <span class="text-[10px] font-semibold uppercase tracking-[.14em] text-slate-500">TOMORROW'S BIAS</span>
+              <span class="text-right text-sm font-semibold {% if 'BEARISH' in daily_report.bias %}text-red-400{% elif 'BULLISH' in daily_report.bias %}text-green-400{% else %}text-amber-300{% endif %}">{{ daily_report.bias|default:"—" }}</span>
+            </div>
+            <div class="rounded-lg border-l-2 border-sky-500/60 bg-slate-950/30 px-3 py-2">
+              <span class="block text-[10px] font-semibold uppercase tracking-[.14em] text-slate-500">ADVICE</span>
+              <p class="mt-1 text-sm leading-5 text-slate-300">{{ daily_report.advice|default:"Sync FNO data to view bias." }}</p>
+            </div>
+          </div>
+        </section>
+
         <section id="macro-option-chain" class="flex flex-col rounded-xl border border-slate-800 bg-slate-900/40 p-2">
           <div class="mb-2 flex items-center justify-between gap-3">
             <h2 class="text-xs font-bold uppercase tracking-[.18em] text-slate-200">TOTAL OPTION CHAIN (MACRO)</h2>
@@ -1096,6 +1130,20 @@
                   <span class="math-marker"></span>
                 </div>
                 <div class="math-scale"><span>-20</span><span>-10</span><span>0</span><span>10</span><span>20</span></div>
+              </div>
+            </div>
+            <div class="math-metric-row math-parity-row" role="group" aria-label="LTP parity">
+              <div class="math-metric-copy">
+                <span class="math-metric-label">LTP Parity · Synthetic Future</span>
+                <span class="math-parity-badges">
+                  <span id="ltp-parity-atm" class="math-parity-badge">ATM <span class="v">--</span></span>
+                  <span id="ltp-parity-spread" class="math-parity-badge">Spread <span class="v">--</span></span>
+                  <span id="ltp-parity-norm" class="math-parity-badge">Norm% <span class="v">--</span></span>
+                  <span id="ltp-parity-velocity" class="math-parity-badge">Vel% <span class="v">--</span></span>
+                  <span id="ltp-parity-synth" class="math-parity-badge">Synth Fut <span class="v">--</span></span>
+                  <span id="ltp-parity-basis" class="math-parity-badge">Basis <span class="v">--</span></span>
+                  <span id="ltp-parity-regime" class="math-parity-badge math-parity-regime">--</span>
+                </span>
               </div>
             </div>
           </div>
@@ -1725,6 +1773,52 @@
     const delta_wt_impact = Number.isFinite(Number(data.delta_wt_impact)) ? Number(data.delta_wt_impact) : 0;
     applyMathConsolePulse(score, bias, momentum, delta_wt_impact);
     recordMathLinesPoint(data);
+  }
+
+  function renderLtpParity(data) {
+    const p = (data && data.ltp_parity && typeof data.ltp_parity === 'object') ? data.ltp_parity : null;
+    const setVal = (id, text) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const v = el.querySelector('.v');
+      if (v) v.textContent = text; else el.textContent = text;
+    };
+    const fmt = (value, decimals = 2, suffix = '') => {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return '--';
+      return `${n > 0 ? '+' : ''}${n.toFixed(decimals)}${suffix}`;
+    };
+    const fmtPlain = (value, decimals = 2) => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n.toFixed(decimals) : '--';
+    };
+
+    if (!p) {
+      ['ltp-parity-atm', 'ltp-parity-spread', 'ltp-parity-norm', 'ltp-parity-velocity', 'ltp-parity-synth', 'ltp-parity-basis']
+        .forEach(id => setVal(id, '--'));
+      const regimeEl = document.getElementById('ltp-parity-regime');
+      if (regimeEl) { regimeEl.textContent = '--'; regimeEl.className = 'math-parity-badge math-parity-regime'; }
+      return;
+    }
+
+    setVal('ltp-parity-atm', fmtPlain(p.atm_strike, 0));
+    setVal('ltp-parity-spread', fmt(p.spread, 2));
+    setVal('ltp-parity-norm', fmt(p.norm_spread_pct, 2, '%'));
+    setVal('ltp-parity-velocity', fmt(p.spread_velocity_pct, 2, '%'));
+    setVal('ltp-parity-synth', fmtPlain(p.synthetic_future, 2));
+    setVal('ltp-parity-basis', fmt(p.parity_basis, 2));
+
+    const regimeEl = document.getElementById('ltp-parity-regime');
+    if (regimeEl) {
+      const regime = String(p.regime || '--');
+      regimeEl.textContent = regime;
+      regimeEl.className = 'math-parity-badge math-parity-regime';
+      const r = regime.toUpperCase();
+      if (r.indexOf('BULLISH') === 0) regimeEl.classList.add('bullish');
+      else if (r.indexOf('BEARISH') === 0) regimeEl.classList.add('bearish');
+      else if (r.indexOf('CHOP') === 0) regimeEl.classList.add('chop');
+      else regimeEl.classList.add('transition');
+    }
   }
 
   // ── 📈 MATH CONSOLE — LIVE TRAJECTORY LINES (unified TradingView-style chart) ─
@@ -2718,6 +2812,7 @@
       updateSentiment(data);
       updateAITrades(data);
       renderAdvancedMetrics(data);
+      renderLtpParity(data);
       renderMacroMetrics(data);
       // BUG #2 FIX: Render the compact chain from the SAME fetch — eliminates the
       // duplicate 1Hz HTTP request that Script 3 used to make independently.

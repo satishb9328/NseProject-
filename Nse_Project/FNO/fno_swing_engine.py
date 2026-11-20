@@ -418,6 +418,12 @@ def compute_derived(rows: list[dict]) -> list[dict]:
     df['nfno_5d_avg'] = df['nfno'].rolling(window=n5).mean()
     df['nfno_5d_mom'] = df['nfno'] - df['nfno_5d_avg']
 
+    # DII combined position and 20-day rolling deviation baseline.
+    df['dii_combined'] = df['npf'] + df['nopo']
+    df['dii_combined_20d_mean'] = (
+        df['dii_combined'].rolling(window=20, min_periods=5).mean()
+    )
+
     # ── Tier 4: dynamic percentile rank of short_pct (1-year lookback) ──
     # Vectorized rolling percentile rank: for each day, the rank of today's
     # short_pct within its trailing window (0..1, method='max' → P(X <= x)).
@@ -549,7 +555,11 @@ def compute_day_signals(fii: dict, dii: dict, pro: dict,
 
     # ── Magnitude-weighted smart money score ──
     score = 0
-    score += CFG.weight_fii * ((fii_npf > 0) - (fii_npf < 0))
+    fii_momentum = fii.get('nfno_5d_mom')
+    if fii_npf > 0:
+        score += 3
+    elif fii_npf < 0:
+        score += -1 if fii_momentum is not None and fii_momentum > 0 else -3
 
     # FII dynamic percentile positioning bonus/penalty (regime-adaptive)
     if fii_short_rank >= CFG.extreme_short_rank:
@@ -563,7 +573,13 @@ def compute_day_signals(fii: dict, dii: dict, pro: dict,
 
     pro_combined = pro_nopo + pro_npf
     score += CFG.weight_pro * ((pro_combined > 0) - (pro_combined < 0))
-    score += CFG.weight_dii * ((dii_combined > 0) - (dii_combined < 0))
+    dii_20d_mean = dii.get('dii_combined_20d_mean')
+    if dii_20d_mean is not None:
+        dii_deviation = dii_combined - dii_20d_mean
+        if dii_deviation > 15_000:
+            score += 1
+        elif dii_deviation < -15_000:
+            score -= 1
     score -= CFG.weight_client * ((client_nfno > 0) - (client_nfno < 0))
 
     # ── Volume kicker: OI vs net-aggression divergence ──

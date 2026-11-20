@@ -2,6 +2,7 @@ from django.conf import settings
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import redirect, render
+from collections import deque
 from pathlib import Path
 import json
 import logging
@@ -915,6 +916,11 @@ def _read_seed_candles_2m() -> list:
 
 def live_signals_view(request):
     context = _build_preopen_context()
+    try:
+        from Nse_Project.FNO.views import _load_daily_report
+        context["daily_report"] = _load_daily_report() or {}
+    except Exception:
+        context["daily_report"] = {}
     # Persisted live market metrics (CVD + peak Bias/Momentum/Score). These are
     # read from the date-scoped Redis key written by the feed worker so a hard
     # refresh shows the accumulated values instead of starting at 0.
@@ -1560,6 +1566,120 @@ def log_sniper_ce_api(request):
     return JsonResponse({"ok": True, "logged": logged})
 
 
+# ---------------------------------------------------------------------------
+# LTP put-call parity diagnostic (additive, in-memory, O(1) per poll)
+# ---------------------------------------------------------------------------
+# A per-process rolling window of (monotonic_ts, spread, straddle_sum) samples for
+# the last 120 seconds, guarded for Django's threaded request handler. This is an
+# in-memory diagnostic only — it never writes to Redis/DB and never feeds back into
+# Bias / Momentum / Delta Wt / Score / IV Skew / Gamma Boost.
+_ltp_parity_window = deque()
+_ltp_parity_lock = threading.Lock()
+_LTP_PARITY_WINDOW_SECONDS = 120.0
+
+
+def _neutral_ltp_parity() -> dict:
+    """All-neutral LTP parity payload (no usable two-sided strike / missing spot)."""
+    return {
+        "atm_strike": 0.0,
+        "call_ltp": 0.0,
+        "put_ltp": 0.0,
+        "spread": 0.0,
+        "straddle_sum": 0.0,
+        "norm_spread_pct": 0.0,
+        "synthetic_future": 0.0,
+        "parity_basis": 0.0,
+        "spread_velocity_pct": 0.0,
+        "regime": "CHOP / DECAY",
+    }
+
+
+def _compute_ltp_parity(chain, spot_price, now_ts) -> dict:
+    """True-ATM put-call parity + rolling 2-minute spread velocity / regime.
+
+    Uses only the already-parsed ``spot_price`` and merged ``chain`` rows
+    (``strike`` / ``call_ltp`` / ``put_ltp``) held in memory for this request, so
+    the whole calculation is a single O(n) pass with zero extra I/O.
+    """
+    spot = _to_number(spot_price) if spot_price is not None else None
+    if spot is None or spot <= 0:
+        spot = 0.0
+
+    # Prune stale samples even when the current tick has no usable strike, so the
+    # window can never grow unbounded during a quiet chain.
+    cutoff = now_ts - _LTP_PARITY_WINDOW_SECONDS
+    with _ltp_parity_lock:
+        while _ltp_parity_window and _ltp_parity_window[0][0] < cutoff:
+            _ltp_parity_window.popleft()
+
+    # True ATM: minimum |call_ltp - put_ltp| where both legs are > 0; tie-break on
+    # the strike closest to spot.
+    best_strike = best_call = best_put = None
+    best_diff = None
+    for row in chain:
+        if not isinstance(row, dict):
+            continue
+        strike = _to_number(row.get("strike"))
+        call_ltp = _to_number(row.get("call_ltp"))
+        put_ltp = _to_number(row.get("put_ltp"))
+        if strike is None or strike <= 0 or call_ltp is None or put_ltp is None:
+            continue
+        if call_ltp <= 0 or put_ltp <= 0:
+            continue
+        diff = abs(call_ltp - put_ltp)
+        if best_strike is None or diff < best_diff:
+            best_strike, best_call, best_put, best_diff = strike, call_ltp, put_ltp, diff
+            continue
+        if diff == best_diff and spot > 0:
+            if abs(strike - spot) < abs(best_strike - spot):
+                best_strike, best_call, best_put = strike, call_ltp, put_ltp
+
+    if best_strike is None:
+        return _neutral_ltp_parity()
+
+    spread = best_call - best_put
+    straddle_sum = best_call + best_put
+    norm_spread_pct = round((spread / straddle_sum) * 100, 2) if straddle_sum > 0 else 0.0
+    synthetic_future = round(best_strike + spread, 2)
+    parity_basis = round(synthetic_future - spot, 2) if spot > 0 else 0.0
+
+    # Rolling 2-minute spread velocity: compare the current spread against the oldest
+    # sample still inside the window, normalised by the CURRENT straddle sum. Defaults
+    # to 0.0 with fewer than 2 samples or a non-positive straddle sum.
+    spread_velocity_pct = 0.0
+    spread_2m = spread
+    straddle_2m = straddle_sum
+    with _ltp_parity_lock:
+        if straddle_sum > 0:
+            _ltp_parity_window.append((now_ts, spread, straddle_sum))
+        if len(_ltp_parity_window) >= 2:
+            _, spread_2m, straddle_2m = _ltp_parity_window[0]
+            if straddle_sum > 0:
+                spread_velocity_pct = round(((spread - spread_2m) / straddle_sum) * 100, 2)
+
+    if norm_spread_pct > 2.0 and spread_velocity_pct > 0:
+        regime = "BULLISH EXPANSION"
+    elif norm_spread_pct < -2.0 and spread_velocity_pct < 0:
+        regime = "BEARISH EXPANSION"
+    elif abs(norm_spread_pct) <= 2.0 and straddle_sum <= straddle_2m:
+        regime = "CHOP / DECAY"
+    else:
+        regime = "TRANSITION"
+
+    return {
+        "atm_strike": round(best_strike, 2),
+        "call_ltp": best_call,
+        "put_ltp": best_put,
+        "spread": spread,
+        "straddle_sum": straddle_sum,
+        "norm_spread_pct": norm_spread_pct,
+        "synthetic_future": synthetic_future,
+        "parity_basis": parity_basis,
+        "spread_velocity_pct": spread_velocity_pct,
+        "regime": regime,
+    }
+
+
 def live_option_chain_api(request):
     """Serve the live option chain, and NEVER answer a 1 Hz poll with an HTML 500.
 
@@ -1625,6 +1745,7 @@ def live_option_chain_api(request):
             "strike_bounds": None,
             "option_chain": [],
             "deadly_combo_signals": [],
+            "ltp_parity": _neutral_ltp_parity(),
             "error": f"{type(exc).__name__}: {exc}",
         })
         response["Cache-Control"] = "no-store"
@@ -1655,6 +1776,10 @@ def _build_live_option_chain_payload() -> dict:
         if isinstance(candidate, (int, float)) and candidate > 0:
             spot_price = candidate
             break
+
+    # LTP put-call parity / synthetic-future diagnostic (additive). Computed in-memory
+    # from the already-parsed spot price + merged option-chain rows on every poll.
+    ltp_parity = _compute_ltp_parity(chain, spot_price, std_time.monotonic())
 
     # "Deadly Combo" anomaly scan — captured on the finalized compact rows, filtered
     # to the ATM +/- 4-strike zone, and surfaced to the frontend under
@@ -1692,6 +1817,8 @@ def _build_live_option_chain_payload() -> dict:
         "gamma_boost_val": _json_safe_value(market_state.get("gamma_boost_val")),
         "iv_skew_est": _json_safe_value(market_state.get("iv_skew_est")),
         "acceleration": _json_safe_value(market_state.get("acceleration")),
+        # LTP put-call parity / synthetic-future diagnostic (rolling 2-min regime).
+        "ltp_parity": ltp_parity,
         # Authoritative God-Mode sentiment — the backend is the single source of truth;
         # the frontend must NOT recompute bias/momentum/score locally.
         "bias": _json_safe_value(market_state.get("bias")),
