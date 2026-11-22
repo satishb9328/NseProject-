@@ -9,6 +9,7 @@ import logging
 import math
 import os
 import threading
+import psycopg2
 import pandas as pd
 import requests
 import psycopg2
@@ -1569,13 +1570,17 @@ def log_sniper_ce_api(request):
 # ---------------------------------------------------------------------------
 # LTP put-call parity diagnostic (additive, in-memory, O(1) per poll)
 # ---------------------------------------------------------------------------
-# A per-process rolling window of (monotonic_ts, spread, straddle_sum) samples for
-# the last 120 seconds, guarded for Django's threaded request handler. This is an
-# in-memory diagnostic only — it never writes to Redis/DB and never feeds back into
-# Bias / Momentum / Delta Wt / Score / IV Skew / Gamma Boost.
+# A per-process rolling window of (monotonic_ts, atm_strike, spread, straddle_sum)
+# samples for the last 120 seconds, guarded for Django's threaded request handler.
+# This is an in-memory diagnostic only — it never writes to Redis/DB and never feeds
+# back into Bias / Momentum / Delta Wt / Score / IV Skew / Gamma Boost.
 _ltp_parity_window = deque()
 _ltp_parity_lock = threading.Lock()
+# 5-tick EMA smoothing state (alpha = 2 / (5 + 1)). `strike` tracks which ATM strike
+# the EMA is anchored to, so a strike switch reseeds instead of blending two strikes.
+_ltp_parity_ema = {"strike": None, "norm": 0.0, "vel": 0.0, "regime": "CHOP / DECAY"}
 _LTP_PARITY_WINDOW_SECONDS = 120.0
+_LTP_PARITY_EMA_ALPHA = 2.0 / 6.0
 
 
 def _neutral_ltp_parity() -> dict:
@@ -1592,6 +1597,42 @@ def _neutral_ltp_parity() -> dict:
         "spread_velocity_pct": 0.0,
         "regime": "CHOP / DECAY",
     }
+
+def _save_token_to_db(access_token: str, payload: dict) -> None:
+    """Save the token into the Supabase config table - same pattern as the TBT collector."""
+    now = int(std_time.time())
+    expires_in = int(payload.get("expires_in", 86400))
+    value = json.dumps({
+        "access_token": access_token,
+        "expires_in": expires_in,
+        "fetched_at": now,
+        "expires_at": datetime.fromtimestamp(now + expires_in).isoformat(),
+        "raw_response": payload,
+    })
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        raise RuntimeError("DATABASE_URL env var not set - cannot persist token")
+    conn = psycopg2.connect(db_url)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO config (key, value) VALUES (%s, %s)
+                   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;""",
+                ("upstox_access_token", value),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+def _ltp_parity_regime_fresh(ema_norm: float, ema_vel: float, straddle_sum: float, straddle_2m: float) -> str:
+    """Fresh-entry regime classification from smoothed EMA values (no hysteresis)."""
+    if ema_norm >= 2.5 and ema_vel > 0.25:
+        return "BULLISH EXPANSION"
+    if ema_norm <= -2.5 and ema_vel < -0.25:
+        return "BEARISH EXPANSION"
+    if abs(ema_norm) <= 1.5 and straddle_sum <= straddle_2m:
+        return "CHOP / DECAY"
+    return "TRANSITION"
 
 
 def _compute_ltp_parity(chain, spot_price, now_ts) -> dict:
@@ -1635,36 +1676,73 @@ def _compute_ltp_parity(chain, spot_price, now_ts) -> dict:
                 best_strike, best_call, best_put = strike, call_ltp, put_ltp
 
     if best_strike is None:
+        with _ltp_parity_lock:
+            _ltp_parity_ema["strike"] = None
+            _ltp_parity_ema["norm"] = 0.0
+            _ltp_parity_ema["vel"] = 0.0
+            _ltp_parity_ema["regime"] = "CHOP / DECAY"
         return _neutral_ltp_parity()
 
     spread = best_call - best_put
     straddle_sum = best_call + best_put
-    norm_spread_pct = round((spread / straddle_sum) * 100, 2) if straddle_sum > 0 else 0.0
+    raw_norm_spread_pct = round((spread / straddle_sum) * 100, 2) if straddle_sum > 0 else 0.0
     synthetic_future = round(best_strike + spread, 2)
     parity_basis = round(synthetic_future - spot, 2) if spot > 0 else 0.0
 
-    # Rolling 2-minute spread velocity: compare the current spread against the oldest
-    # sample still inside the window, normalised by the CURRENT straddle sum. Defaults
-    # to 0.0 with fewer than 2 samples or a non-positive straddle sum.
-    spread_velocity_pct = 0.0
+    # Same-strike velocity lock: record the strike with every sample and compare the
+    # current spread only against the OLDEST in-window sample that shares the current
+    # ATM strike, so an ATM strike switch can never fabricate a fake spread spike.
+    raw_spread_velocity_pct = 0.0
     spread_2m = spread
     straddle_2m = straddle_sum
     with _ltp_parity_lock:
         if straddle_sum > 0:
-            _ltp_parity_window.append((now_ts, spread, straddle_sum))
-        if len(_ltp_parity_window) >= 2:
-            _, spread_2m, straddle_2m = _ltp_parity_window[0]
-            if straddle_sum > 0:
-                spread_velocity_pct = round(((spread - spread_2m) / straddle_sum) * 100, 2)
+            _ltp_parity_window.append((now_ts, best_strike, spread, straddle_sum))
+        oldest_same_strike = None
+        same_strike_count = 0
+        for entry in _ltp_parity_window:
+            if entry[1] == best_strike:
+                same_strike_count += 1
+                if oldest_same_strike is None:
+                    oldest_same_strike = entry
+        if oldest_same_strike is not None and same_strike_count >= 2 and straddle_sum > 0:
+            _, _, spread_2m, straddle_2m = oldest_same_strike
+            raw_spread_velocity_pct = round(((spread - spread_2m) / straddle_sum) * 100, 2)
 
-    if norm_spread_pct > 2.0 and spread_velocity_pct > 0:
-        regime = "BULLISH EXPANSION"
-    elif norm_spread_pct < -2.0 and spread_velocity_pct < 0:
-        regime = "BEARISH EXPANSION"
-    elif abs(norm_spread_pct) <= 2.0 and straddle_sum <= straddle_2m:
-        regime = "CHOP / DECAY"
+    # 5-tick EMA smoothing (~5s at 1 Hz). A strike switch (or first tick) reseeds the
+    # EMA to the raw value and marks the regime TRANSITION so stale momentum from a
+    # different strike is never blended into this one.
+    with _ltp_parity_lock:
+        ema = _ltp_parity_ema
+        if ema["strike"] != best_strike:
+            ema_norm = raw_norm_spread_pct
+            ema_vel = raw_spread_velocity_pct
+            prev_regime = "TRANSITION"
+        else:
+            ema_norm = _LTP_PARITY_EMA_ALPHA * raw_norm_spread_pct + (1.0 - _LTP_PARITY_EMA_ALPHA) * ema["norm"]
+            ema_vel = _LTP_PARITY_EMA_ALPHA * raw_spread_velocity_pct + (1.0 - _LTP_PARITY_EMA_ALPHA) * ema["vel"]
+            prev_regime = ema["regime"]
+        ema["strike"] = best_strike
+        ema["norm"] = ema_norm
+        ema["vel"] = ema_vel
+
+    norm_spread_pct = round(ema_norm, 2)
+    spread_velocity_pct = round(ema_vel, 2)
+
+    # Hysteresis deadband so the regime does not flicker at the expansion boundary.
+    if prev_regime == "BULLISH EXPANSION":
+        regime = "BULLISH EXPANSION" if ema_norm >= 1.5 else _ltp_parity_regime_fresh(
+            ema_norm, ema_vel, straddle_sum, straddle_2m
+        )
+    elif prev_regime == "BEARISH EXPANSION":
+        regime = "BEARISH EXPANSION" if ema_norm <= -1.5 else _ltp_parity_regime_fresh(
+            ema_norm, ema_vel, straddle_sum, straddle_2m
+        )
     else:
-        regime = "TRANSITION"
+        regime = _ltp_parity_regime_fresh(ema_norm, ema_vel, straddle_sum, straddle_2m)
+
+    with _ltp_parity_lock:
+        _ltp_parity_ema["regime"] = regime
 
     return {
         "atm_strike": round(best_strike, 2),
@@ -1742,6 +1820,11 @@ def live_option_chain_api(request):
             "total_pcr": 1.0,
             "vwap": 0,
             "future_ltp": 0,
+            "mom_strike": 0,
+            "mom_rolling_peak_ltp": 0,
+            "mom_entry_price": 0,
+            "mom_sl_price": 0,
+            "mom_target_price": 0,
             "strike_bounds": None,
             "option_chain": [],
             "deadly_combo_signals": [],
@@ -1837,6 +1920,14 @@ def _build_live_option_chain_payload() -> dict:
         "current_atr": _json_safe_value(market_state.get("current_atr")),
         "current_atr_ce": _json_safe_value(market_state.get("current_atr_ce")),
         "current_atr_pe": _json_safe_value(market_state.get("current_atr_pe")),
+        # Momentum Pullback (15% Dip): active-side rolling 15-minute peak + derived
+        # entry / SL / target / strike, published by the feed worker every beat so
+        # the AI card renders the backend's values verbatim.
+        "mom_strike": _json_safe_value(market_state.get("mom_strike")),
+        "mom_rolling_peak_ltp": _json_safe_value(market_state.get("mom_rolling_peak_ltp")),
+        "mom_entry_price": _json_safe_value(market_state.get("mom_entry_price")),
+        "mom_sl_price": _json_safe_value(market_state.get("mom_sl_price")),
+        "mom_target_price": _json_safe_value(market_state.get("mom_target_price")),
         "net_gex": _json_safe_value(market_state.get("net_gex")),
         "net_gex_ratio": _json_safe_value(market_state.get("net_gex_ratio")),
         # Advanced Greek Blend inputs (Vanna / Charm / Gamma Flip level) driving the score.
@@ -1925,7 +2016,22 @@ def upstox_callback(request):
         )
         return HttpResponse(f"Upstox token exchange failed: {detail}", status=502)
 
-    token_preview = access_token[:15]
+        access_token = payload.get("access_token")
+    if not access_token:
+        detail = (
+            payload.get("error_description")
+            or payload.get("error")
+            or response.text
+        )
+        return HttpResponse(f"Upstox token exchange failed: {detail}", status=502)
+
+    try:
+        _save_token_to_db(access_token, payload)
+    except Exception as exc:
+        logger.error(f"Failed to persist Upstox token: {exc}")
+        return HttpResponse(
+            f"Upstox OAuth succeeded but saving to Supabase failed: {exc}", status=500
+        )
     return HttpResponse(
-        f"✅ Upstox OAuth succeeded. Access token preview (first 15 chars): {token_preview}"
+        "Login complete. Token saved to Supabase - the live feed picks it up automatically."
     )

@@ -549,7 +549,40 @@ def refresh_liveness_fields() -> tuple[bool, float | None]:
     return live, age
 
 
+def _token_from_supabase() -> str | None:
+    """Read the token that /upstox-callback/ saved into the Supabase config table."""
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        return None
+    try:
+        import psycopg2
+        conn = psycopg2.connect(db_url)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT value FROM config WHERE key = %s",
+                    ("upstox_access_token",),
+                )
+                row = cur.fetchone()
+        finally:
+            conn.close()
+        if row:
+            payload = json.loads(row[0])
+            token = payload.get("access_token")
+            if token:
+                return token
+    except Exception as exc:
+        logger.warning(f"Supabase token read failed: {exc}")
+    return None
+
+
 def read_access_token() -> str | None:
+    # 1) Supabase first (works on Render AND locally when DATABASE_URL is set)
+    token = _token_from_supabase()
+    if token:
+        logger.info("Loaded access token from Supabase config table")
+        return token
+    # 2) Local file fallback (local dev without DATABASE_URL)
     for path in TOKEN_FILE_PATHS:
         try:
             if path.exists():
@@ -557,12 +590,11 @@ def read_access_token() -> str | None:
                     payload = json.load(token_file)
                     token = payload.get("access_token")
                     if token:
-                        logger.info(f"✅ Loaded access token from {path}")
+                        logger.info(f"Loaded access token from {path}")
                         return token
-                    logger.warning(f"Token file exists but no access_token field: {path}")
         except Exception as exc:
             logger.warning(f"Failed to read token file {path}: {exc}")
-    logger.error("No Upstox token JSON file found in Brokers/upstox.")
+    logger.info("No Upstox token yet (Supabase empty, no local file). Waiting for login.")
     return None
 
 
@@ -1986,8 +2018,16 @@ def _load_seed_candles_2m() -> None:
         logger.warning("Failed to load 2m seed candles from Redis: %s", exc)
 
 
+# VWAP Sniper cards (PE · C2-A / CE · C2-PB) were removed from the UI. Keep the
+# evaluators + EOD scheduler compiled but inert behind this flag so the live tick
+# path, CVD candles and Redis publishing are completely unaffected.
+ENABLE_VWAP_SNIPERS = False
+
+
 def _evaluate_sniper_c2a_and_log(payload: dict) -> None:
     """Evaluate VWAP Breakdown Sniper (PE · C2-A) on a closed 2m candle and log."""
+    if not ENABLE_VWAP_SNIPERS:
+        return
     try:
         from Nse_Project.Live_dashboard.sniper_logger import log_sniper_c2a_trigger
 
@@ -2066,6 +2106,8 @@ def _evaluate_sniper_ce_pb_and_log(payload: dict) -> None:
     validated 11:30-14:55 IST CE VWAP pullback/reclaim model) and forwards any
     trigger to the dedicated CE forward log.
     """
+    if not ENABLE_VWAP_SNIPERS:
+        return
     try:
         from Nse_Project.Live_dashboard.sniper_logger import log_sniper_ce_pb_trigger
 
@@ -2174,6 +2216,8 @@ def _maybe_trigger_eod_sniper_evaluation() -> None:
     the live feed can never be interrupted by the EOD pass.
     """
     global _eod_sniper_evaluated_date
+    if not ENABLE_VWAP_SNIPERS:
+        return
     try:
         now_ist = datetime.now(IST)
         mins = now_ist.hour * 60 + now_ist.minute
@@ -2307,11 +2351,6 @@ _AI_SETUP_TYPES = (MOMENTUM_PULLBACK_SETUP,)
 # asyncio loop, read from the option-CVD worker thread, hence the lock.
 _ai_engines: dict[tuple, "CandleConfirmationEngine"] = {}
 _ai_engines_lock = threading.Lock()
-# Anchored reference premium per (instrument_key, setup_type). The 15%-dip entry is
-# derived from this ONCE and held until the ATM strike rolls. Re-anchoring to the live
-# LTP every tick made the entry an unreachable moving target (close ≈ 0.85*close ±1.5%
-# is never satisfied).
-_ai_ref_premium: dict[tuple, float] = {}
 
 
 def _ai_entry_factor(setup_type: str) -> float:
@@ -2377,10 +2416,12 @@ def _resolve_atm_option_keys(spot: float | None, instrument_data: dict) -> tuple
 def _refresh_ai_engines(ai_option_cvd: "CVDEngine") -> None:
     """(Re)create / refresh CandleConfirmationEngine instances for the ATM CE/PE.
 
-    The entry price is derived from a STABLE reference premium (anchored once per
-    (key, setup_type)), not the live LTP, so the "15% dip" target is actually
-    reachable. Engines are re-used (history preserved) on ordinary premium drift
-    and only replaced on an ATM strike roll or option-side flip.
+    The 15%-dip entry is now derived from a ROLLING 15-minute peak of the live
+    premium (maintained inside the engine), so it ratchets UP on new highs instead
+    of freezing ``first_premium * 0.85`` forever. Engines are re-used (history
+    preserved) on ordinary premium drift and only replaced on an ATM strike roll or
+    option-side flip. The live VWAP / reference price / 2m CVD trend are also pushed
+    into each engine every cycle so the trend-alignment gate evaluates fresh.
 
     Thread safety:
       * Runs on the asyncio event loop (from run_streamer's 1-second while loop).
@@ -2405,9 +2446,9 @@ def _refresh_ai_engines(ai_option_cvd: "CVDEngine") -> None:
     instrument_data = live_state.get("instrument_data") or {}
     ce_key, pe_key = _resolve_atm_option_keys(spot_f, instrument_data)
 
-    # ── Build the desired (key, setup_type) → (side, ltp) map OUTSIDE the lock ─
+    # ── Build the desired (key, setup_type) → (side, ltp, strike) map ──────────
     # Held only briefly inside the `with _ai_engines_lock:` block below.
-    desired: dict[tuple, tuple[str, float]] = {}
+    desired: dict[tuple, tuple[str, float, float]] = {}
     for key in (ce_key, pe_key):
         if not key:
             continue
@@ -2423,8 +2464,24 @@ def _refresh_ai_engines(ai_option_cvd: "CVDEngine") -> None:
             str(meta.get("option_type") or entry_data.get("option_type") or "CE")
             .strip().upper() or "CE"
         )
+        raw_strike = entry_data.get("strike")
+        try:
+            strike_f = (
+                float(raw_strike)
+                if isinstance(raw_strike, (int, float)) and not isinstance(raw_strike, bool)
+                else 0.0
+            )
+        except (TypeError, ValueError):
+            strike_f = 0.0
         for setup_type in _AI_SETUP_TYPES:
-            desired[(key, setup_type)] = (side, ltp)
+            desired[(key, setup_type)] = (side, ltp, strike_f)
+
+    # Live VWAP + reference price + 2m CVD trend for the trend-alignment gate.
+    # Reference price is the NIFTY future LTP when available, else the index spot.
+    vwap = float(market_state.get("vwap") or 0.0)
+    future_ltp = float(market_state.get("future_ltp") or 0.0)
+    ref_price = future_ltp if future_ltp > 0 else (spot_f or 0.0)
+    cvd_trend = float(_latest_cvd_change_3)
 
     # ── Apply the desired engine set under the lock ───────────────────────────
     with _ai_engines_lock:
@@ -2432,27 +2489,29 @@ def _refresh_ai_engines(ai_option_cvd: "CVDEngine") -> None:
         for k in list(_ai_engines.keys()):
             if k not in desired:
                 del _ai_engines[k]
-                _ai_ref_premium.pop(k, None)
 
-        for (key, setup_type), (side, ltp) in desired.items():
-            # Anchor the reference premium once; keep it until the key changes.
-            ref = _ai_ref_premium.get((key, setup_type))
-            if ref is None:
-                ref = ltp
-                _ai_ref_premium[(key, setup_type)] = ref
-            entry = round(ref * _ai_entry_factor(setup_type), 2)
-
+        for (key, setup_type), (side, ltp, strike_f) in desired.items():
             eng = _ai_engines.get((key, setup_type))
             if eng is not None and eng.option_side == side:
-                # Same engine: refresh entry in place so rolling history survives.
+                # Same engine: feed the live premium so the rolling 15-min peak
+                # (and the 15%-dip entry derived from it) ratchets up on new highs.
                 # Bug #7 fix: _route_ai_option_candle() also holds _ai_engines_lock
                 # during on_candle(), so this update_entry() can't race with a
                 # concurrent candle evaluation on the CVD worker thread.
-                eng.update_entry(entry, option_side=side)
+                eng.set_market_context(vwap=vwap, ref_price=ref_price, cvd_trend=cvd_trend)
+                eng.update_entry(ltp, option_side=side, strike=strike_f)
                 continue
-            _ai_engines[(key, setup_type)] = CandleConfirmationEngine(
-                setup_type, entry, symbol=key, option_side=side, dispatch=True
+            eng = CandleConfirmationEngine(
+                setup_type,
+                ltp,
+                symbol=key,
+                option_side=side,
+                dispatch=True,
+                entry_factor=_ai_entry_factor(setup_type),
+                strike=strike_f,
             )
+            eng.set_market_context(vwap=vwap, ref_price=ref_price, cvd_trend=cvd_trend)
+            _ai_engines[(key, setup_type)] = eng
 
     # ── Keep the option-candle feed allowlist in sync ──────────────────────────
     if ai_option_cvd is not None:
@@ -2495,6 +2554,22 @@ def _ai_current_atr() -> dict:
             elif side == "PE" and pe_atr is None:
                 pe_atr = float(atr)
     return {"ce": ce_atr, "pe": pe_atr}
+
+
+def _ai_momentum_pullback_state(side: str) -> dict:
+    """Return the active-side Momentum Pullback engine's current_state() dict.
+
+    ``side`` is the active option side ("CE"/"PE") chosen by the same tri-state
+    used in ``_refresh_market_state``. Returns {} when no engine tracks that side
+    yet (e.g. before the first ATM option tick arrives).
+    """
+    side = (side or "").upper()
+    with _ai_engines_lock:
+        for (_key, _setup), eng in _ai_engines.items():
+            if (getattr(eng, "option_side", "") or "").upper() == side:
+                state = eng.current_state()
+                return state if isinstance(state, dict) else {}
+    return {}
 
 
 def _ai_market_no_trade_probe() -> bool:
@@ -2700,6 +2775,17 @@ def _refresh_market_state(instrument_data=None) -> None:
         market_state["current_atr"] = market_state["current_atr_ce"]
     else:
         market_state["current_atr"] = 0.0
+
+    # Momentum Pullback (15% Dip): publish the active-side rolling-peak state so the
+    # frontend renders the backend's entry / SL / target / strike verbatim instead of
+    # re-deriving them locally. When no active side (no-trade) the fields stay 0.0.
+    _active_side = "PE" if _bearish else ("CE" if _bullish else "")
+    _mom_state = _ai_momentum_pullback_state(_active_side) if _active_side else {}
+    market_state["mom_strike"] = _mom_state.get("strike") or 0.0
+    market_state["mom_rolling_peak_ltp"] = _mom_state.get("rolling_peak_ltp") or 0.0
+    market_state["mom_entry_price"] = _mom_state.get("entry_price") or 0.0
+    market_state["mom_sl_price"] = _mom_state.get("sl_price") or 0.0
+    market_state["mom_target_price"] = _mom_state.get("target_price") or 0.0
 
     if abs(macro["net_oi_bias"]) > abs(market_state.get("peak_net_oi_bias", 0.0)):
         market_state["peak_net_oi_bias"] = macro["net_oi_bias"]
@@ -3362,9 +3448,10 @@ async def apply_expiry_rollover(
 
 async def run_streamer(instrument_keys: list[str], expiry_date: date) -> None:
     token = read_access_token()
-    if not token:
-        return
-
+    while not token:
+        logger.info("Idle - Waiting for Upstox login (no token in Supabase). Retrying in 10s...")
+        await asyncio.sleep(10)
+        token = read_access_token()
     # Mutable holder shared with the POI refresh loop so an expiry rollover is picked
     # up without tearing down and recreating background tasks.
     active = {"expiry": expiry_date}
