@@ -83,6 +83,19 @@ MTF_MIN_BODY_FRAC = float(os.getenv("AI_TRADE_MTF_MIN_BODY_FRAC", "0.15"))
 # roll, side flip) resets the window.
 SETUP_EXPIRY_SECONDS = float(os.getenv("AI_TRADE_SETUP_EXPIRY_SECONDS", "900"))
 
+# ── Momentum Pullback (15% Dip) rolling-peak entry ────────────────────────────
+# The 15% dip entry is no longer anchored to the FIRST observed premium forever.
+# Instead the engine keeps a rolling 15-minute window of (monotonic_ts, premium_ltp)
+# samples and ratchets the entry UP whenever a fresh peak is hit:
+#     entry_ref = round(rolling_peak_ltp * MOMENTUM_ENTRY_FACTOR, 2)
+# This keeps the dip target reachable while a strong trend makes new highs.
+ROLLING_PEAK_WINDOW_SECONDS = float(os.getenv("AI_TRADE_ROLLING_PEAK_WINDOW_SECONDS", "900"))
+MOMENTUM_ENTRY_FACTOR = float(os.getenv("AI_TRADE_MOMENTUM_ENTRY_FACTOR", "0.85"))
+# Risk/reward levels derived from the pullback entry (kept in lock-step with the
+# dashboard card): target = entry * 1.40, stop = entry * 0.80.
+MOMENTUM_TARGET_MULTIPLE = float(os.getenv("AI_TRADE_MOMENTUM_TARGET_MULTIPLE", "1.40"))
+MOMENTUM_SL_FACTOR = float(os.getenv("AI_TRADE_MOMENTUM_SL_FACTOR", "0.80"))
+
 # ── Additional candlestick-pattern tolerances ─────────────────────────────────
 TWEEZER_TOLERANCE = float(os.getenv("AI_TRADE_TWEEZER_TOLERANCE", "0.001"))
 HANGING_MAN_BODY_FRAC = float(os.getenv("AI_TRADE_HANGING_MAN_BODY_FRAC", "0.3"))
@@ -696,6 +709,10 @@ def build_trigger_payload(
     pattern: Optional[str] = None,
     symbol: Optional[str] = None,
     reasons: Optional[List[str]] = None,
+    strike: Optional[float] = None,
+    rolling_peak_ltp: Optional[float] = None,
+    sl_price: Optional[float] = None,
+    target_price: Optional[float] = None,
 ) -> Dict[str, Any]:
     """The WebSocket trigger payload the frontend expects, with full context.
 
@@ -704,6 +721,11 @@ def build_trigger_payload(
     at what price, what pattern fired, when, or which symbol. Now includes
     ``timestamp`` (tz-aware), ``symbol``, ``entry_price``, ``ltp``, ``atr``,
     ``pattern``, and ``reasons`` so the frontend can render the full context.
+
+    Momentum Pullback also carries the tracked ``strike``, the ``rolling_peak_ltp``
+    the 15% dip entry was derived from, plus the derived ``sl_price`` /
+    ``target_price``, so the durable ``ai:trade_trigger_log`` replay holds the
+    complete execution context.
     """
     payload: Dict[str, Any] = {
         "action": "trade_trigger",
@@ -723,6 +745,14 @@ def build_trigger_payload(
         payload["atr"] = atr
     if pattern is not None:
         payload["pattern"] = pattern
+    if strike is not None:
+        payload["strike"] = strike
+    if rolling_peak_ltp is not None:
+        payload["rolling_peak_ltp"] = rolling_peak_ltp
+    if sl_price is not None:
+        payload["sl_price"] = sl_price
+    if target_price is not None:
+        payload["target_price"] = target_price
     return payload
 
 
@@ -741,6 +771,9 @@ def evaluate_confirmation(
     symbol: Optional[str] = None,
     setup_age_seconds: Optional[float] = None,
     setup_expiry_seconds: Optional[float] = SETUP_EXPIRY_SECONDS,
+    vwap: Optional[float] = None,
+    ref_price: Optional[float] = None,
+    cvd_trend: Optional[float] = None,
 ) -> ConfirmationResult:
     """Run the confirmation gate over the just-closed candle.
 
@@ -834,7 +867,25 @@ def evaluate_confirmation(
     # CVD is ADVISORY only: a frozen CVD feed (missing bid/ask) must never block a
     # directional candle confirmation, so the trigger now ignores it entirely.
     # The 2-minute MTF filter IS a hard gate (like the entry zone + pattern).
-    triggered = in_zone and bool(pattern) and mtf_ok
+
+    # Gate 4: VWAP + 2m CVD trend alignment (Momentum Pullback). Only enforced when a
+    # live VWAP is available (vwap > 0); otherwise the gate is skipped so callers
+    # without a VWAP feed keep the original behaviour. CE requires price > VWAP with a
+    # non-negative CVD trend; PE requires price < VWAP with a non-positive CVD trend.
+    # A counter-trend pullback is blocked here and reported via ``reasons``.
+    if vwap is not None and vwap > 0:
+        ref = _to_float(ref_price)
+        trend = _to_float(cvd_trend)
+        if side == "CE":
+            vwap_cvd_ok = ref > vwap and trend >= 0.0
+        else:
+            vwap_cvd_ok = ref < vwap and trend <= 0.0
+        reasons.append("vwap_cvd_aligned" if vwap_cvd_ok else "vwap_cvd_misaligned")
+    else:
+        vwap_cvd_ok = True
+        reasons.append("vwap_cvd_skipped(no_vwap)")
+
+    triggered = in_zone and bool(pattern) and mtf_ok and vwap_cvd_ok
     # NO TRADE ZONE gate: when the frontend tri-state would render "NO TRADE ZONE",
     # the BUY_NOW trigger must NOT be published at all — suppress it here.
     if triggered and no_trade_zone:
@@ -996,7 +1047,7 @@ class CandleConfirmationEngine:
     def __init__(
         self,
         setup_name: str,
-        entry_price: float,
+        initial_premium: float,
         *,
         symbol: Optional[str] = None,
         zone_pct: float = ENTRY_ZONE_PCT,
@@ -1008,9 +1059,11 @@ class CandleConfirmationEngine:
         atr_multiplier: float = ATR_MULTIPLIER,
         setup_expiry_seconds: Optional[float] = SETUP_EXPIRY_SECONDS,
         setup_created_at: Optional[datetime] = None,
+        entry_factor: float = MOMENTUM_ENTRY_FACTOR,
+        rolling_window_seconds: float = ROLLING_PEAK_WINDOW_SECONDS,
+        strike: Optional[float] = None,
     ) -> None:
         self.setup_name = setup_name
-        self.entry_price = float(entry_price)
         self.symbol = symbol
         self.zone_pct = zone_pct
         self.trend_window = trend_window
@@ -1018,6 +1071,24 @@ class CandleConfirmationEngine:
         self.option_side = (option_side or "CE").upper()
         self.atr_period = max(1, int(atr_period))
         self.atr_multiplier = float(atr_multiplier)
+        # Momentum Pullback: entry = rolling peak * factor. ``initial_premium`` is
+        # the first observed LTP and seeds the rolling 15-minute peak window.
+        self.entry_factor = float(entry_factor)
+        self.rolling_window_seconds = max(1.0, float(rolling_window_seconds))
+        self.strike = None if strike is None else float(strike)
+        # Rolling 15-minute (monotonic_ts, premium_ltp) samples for the active ATM
+        # instrument. The entry reference ratchets UP with each fresh peak instead
+        # of freezing ``first_premium * 0.85`` forever.
+        self._premium_window: deque = deque()
+        self.rolling_peak_ltp: Optional[float] = None
+        # Derived execution levels (kept in lock-step with the dashboard card).
+        self.entry_price: float = 0.0
+        self.sl_price: Optional[float] = None
+        self.target_price: Optional[float] = None
+        # Live market context for the VWAP + 2m CVD trend alignment gate.
+        self.vwap: Optional[float] = None
+        self.ref_price: Optional[float] = None
+        self.cvd_trend: Optional[float] = None
         # ARCHITECTURAL UPGRADE: setup auto-expiry. None (or 0) disables the
         # gate; otherwise the engine refuses to fire once the setup has aged
         # past this many seconds. ``setup_created_at`` defaults to NOW in
@@ -1033,24 +1104,99 @@ class CandleConfirmationEngine:
         self.latest_atr: Optional[float] = None
         # Default history keeps enough 1-minute candles for the 14-period ATR.
         self._history: deque = deque(maxlen=max(3, int(history_size)))
+        # Seed the rolling peak with the initial premium and derive levels once.
+        self._record_premium(float(initial_premium))
+        self._recompute_levels()
 
-    def update_entry(self, entry_price: float, *, option_side: Optional[str] = None) -> None:
-        """Refresh the entry reference WITHOUT discarding the rolling candle history.
+    # ── Rolling peak + level derivation ─────────────────────────────────────────
+    def _record_premium(self, premium_ltp: float) -> bool:
+        """Append a premium sample, prune the 15-min window, and update the peak.
 
-        The feed re-arms engines on ATM strike rolls / side flips; recreating the
-        engine there would empty ``_history`` and starve the engulfing + 3-candle
-        CVD-trend gates of their ``prev_candle`` context.
-
-        ARCHITECTURAL UPGRADE: a re-arm ALSO refreshes ``setup_created_at``, so
-        the new setup (rolled strike / flipped side) gets a fresh expiry window.
-        Without this, a re-arm 16 minutes after the original setup would
-        immediately expire the new signal too.
+        Returns True when a *fresh* rolling peak was established (the entry
+        reference ratcheted up), which signals a new pullback cycle.
         """
-        self.entry_price = float(entry_price)
+        now = time.monotonic()
+        self._premium_window.append((now, float(premium_ltp)))
+        cutoff = now - self.rolling_window_seconds
+        while self._premium_window and self._premium_window[0][0] < cutoff:
+            self._premium_window.popleft()
+        if not self._premium_window:
+            self.rolling_peak_ltp = None
+            return False
+        new_peak = max(ltp for _ts, ltp in self._premium_window)
+        old_peak = self.rolling_peak_ltp
+        made_new_peak = old_peak is None or new_peak > old_peak
+        self.rolling_peak_ltp = new_peak
+        return made_new_peak
+
+    def _recompute_levels(self) -> None:
+        """Derive entry / SL / target from the current rolling peak."""
+        if self.rolling_peak_ltp is None or self.rolling_peak_ltp <= 0:
+            self.entry_price = 0.0
+            self.sl_price = None
+            self.target_price = None
+            return
+        self.entry_price = round(self.rolling_peak_ltp * self.entry_factor, 2)
+        self.sl_price = round(self.entry_price * MOMENTUM_SL_FACTOR, 2)
+        self.target_price = round(self.entry_price * MOMENTUM_TARGET_MULTIPLE, 2)
+
+    def update_entry(
+        self,
+        premium_ltp: float,
+        *,
+        option_side: Optional[str] = None,
+        strike: Optional[float] = None,
+    ) -> None:
+        """Feed a live premium tick WITHOUT discarding the rolling candle history.
+
+        This is called every 1s by the feed worker. It maintains the rolling
+        15-minute peak window and ratchets the 15%-dip entry UP on each fresh
+        peak (instead of freezing ``first_premium * 0.85`` forever).
+
+        BUG FIX (1-second expiry reset): ``setup_created_at`` is only reset when
+        the instrument key/side flips OR a fresh rolling peak establishes a new
+        pullback cycle. Routine 1 Hz ticks on the same instrument with no new
+        peak leave the expiry clock alone.
+        """
+        side_changed = bool(option_side) and self.option_side != (option_side or "").upper()
         if option_side:
             self.option_side = (option_side or "CE").upper()
-        # Re-arm = new setup; reset the expiry clock.
-        self.setup_created_at = datetime.now(LOCAL_TZ)
+        if strike is not None:
+            self.strike = float(strike)
+        made_new_peak = self._record_premium(float(premium_ltp))
+        self._recompute_levels()
+        if side_changed or made_new_peak:
+            # Re-arm (side/key flip) or a fresh peak => a new pullback cycle gets a
+            # fresh expiry window. Routine unchanged ticks do NOT reset the clock.
+            self.setup_created_at = datetime.now(LOCAL_TZ)
+
+    def set_market_context(
+        self,
+        *,
+        vwap: Optional[float] = None,
+        ref_price: Optional[float] = None,
+        cvd_trend: Optional[float] = None,
+    ) -> None:
+        """Update the live VWAP / reference-price / CVD-trend used by the gate."""
+        if vwap is not None:
+            self.vwap = float(vwap)
+        if ref_price is not None:
+            self.ref_price = float(ref_price)
+        if cvd_trend is not None:
+            self.cvd_trend = float(cvd_trend)
+
+    def current_state(self) -> Dict[str, Any]:
+        """JSON-safe state dict for the dashboard (Momentum Pullback card)."""
+        return {
+            "strike": self.strike,
+            "option_side": self.option_side,
+            "rolling_peak_ltp": self.rolling_peak_ltp,
+            "entry_price": self.entry_price,
+            "sl_price": self.sl_price,
+            "target_price": self.target_price,
+            "setup_age_seconds": round(self.setup_age_seconds(), 2),
+            "setup_expired": self.is_setup_expired(),
+        }
 
     def is_setup_expired(self) -> bool:
         """True when the setup has aged past ``setup_expiry_seconds``.
@@ -1126,10 +1272,21 @@ class CandleConfirmationEngine:
             symbol=self.symbol,
             setup_age_seconds=age_seconds,
             setup_expiry_seconds=self.setup_expiry_seconds,
+            vwap=self.vwap,
+            ref_price=self.ref_price,
+            cvd_trend=self.cvd_trend,
         )
         self.latest_atr = result.atr
 
         if result.triggered:
+            # Momentum Pullback: enrich the BUY_NOW payload (and hence the durable
+            # ai:trade_trigger_log replay) with the tracked strike, the rolling peak
+            # the 15% dip entry was derived from, and the derived SL / target.
+            if result.trigger is not None:
+                result.trigger.setdefault("strike", self.strike)
+                result.trigger.setdefault("rolling_peak_ltp", self.rolling_peak_ltp)
+                result.trigger.setdefault("sl_price", self.sl_price)
+                result.trigger.setdefault("target_price", self.target_price)
             logger.info(
                 "AI trade trigger fired: setup=%s reasons=%s",
                 self.setup_name,

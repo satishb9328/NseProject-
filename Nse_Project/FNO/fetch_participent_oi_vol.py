@@ -6,11 +6,11 @@ import time
 
 import requests
 
-# రెండు ఫైల్స్ సేవ్ చేయడానికి అవసరమైన ఫోల్డర్ పాత్‌లు
+# Folder paths required to save both files
 OUTPUT_DIR_OI = r"D:\FNO DATA\Participant data\OpenInterest"
 OUTPUT_DIR_VOL = r"D:\FNO DATA\Participant data\Volume"
 
-# రెండు ఫైల్స్ డౌన్‌లోడ్ చేసుకోవడానికి NSE URL టెంప్లేట్స్ 
+# NSE URL templates for downloading both files
 URL_TEMPLATE_OI = 'https://archives.nseindia.com/content/nsccl/fao_participant_oi_{ddmmyyyy}.csv'
 URL_TEMPLATE_VOL = 'https://archives.nseindia.com/content/nsccl/fao_participant_vol_{ddmmyyyy}.csv'
 
@@ -125,32 +125,32 @@ def get_missing_trading_dates(today: dt.date | None = None) -> list[dt.date]:
     return valid_dates
 
 
-# ఈ ఫంక్షన్ OI మరియు Volume ఫైల్స్ రెండింటికీ పనిచేస్తుంది
+# This function works for both OI and Volume files
 def download_report(date_obj: dt.date, url_template: str, output_dir: str, file_prefix: str, session: requests.Session) -> None:
     os.makedirs(output_dir, exist_ok=True)
     file_name = f'{file_prefix}_{format_yyyymmdd(date_obj)}.csv'
     output_path = os.path.join(output_dir, file_name)
     
     if os.path.exists(output_path):
-        print(f"ఫైల్ ఇప్పటికే ఉంది: {output_path}")
+        print(f"File already exists: {output_path}")
         return
 
     url = url_template.format(ddmmyyyy=format_ddmmyyyy(date_obj))
-    print(f"డౌన్‌లోడ్ అవుతోంది: {url}")
+    print(f"Downloading: {url}")
 
     try:
         response = _get_with_retry(session, url)
     except requests.RequestException as exc:
-        print(f"డౌన్‌లోడ్ అభ్యర్థన విఫలమైంది: {exc}")
+        print(f"Download request failed: {exc}")
         return
     if response.status_code != 200:
-        print(f"డౌన్‌లోడ్ విఫలమైంది (Status: {response.status_code}) - బహుశా ఆ రోజు డేటా ఇంకా రాలేదు.")
+        print(f"Download failed (Status: {response.status_code}) - Data may not yet be available for that day.")
         return
 
     content = response.content
     text_preview = content[:200].decode('utf-8', errors='replace').strip()
     if text_preview.startswith('{') or text_preview.lower().startswith('<html') or 'error' in text_preview.lower():
-        print(f"తప్పు ఫార్మాట్ ఫైల్ వచ్చింది: {file_name}")
+        print(f"Received a file in an invalid format: {file_name}")
         return
 
     # Data integrity: only save if it looks like a real participant CSV.
@@ -168,7 +168,7 @@ def create_session() -> requests.Session:
     session = requests.Session()
     session.headers.update(HEADERS)
 
-    # కుకీస్ (Cookies) జనరేట్ చేయడం కోసం ముందుగా ప్రధాన పేజీని లోడ్ చేయడం
+    # Load the home page first to generate cookies
     try:
         session.get(SESSION_PRIME_URL, timeout=20)
     except Exception:
@@ -178,12 +178,12 @@ def create_session() -> requests.Session:
 
 def fetch_participant_data(date_obj: dt.date, session: requests.Session) -> None:
 
-    print(f"\n--- {date_obj} తేదీకి సంబంధించిన ఫైల్స్ కోసం వెతుకుతోంది ---")
+    print(f"\n--- Searching for files for {date_obj} ---")
     
-    # 1. మొదట Open Interest డేటాను డౌన్‌లోడ్ చేస్తుంది
+    # 1. Download Open Interest data first
     download_report(date_obj, URL_TEMPLATE_OI, OUTPUT_DIR_OI, "participant_oi", session)
 
-    # 2. ఆ వెంటనే Trading Volume డేటాను డౌన్‌లోడ్ చేస్తుంది
+    # 2. Download Trading Volume data immediately afterward
     download_report(date_obj, URL_TEMPLATE_VOL, OUTPUT_DIR_VOL, "participant_vol", session)
 
 

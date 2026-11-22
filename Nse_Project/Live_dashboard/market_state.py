@@ -73,6 +73,14 @@ DEFAULT_MARKET_STATE = {
     "current_atr": 0.0,
     "current_atr_ce": 0.0,
     "current_atr_pe": 0.0,
+    # Momentum Pullback (15% Dip): active-side rolling 15-minute peak + derived
+    # entry / SL / target / strike, published by the feed worker every beat so the
+    # frontend renders the backend's values verbatim.
+    "mom_strike": 0.0,
+    "mom_rolling_peak_ltp": 0.0,
+    "mom_entry_price": 0.0,
+    "mom_sl_price": 0.0,
+    "mom_target_price": 0.0,
     # Real volume-weighted VWAP (₹), fed by the NIFTY index future's average-traded-
     # price (Upstox `atp` = Σ(price·qty) / Σ(qty)) in the feed worker.
     "vwap": 0.0,
