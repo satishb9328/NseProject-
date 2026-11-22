@@ -9,6 +9,7 @@ import os
 import threading
 import pandas as pd
 import requests
+import psycopg2
 import time as std_time  # aliased to avoid clashing with `datetime.time` below
 from datetime import date, datetime, time, timedelta, timezone
 from Nse_Project.Swing_ML.views import get_swing_ml_context
